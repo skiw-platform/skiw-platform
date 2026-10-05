@@ -2,6 +2,15 @@
 
 <!-- Committed. Newest at the top. One entry per decision. A settled decision is reopened only by the owner. -->
 
+## 2026-10-05 — M0a Python toolchain, pins and local database roles
+- **Decision:** Python 3.12 (local 3.12.13; image `python:3.12.15-slim`), Django 5.2.17 (LTS, ASGI only, no `wsgi.py`), psycopg 3.3.6, gunicorn 26.2.0 + uvicorn 0.54.0 + uvicorn-worker 0.4.0. Dev tools: mypy 1.19.1 + django-stubs/-ext 5.2.9 (mypy stays below 1.20 because django-stubs 5.2.9 requires it; mypy 2.x not used), ruff 0.16.10, import-linter 2.15, pytest 9.1.1, pytest-django 4.14.0; `aws-cdk-lib` 2.272.0 in the `infra` group (used from M0d). uv 0.11.24. Base images pinned by digest: `python:3.12.15-slim@sha256:02108f5d…`, `ghcr.io/astral-sh/uv:0.11.24@sha256:99ea34ac…`, `postgres:17.11@sha256:d74eeac9…`. Settings read the environment through one helper (`config/env.py`, no `django-environ`) and fail closed when `DJANGO_SECRET_KEY` or `DATABASE_URL` is missing. Local Postgres creates the roles `skiw_migrator` (schema owner) and `skiw_app` (NOSUPERUSER, NOBYPASSRLS); grants and RLS arrive with M4. The `app` container connects as `skiw_app`; `make migrate` runs as `skiw_migrator`. The local database is published on host port 5433 (5432 is used by another local project).
+- **Why:** Spec D1/D4/D16 and plan `docs/plans/2026-10-05-m0-scaffold.md`. A small env helper avoids a dependency (UNI-06). Versions were checked against PyPI and the tags/digests against the registries on 2026-10-05.
+- **Alternatives rejected:** `django-environ` (new dependency for ~40 lines). mypy 2.x (incompatible with django-stubs 5.2.9). Unpinned image tags (T17).
+- **Scope / affects:** `pyproject.toml`, `uv.lock`, `Dockerfile`, `docker-compose.yml`, `docker/postgres/10-roles.sh`, `app/`; rules UNI-06, UNI-07, TEN-01/02, TEN-10.
+- **Versions:** as listed above.
+- **Exception to a rule?** no (the app role is non-superuser and non-bypass from M0a; there are no tables yet, so no grants are needed)
+- **Decided by:** builder, within the owner-approved M0 plan
+
 ## 2026-10-05 — New platform repo created: charliekhc/skiw-platform (private)
 - **Decision:** The new platform repo is `https://github.com/charliekhc/skiw-platform`, private, created under the owner's personal GitHub account `charliekhc` (the `apiskiw` account was not used because the builder cannot create repos there). Local repo initialised on `main` with `origin` set. Nothing pushed yet.
 - **Why:** Owner chose option A (create now, personal account first). The old repo stays reference only.

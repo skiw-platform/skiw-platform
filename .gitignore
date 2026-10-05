@@ -1,1 +1,11 @@
 .agent/
+.env
+.env.*
+!.env.example
+.venv/
+node_modules/
+dist/
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
