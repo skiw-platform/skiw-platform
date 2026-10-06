@@ -1,0 +1,14 @@
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  plugins: [react()],
+  build: { manifest: true, outDir: "dist" },
+  server: {
+    proxy: {
+      "/healthz": "http://127.0.0.1:8000",
+      "/api": "http://127.0.0.1:8000",
+    },
+  },
+  test: { environment: "jsdom", include: ["src/**/*.test.tsx"] },
+});
