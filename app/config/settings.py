@@ -14,7 +14,11 @@ MIDDLEWARE: list[str] = []
 ROOT_URLCONF = "config.urls"
 ASGI_APPLICATION = "config.asgi.application"
 
-DATABASES = {"default": env.database_from_url(env.require("DATABASE_URL"))}
+DATABASES = {
+    "default": env.database_from_url(
+        env.require("DATABASE_URL"), require_tls=env.flag("DJANGO_REQUIRE_DB_TLS")
+    )
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 TIME_ZONE = "Asia/Kuala_Lumpur"

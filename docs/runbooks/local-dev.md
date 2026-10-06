@@ -18,13 +18,15 @@ Applies from M0a. Production deployment, rollback and restore runbooks arrive wi
 | `make typecheck` | mypy (strict, django-stubs) |
 | `make test` | pytest (no database needed in M0a) |
 | `make db-up` | starts only the database and waits until healthy |
-| `make migrate` | runs migrations as `skiw_migrator`, then `makemigrations --check` |
+| `make migrate` | runs migrations with `MIGRATION_DATABASE_URL` (`skiw_migrator`), then `makemigrations --check` |
 | `make clean` | stops the stack and deletes the local database volume |
 
 ## Environment variables
 All come from `.env` (copied from `.env.example`; never committed). The app fails to start if
-`DJANGO_SECRET_KEY` or `DATABASE_URL` is missing. The `app` container connects as `skiw_app`;
-host-run commands connect as `skiw_migrator`. Local values are placeholders, not secrets.
+`DJANGO_SECRET_KEY` or `DATABASE_URL` is missing.
+- `DATABASE_URL` is the runtime URL and uses `skiw_app`. The `app` container and any host-run app or test use it (TEN-02).
+- `MIGRATION_DATABASE_URL` uses `skiw_migrator`. Only `make migrate` reads it, and it injects it as `DATABASE_URL` for that one process (TEN-01).
+- TLS: `DATABASE_URL` may carry `sslmode`, `sslrootcert`, `sslcert`, `sslkey`, `sslcrl`; other options are rejected. Non-local deployments set `DJANGO_REQUIRE_DB_TLS=1`, which refuses any `sslmode` other than `verify-full` or `verify-ca`. Local values are placeholders, not secrets.
 
 ## Known local conflicts
 - The database is published on host port **5433** (`SKIW_DB_PORT`), because 5432 is often taken by another local Postgres.

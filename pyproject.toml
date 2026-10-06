@@ -38,8 +38,8 @@ src = ["app"]
 select = ["E", "F", "W", "I", "B", "UP", "S", "DJ", "C4", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-"app/**/tests/**" = ["S101"]
-"app/tests/**" = ["S101"]
+"app/**/tests/**" = ["S101", "S105", "S603"]
+"app/tests/**" = ["S101", "S105", "S603"]
 
 [tool.mypy]
 python_version = "3.12"
