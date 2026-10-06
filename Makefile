@@ -30,8 +30,8 @@ db-up: .env
 	docker compose up -d --wait db
 
 migrate: .env
-	set -a; . ./.env; set +a; uv run python app/manage.py migrate
-	set -a; . ./.env; set +a; uv run python app/manage.py makemigrations --check --dry-run
+	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py migrate
+	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py makemigrations --check --dry-run
 
 clean:
 	docker compose down -v
