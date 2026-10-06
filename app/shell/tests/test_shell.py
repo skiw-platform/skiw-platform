@@ -1,0 +1,57 @@
+import json
+from pathlib import Path
+
+import pytest
+from django.test import Client
+from pytest_django import Settings
+
+
+@pytest.fixture
+def dist(tmp_path: Path, settings: Settings) -> Path:
+    (tmp_path / ".vite").mkdir()
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "index-abc.js").write_text("console.log('shell')")
+    (tmp_path / "assets" / "index-abc.css").write_text("body{}")
+    manifest = {"index.html": {"file": "assets/index-abc.js", "css": ["assets/index-abc.css"]}}
+    (tmp_path / ".vite" / "manifest.json").write_text(json.dumps(manifest))
+    settings.WEB_DIST_DIR = tmp_path
+    return tmp_path
+
+
+def test_shell_links_the_built_assets_from_the_manifest(dist: Path) -> None:
+    response = Client().get("/")
+    body = response.content.decode()
+    assert response.status_code == 200
+    assert '<html lang="en-MY">' in body
+    assert '<div id="root"></div>' in body
+    assert 'src="/assets/index-abc.js"' in body
+    assert 'href="/assets/index-abc.css"' in body
+    assert "<noscript>" in body
+    assert 'rel="icon"' in body
+
+
+def test_shell_reports_a_missing_build_clearly(tmp_path: Path, settings: Settings) -> None:
+    settings.WEB_DIST_DIR = tmp_path
+    response = Client().get("/")
+    assert response.status_code == 503
+    assert b"make web-build" in response.content
+
+
+def test_assets_are_served_with_long_immutable_caching(dist: Path) -> None:
+    response = Client().get("/assets/index-abc.js")
+    assert response.status_code == 200
+    assert "immutable" in response["Cache-Control"]
+    assert "max-age=31536000" in response["Cache-Control"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/assets/../.vite/manifest.json", "/assets/..%2f.vite%2fmanifest.json", "/assets/missing.js"],
+)
+def test_assets_cannot_escape_the_assets_folder(dist: Path, path: str) -> None:
+    assert Client().get(path).status_code in {400, 404}
+
+
+def test_shell_and_assets_accept_get_only(dist: Path) -> None:
+    assert Client().post("/").status_code == 405
+    assert Client().post("/assets/index-abc.js").status_code == 405

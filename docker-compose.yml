@@ -30,6 +30,7 @@ services:
       DATABASE_URL: postgres://skiw_app:${SKIW_APP_PASSWORD:?set in .env}@db:5432/${POSTGRES_DB:?set in .env}
     volumes:
       - ./app:/srv/app:ro
+      - ./web/dist:/srv/web/dist:ro
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

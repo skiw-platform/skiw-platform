@@ -13,9 +13,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  python:
+  checks:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -24,6 +24,10 @@ jobs:
         with:
           version: "0.11.24"
           enable-cache: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
       - name: Install
         run: make install
       - name: Lint
@@ -36,10 +40,11 @@ jobs:
         # Disposable Postgres via Compose, migrate as skiw_migrator, then assert the real app
         # connection reports current_user = skiw_app (TEN-01/02).
         run: make test-live
-      - name: Compose smoke test
-        run: |
-          docker compose up -d --build --wait
-          curl --fail --silent --show-error http://127.0.0.1:8000/healthz
+      - name: Install browser
+        run: pnpm -C web exec playwright install --with-deps chromium
+      - name: End-to-end tests
+        # Builds the web shell, starts Compose (db + app), runs Playwright on desktop and mobile widths.
+        run: make e2e
       - name: Stop Compose
         if: always()
         run: docker compose down -v

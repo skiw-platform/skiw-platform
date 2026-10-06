@@ -59,22 +59,27 @@ addopts = "-ra --strict-markers -m 'not live'"
 markers = ["live: needs the Compose database (make test-live)"]
 
 [tool.importlinter]
-root_packages = ["config", "health"]
+root_packages = ["config", "health", "shell"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Apps do not reach into config internals"
 type = "forbidden"
-source_modules = ["health"]
+source_modules = ["health", "shell"]
 forbidden_modules = ["config"]
 
 [[tool.importlinter.contracts]]
 name = "Only the DB boundary packages may import psycopg (TEN-10 prep)"
 type = "forbidden"
-source_modules = ["config", "health"]
+source_modules = ["config", "health", "shell"]
 forbidden_modules = ["psycopg"]
 
 [[tool.importlinter.contracts]]
 name = "config sits above the apps"
 type = "layers"
-layers = ["config", "health"]
+layers = ["config", "health | shell"]
+
+[[tool.importlinter.contracts]]
+name = "App modules are independent of each other"
+type = "independence"
+modules = ["health", "shell"]

@@ -4,19 +4,22 @@ Applies from M0a. Production deployment, rollback and restore runbooks arrive wi
 
 ## Prerequisites
 - `uv` (installs Python 3.12 from `.python-version`), Docker with Compose, GNU make.
-- Web tooling (`node`, `pnpm`) arrives with M0b.
+- Node 24.21.0 and pnpm 11 for the web shell. Use `fnm` (`fnm install` then `fnm use`; it reads `.node-version`). `make` refuses other Node majors (`make check-node`).
+- First end-to-end run only: `pnpm -C web exec playwright install chromium`.
 
 ## First run
-1. `make install` — creates `.venv` from `uv.lock`.
-2. `make dev` — copies `.env.example` to `.env` if missing, builds the image, starts Postgres 17 and the app.
-3. `curl http://127.0.0.1:8000/healthz` returns `ok` (HTTP 200).
+1. `make install` — creates `.venv` from `uv.lock` and installs the web packages from `pnpm-lock.yaml`.
+2. `make dev` — builds the web shell, copies `.env.example` to `.env` if missing, builds the image, starts Postgres 17 and the app.
+3. `curl http://127.0.0.1:8000/healthz` returns `ok` (HTTP 200); `http://127.0.0.1:8000/` shows the shell.
 
 ## Everyday commands
 | Command | What it does |
 |---|---|
-| `make lint` | ruff check and format check, import-linter contracts |
-| `make typecheck` | mypy (strict, django-stubs) |
-| `make test` | pytest (no database needed in M0a) |
+| `make lint` | ruff, import-linter contracts, eslint |
+| `make typecheck` | mypy (strict, django-stubs) and `tsc` |
+| `make test` | pytest (no database needed) and vitest |
+| `make web-build` / `make web-dev` | production build of the shell into `web/dist` / Vite dev server with `/healthz` and `/api` proxied to `:8000` |
+| `make e2e` | builds the shell, starts Compose, runs Playwright on desktop and mobile widths (axe, keyboard, overflow, no-JS, console errors) |
 | `make test-live` | starts the database, migrates as `skiw_migrator`, then runs the live role checks (the app connection must report `skiw_app`) |
 | `make db-up` | starts only the database and waits until healthy |
 | `make migrate` | runs migrations with `MIGRATION_DATABASE_URL` (`skiw_migrator`), then `makemigrations --check` |
@@ -37,4 +40,4 @@ All come from `.env` (copied from `.env.example`; never committed). The app fail
 Roles are created only on the first start of an empty volume (`docker/postgres/10-roles.sh`). After changing it, run `make clean` and `make dev`.
 
 ## CI
-`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: install, lint, typecheck, unit tests, live database role checks (`make test-live` against a disposable Postgres), and a Compose smoke test of `/healthz`. Actions are pinned by commit SHA. The M0d PR extends this workflow (web, e2e, secret scan, dependency audit, image scan).
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: install, lint, typecheck, unit tests (pytest and vitest), live database role checks (`make test-live` against a disposable Postgres), and the Playwright end-to-end tests (`make e2e`). Actions are pinned by commit SHA. The M0d PR extends this workflow (secret scan, dependency audit, image scan, web build stage in the image).
