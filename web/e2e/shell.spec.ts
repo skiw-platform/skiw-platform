@@ -27,6 +27,8 @@ test("keyboard: first Tab reaches the skip link and Enter moves focus to main", 
   page,
 }) => {
   await page.goto("/");
+  // React replaces the static shell on load; wait so the first Tab is not lost to the swap.
+  await page.waitForLoadState("networkidle");
   await page.keyboard.press("Tab");
   const skip = page.getByRole("link", { name: "Skip to content" });
   await expect(skip).toBeFocused();
