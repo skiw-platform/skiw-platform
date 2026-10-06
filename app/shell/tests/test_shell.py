@@ -23,10 +23,12 @@ def test_shell_links_the_built_assets_from_the_manifest(dist: Path) -> None:
     body = response.content.decode()
     assert response.status_code == 200
     assert '<html lang="en-MY">' in body
-    assert '<div id="root"></div>' in body
+    assert '<div id="root">' in body
+    assert body.count("<main") == 1
+    assert body.count("<h1>") == 1
+    assert '<nav class="sidebar" aria-label="Primary">' in body
     assert 'src="/assets/index-abc.js"' in body
     assert 'href="/assets/index-abc.css"' in body
-    assert "<noscript>" in body
     assert 'rel="icon"' in body
 
 

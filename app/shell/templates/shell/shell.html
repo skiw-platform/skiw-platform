@@ -8,8 +8,27 @@
   {% for href in styles %}<link rel="stylesheet" href="{{ href }}">
   {% endfor %}</head>
 <body>
-  <div id="root"></div>
-  <noscript>SKIW needs JavaScript to run. Enable JavaScript and reload this page.</noscript>
+  {# Static copy of the shell. React replaces it when JavaScript runs; keep the text equal to web/src/content.ts (the no-JS parity e2e test checks it). #}
+  <div id="root">
+    <div class="app">
+      <a class="skip-link" href="#main">Skip to content</a>
+      <header class="topbar">
+        <p class="brand">SKIW</p>
+      </header>
+      <nav class="sidebar" aria-label="Primary">
+        <ul>
+          <li><a href="/" aria-current="page">Today</a></li>
+        </ul>
+      </nav>
+      <main id="main" tabindex="-1">
+        <h1>Today</h1>
+        <section class="card" aria-labelledby="empty-title">
+          <h2 id="empty-title">Nothing here yet</h2>
+          <p>Modules appear here as they are built.</p>
+        </section>
+      </main>
+    </div>
+  </div>
   <script type="module" src="{{ script }}"></script>
 </body>
 </html>

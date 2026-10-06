@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test("healthz answers ok", async ({ request }) => {
   const response = await request.get("/healthz");
@@ -54,12 +54,41 @@ test("no console errors or page errors", async ({ page }) => {
   expect(problems).toEqual([]);
 });
 
+async function shellText(page: Page) {
+  return page.evaluate(() => ({
+    nav: [...document.querySelectorAll("nav[aria-label='Primary'] a")].map((a) => a.textContent),
+    h1: [...document.querySelectorAll("h1")].map((h) => h.textContent),
+    h2: [...document.querySelectorAll("h2")].map((h) => h.textContent),
+    body: document.querySelector("main p")?.textContent,
+  }));
+}
+
+test("server HTML and the React shell show the same content", async ({ browser, baseURL }) => {
+  const plain = await browser.newContext({ javaScriptEnabled: false });
+  const noJs = await plain.newPage();
+  await noJs.goto(baseURL ?? "/");
+  const withoutJs = await shellText(noJs);
+  await plain.close();
+
+  const rich = await browser.newContext();
+  const js = await rich.newPage();
+  await js.goto(baseURL ?? "/");
+  await js.waitForLoadState("networkidle");
+  const withJs = await shellText(js);
+  await rich.close();
+
+  expect(withoutJs).toEqual(withJs);
+});
+
 test.describe("without JavaScript", () => {
   test.use({ javaScriptEnabled: false });
 
-  test("says that JavaScript is needed instead of showing a blank page", async ({ page }) => {
+  test("keeps navigation, one main, one h1 and the empty state", async ({ page }) => {
     await page.goto("/");
-    const message = await page.locator("noscript").evaluate((element) => element.textContent);
-    expect(message).toContain("SKIW needs JavaScript to run");
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+    await expect(page.locator("main")).toHaveCount(1);
+    await expect(page.locator("h1")).toHaveCount(1);
+    await expect(page.getByRole("heading", { name: "Nothing here yet" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Today" })).toHaveAttribute("href", "/");
   });
 });
