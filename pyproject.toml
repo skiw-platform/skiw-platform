@@ -55,7 +55,8 @@ django_settings_module = "config.settings"
 pythonpath = ["app"]
 DJANGO_SETTINGS_MODULE = "config.settings"
 testpaths = ["app"]
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers -m 'not live'"
+markers = ["live: needs the Compose database (make test-live)"]
 
 [tool.importlinter]
 root_packages = ["config", "health"]

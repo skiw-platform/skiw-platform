@@ -2,6 +2,15 @@
 
 <!-- Committed. Newest at the top. One entry per decision. A settled decision is reopened only by the owner. -->
 
+## 2026-10-06 — Minimal CI pulled forward into PR 1 (live role checks)
+- **Decision:** PR 1 carries a minimal GitHub Actions workflow (`.github/workflows/ci.yml`): install, lint, typecheck, unit tests, `make test-live` (disposable Postgres via Compose, `make migrate` as `skiw_migrator`, then tests that the real Django app connection reports `current_user = skiw_app`, that `skiw_app` is not superuser/BYPASSRLS and cannot create objects, and that `skiw_migrator` owns the database and schema and can), and a Compose `/healthz` smoke test. Pytest marker `live` is excluded from `make test` by default. M0d extends this workflow instead of replacing it.
+- **Why:** PR 1 review Rounds 2–4 stayed Blocked only because the reviewer's sandbox cannot run Docker or Postgres, so TEN-02 (hard) had no independent runtime proof. The owner chose option B (CI at the exact head) on 2026-10-06. Also records the owner decision (option A) to give the reviewer a checkout-capable environment; this CI is the independent evidence either way.
+- **Alternatives rejected:** Accepting the builder's local runs as the proof (not independent). Waiting for M0d (blocks M0a).
+- **Scope / affects:** `.github/workflows/ci.yml`, `Makefile` (`test-live`), `pyproject.toml` (marker), `app/tests/test_live_db_roles.py`, `docs/runbooks/local-dev.md`; rules UNI-13, UNI-14, TEN-01, TEN-02.
+- **Versions:** `actions/checkout` v7.0.1 (`3d3c42e5aac5ba805825da76410c181273ba90b1`), `astral-sh/setup-uv` v10.2.0 (`c18668ad3cf93ea998bef934396af7bb5c839dc7`), uv 0.11.24; GitHub-hosted `ubuntu-latest` runner (not pinned to an image version).
+- **Exception to a rule?** no
+- **Decided by:** owner (option B)
+
 ## 2026-10-06 — Runtime vs migration database URLs and TLS options (PR 1 review R1)
 - **Decision:** `DATABASE_URL` is always the runtime URL (`skiw_app`); migrations use a separate `MIGRATION_DATABASE_URL` (`skiw_migrator`) that `make migrate` injects as `DATABASE_URL` for that one process only. The URL parser keeps the libpq TLS options `sslmode`, `sslrootcert`, `sslcert`, `sslkey`, `sslcrl` in Django `OPTIONS`, rejects any other option, repeated options and invalid `sslmode` values, and with `DJANGO_REQUIRE_DB_TLS=1` accepts only `sslmode=verify-full` or `verify-ca`. Non-local deployments must set that flag.
 - **Why:** PR 1 review Round 1 findings P1-1 (TEN-01/02: a host-run app must not run as the schema owner) and P1-2 (spec D4: TLS options were silently dropped).

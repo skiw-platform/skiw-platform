@@ -17,6 +17,7 @@ Applies from M0a. Production deployment, rollback and restore runbooks arrive wi
 | `make lint` | ruff check and format check, import-linter contracts |
 | `make typecheck` | mypy (strict, django-stubs) |
 | `make test` | pytest (no database needed in M0a) |
+| `make test-live` | starts the database, migrates as `skiw_migrator`, then runs the live role checks (the app connection must report `skiw_app`) |
 | `make db-up` | starts only the database and waits until healthy |
 | `make migrate` | runs migrations with `MIGRATION_DATABASE_URL` (`skiw_migrator`), then `makemigrations --check` |
 | `make clean` | stops the stack and deletes the local database volume |
@@ -34,3 +35,6 @@ All come from `.env` (copied from `.env.example`; never committed). The app fail
 
 ## Rebuilding the database roles
 Roles are created only on the first start of an empty volume (`docker/postgres/10-roles.sh`). After changing it, run `make clean` and `make dev`.
+
+## CI
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: install, lint, typecheck, unit tests, live database role checks (`make test-live` against a disposable Postgres), and a Compose smoke test of `/healthz`. Actions are pinned by commit SHA. The M0d PR extends this workflow (web, e2e, secret scan, dependency audit, image scan).

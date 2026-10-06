@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test build dev db-up migrate clean
+.PHONY: install lint typecheck test test-live build dev db-up migrate clean
 
 export PYTHONPATH := app
 TOOL_ENV := DJANGO_SECRET_KEY=tooling-only-not-a-secret DATABASE_URL=postgres://u:p@localhost:5432/db
@@ -16,6 +16,11 @@ typecheck:
 
 test:
 	$(TOOL_ENV) uv run pytest
+
+test-live: .env
+	docker compose up -d --wait db
+	$(MAKE) migrate
+	set -a; . ./.env; set +a; uv run pytest -m live
 
 build:
 	docker compose build
