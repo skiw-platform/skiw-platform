@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      SKIW_MIGRATOR_PASSWORD: ${SKIW_MIGRATOR_PASSWORD:?set in .env}
+      SKIW_APP_PASSWORD: ${SKIW_APP_PASSWORD:?set in .env}
+    volumes:
+      - ./docker/postgres/10-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+      - db-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${SKIW_DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    command: >-
+      uvicorn config.asgi:application --host 0.0.0.0 --port 8000
+      --reload --reload-dir /srv/app --lifespan off
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?set in .env}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DATABASE_URL: postgres://skiw_app:${SKIW_APP_PASSWORD:?set in .env}@db:5432/${POSTGRES_DB:?set in .env}
+    volumes:
+      - ./app:/srv/app:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:

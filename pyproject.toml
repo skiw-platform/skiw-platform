@@ -1,0 +1,80 @@
+[project]
+name = "skiw-platform"
+version = "0.0.0"
+description = "SKIW platform: modular Django monolith (spec docs/specs/2026-10-05-skiw-platform-stack-design.md)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "Django==5.2.17",
+    "psycopg[binary,pool]==3.3.6",
+    "gunicorn==26.2.0",
+    "uvicorn==0.54.0",
+    "uvicorn-worker==0.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "django-stubs==5.2.9",
+    "django-stubs-ext==5.2.9",
+    "mypy==1.19.1",
+    "ruff==0.16.10",
+    "import-linter==2.15",
+    "pytest==9.1.1",
+    "pytest-django==4.14.0",
+]
+infra = [
+    "aws-cdk-lib==2.272.0",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["app"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "DJ", "C4", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/**/tests/**" = ["S101", "S105", "S603"]
+"app/tests/**" = ["S101", "S105", "S603"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "app"
+explicit_package_bases = true
+plugins = ["mypy_django_plugin.main"]
+
+[tool.django-stubs]
+django_settings_module = "config.settings"
+
+[tool.pytest.ini_options]
+pythonpath = ["app"]
+DJANGO_SETTINGS_MODULE = "config.settings"
+testpaths = ["app"]
+addopts = "-ra --strict-markers -m 'not live'"
+markers = ["live: needs the Compose database (make test-live)"]
+
+[tool.importlinter]
+root_packages = ["config", "health"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Apps do not reach into config internals"
+type = "forbidden"
+source_modules = ["health"]
+forbidden_modules = ["config"]
+
+[[tool.importlinter.contracts]]
+name = "Only the DB boundary packages may import psycopg (TEN-10 prep)"
+type = "forbidden"
+source_modules = ["config", "health"]
+forbidden_modules = ["psycopg"]
+
+[[tool.importlinter.contracts]]
+name = "config sits above the apps"
+type = "layers"
+layers = ["config", "health"]

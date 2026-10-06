@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.11.24"
+          enable-cache: false
+      - name: Install
+        run: make install
+      - name: Lint
+        run: make lint
+      - name: Typecheck
+        run: make typecheck
+      - name: Unit tests
+        run: make test
+      - name: Live database role checks
+        # Disposable Postgres via Compose, migrate as skiw_migrator, then assert the real app
+        # connection reports current_user = skiw_app (TEN-01/02).
+        run: make test-live
+      - name: Compose smoke test
+        run: |
+          docker compose up -d --build --wait
+          curl --fail --silent --show-error http://127.0.0.1:8000/healthz
+      - name: Stop Compose
+        if: always()
+        run: docker compose down -v
