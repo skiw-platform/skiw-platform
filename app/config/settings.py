@@ -8,8 +8,18 @@ SECRET_KEY = env.require("DJANGO_SECRET_KEY")
 DEBUG = env.flag("DJANGO_DEBUG")
 ALLOWED_HOSTS = env.csv("DJANGO_ALLOWED_HOSTS")
 
-INSTALLED_APPS = ["health"]
+INSTALLED_APPS = ["health", "shell"]
 MIDDLEWARE: list[str] = []
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "APP_DIRS": True,
+        "OPTIONS": {"context_processors": []},
+    }
+]
+
+WEB_DIST_DIR = BASE_DIR.parent / "web" / "dist"
 
 ROOT_URLCONF = "config.urls"
 ASGI_APPLICATION = "config.asgi.application"
