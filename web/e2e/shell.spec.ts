@@ -27,12 +27,31 @@ test("keyboard: first Tab reaches the skip link and Enter moves focus to main", 
   page,
 }) => {
   await page.goto("/");
-  // React replaces the static shell on load; wait so the first Tab is not lost to the swap.
-  await page.waitForLoadState("networkidle");
   await page.keyboard.press("Tab");
   const skip = page.getByRole("link", { name: "Skip to content" });
   await expect(skip).toBeFocused();
   await expect(skip).toBeInViewport();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("main")).toBeFocused();
+});
+
+test("keyboard focus survives a slow client start", async ({ page }) => {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/assets/*.js", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await page.goto("/", { waitUntil: "commit" });
+  const skip = page.getByRole("link", { name: "Skip to content" });
+  await skip.waitFor();
+  await page.keyboard.press("Tab");
+  await expect(skip).toBeFocused();
+  release();
+  await page.waitForLoadState("networkidle");
+  await expect(skip).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.locator("main")).toBeFocused();
 });

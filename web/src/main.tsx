@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import { hydrateRoot } from "react-dom/client";
 
 import { App } from "./App";
 import "./styles.css";
@@ -9,7 +9,10 @@ if (!root) {
   throw new Error("Missing #root element");
 }
 
-createRoot(root).render(
+// Hydrate the server-rendered shell (app/shell/templates/shell/shell.html) so the focused
+// node survives startup. The two must stay equal.
+hydrateRoot(
+  root,
   <StrictMode>
     <App />
   </StrictMode>,
