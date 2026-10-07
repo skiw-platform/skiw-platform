@@ -1,5 +1,154 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 11 — 2026-10-07 · scope: spec-change slice (v1.8 D2/D5 and TEN-03 mapping, PR 3)
+- **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` on PR 3 branch `docs/spec-v1.8-d5` · version 1.8 · hash (`git hash-object`) `67e36a52fd8e1cdb9f5b63e50b495323b9b5b6f3`. Main still has approved v1.7 (`cf57625da85c77d9be83995721fce9ed45907a07`), so this is a slice approval only.
+- **Project rule mapping:** `agents/PROJECT.md` on PR 3 · hash `66497bbcdbe64ae2425bb8de3db18acfe09451df`.
+- **Code review:** n/a; the PR changes the spec and project rule mapping only. PR 3 base `b6abd9f605bdabda6c8c4522b061ce763bc8be1c` · head `07bd5bd3e2e7b0591fe65c2cc4da85cc9b41cbf0` · host head re-checked at end: yes.
+
+**Verdict:** Approved with conditions
+**Model used:** Codex GPT-6 · **Switch model next step?** No for spec reconciliation; use the project's deep tier for M0c implementation and its transaction/grant tests.
+
+### Findings
+
+### [P2] The M0c plan still prescribes the superseded queue handoff and role grants
+- Category: spec/plan mismatch
+- Rule: D5; §9 M0; TEN-02; EVT-01
+- Evidence: the current spec's D5 “Staging” and M0 row (lines 89 and 647) require the probe-only helper, same-connection synchronous `.defer()`, M0c grants, and tests as `skiw_app`. The existing `docs/plans/2026-10-05-m0-scaffold.md:40,84-90,149,155-159` still presents ASK-1 as unresolved, describes an M0/M4 split without the new probe boundary, and postpones grants to M4 while running local/CI as `skiw_migrator`.
+- Failure scenario: M0c follows that plan and either runs the worker as the schema owner or implements the rejected external-connection handoff, despite the approved spec.
+- Why it matters: the implementation plan can steer the next PR away from the now-testable design.
+- Required correction: before M0c starts, revise the plan to the approved D5/M0/M4 staging, exact queue grants, `skiw_app` tests and fallback criterion; remove the obsolete ASK-1/ASK-6 branches.
+- Owner: builder
+- Verification: the revised plan and M0c PR tests agree with the approved spec hash and the grant matrix.
+- Disposition: deferred to the M0c plan-update PR, before M0c implementation begins
+- Status: open
+
+### Round 10 resolution audit
+
+| Round 10 finding | Round 11 result | Evidence |
+|---|---|---|
+| M0 acceptance required M4 tenant guard | Resolved in design: D5 now defines a probe-only M0c subset, its temporary calling boundary, and the full M4 helper behind the same signature; M0 and M4 have separate executable acceptance tests. | D5 line 89; §9 lines 647 and 651; `agents/PROJECT.md` §9 line 180 |
+| Queue grants conflicted with TEN-03 | Resolved in design: owner option A is mapped in the spec and `PROJECT.md`; four queue tables are operational state, while evidence tables remain append-only. The spec lists table, sequence and function grants, denies job DELETE and all TRUNCATE, states shared-queue disruption, and requires a grant audit plus worker tests. | §4.1 lines 186 and 192–230; §4.2 lines 335–342 and 361; Q32 line 716; `agents/PROJECT.md` §9 line 182 |
+| PR 3 lacked a per-rule self-check | Resolved: the PR body now has rows for the applicable tenancy, event/job, enqueue, CI and token rules, with evidence and scope explanations. | PR 3 body at head `07bd5bd` |
+
+### Self-check audit
+
+| Rule group | Applies? | Builder said | Reviewer found | Evidence | Disagreement |
+|---|---|---|---|---|---|
+| TEN-01/02, D16 | Yes: queue migrations versus runtime | pass | Spec says migration/grants use `skiw_migrator`, web/worker `skiw_app`; M0c test gate names both roles. Runtime not tested in this spec review. | D5; §4.1; M0 | No |
+| TEN-03 | Yes: mutable queue and append-only evidence | pass with owner mapping | Mapping and grant audit are explicit; queue status needs UPDATE, whereas `audit_event` and listed evidence retain no UPDATE/DELETE/TRUNCATE. | §4.1 grants; §4.2 TEN-03 row; `PROJECT.md` §9 | No |
+| TEN-09/10/11 | Yes: job tenant source and temporary M0 boundary | pass (staged) | M0c permits only test probes with no tenant data; M4 enforces `with_agency`, derived agency, RLS checks and worker MAC on all production tasks. | D5 Staging; M0/M4 | No |
+| EVT-01/02/05/06 | Yes: handoff, fallback, retry, schedules | pass | Sync Django-connection path, rollback/commit/visibility tests, `job_outbox` fallback, worker retry and periodic test are specified. Live proof is M0c. | D5; §4.1 grants; M0 | No |
+| Project enqueue rule; UNI-04/13 | Yes: wrapper, registry and CI bans | pass | Direct defer and task decorator bans are specified with M0c/M4 test gates. | D5; M0/M4; `PROJECT.md` §9 | No |
+| FE-13 | Yes: D2 token source | pass | One token location is named; visual implementation is in separate PR 4. | D2; PR body | No |
+| Other ticked packs | No new implementation in this text slice | n/a | The approved v1.7 feature-complete review remains the baseline. | Round 9 | No |
+
+### Verification performed
+
+| Command / check | Result |
+|---|---|
+| `git -C .agent/worktrees/build-docs-spec-d5 hash-object` for the spec and `agents/PROJECT.md` | `67e36a52fd8e1cdb9f5b63e50b495323b9b5b6f3`; `66497bbcdbe64ae2425bb8de3db18acfe09451df` |
+| PR 3 host metadata and CI | Open at head `07bd5bd`; `checks` passed at that head; branch worktree clean; host head re-checked unchanged. |
+| `git diff --check b6abd9f...HEAD` in PR 3 worktree | Passed. |
+| Compared changed spec and `PROJECT.md` with Round 10, decisions, plan and guardrails | All three Round 10 corrections re-inspected; one deferred plan mismatch remains. |
+| [Procrastinate 3.10.0 schema](https://github.com/procrastinate-org/procrastinate/blob/3.10.0/procrastinate/sql/schema.sql), [queries](https://github.com/procrastinate-org/procrastinate/blob/3.10.0/procrastinate/sql/queries.sql), [worker](https://github.com/procrastinate-org/procrastinate/blob/3.10.0/procrastinate/worker.py) | Independently checked mutable job status, periodic bookkeeping, worker register/prune, query paths and default `delete_jobs=never`. The listed grants are plausible for the named paths; database execution remains an M0c gate. |
+
+### Residual risks and test gaps
+- No live Postgres, worker, UUID round-trip, grant audit or browser test was run in this text-only spec review. Procrastinate's Django migration objects and exact privileges remain assumptions until M0c proves them with the production connector and `skiw_app`.
+- `skiw_app` can disrupt jobs across agencies in the shared operational queue; the spec states this limit and Q32 requires a decision before a second agency. The worker MAC protects tenant execution, not availability.
+- `PROJECT.md` still records the v1.7 spec hash; `setup` Part B must reconcile it after PR 3 merges. The brand decision log update is in separate PR 4, not this spec PR. The 1.8 changelog is dated 2026-10-06 although the Round 10 fixes were added 2026-10-07; this is minor editorial drift.
+- No instruction-like text directed the reviewer to skip a gate or change the verdict.
+
+### Required before merge
+- None for PR 3 at this head. Approval is of the reviewed spec and rule-mapping hashes, not implementation.
+
+### Deferred conditions
+- Update `docs/plans/2026-10-05-m0-scaffold.md` in the named M0c plan-update PR before M0c implementation begins (P2 above).
+- M0c must prove the queue grant matrix, same-transaction behavior, UUID round-trip, worker lifecycle and retry under `skiw_app`; M4 must prove the full tenant-guarded helper. These are the spec's milestone gates.
+
+### Optional improvements
+- Date the Round 10 changelog addition 2026-10-07 when next editing the spec.
+
+## Round 10 — 2026-10-07 · scope: spec-change slice (v1.8 D2/D5, PR 3)
+- **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` on PR 3 branch `docs/spec-v1.8-d5` · version 1.8 · hash (`git hash-object`) `a424c7f3f94fba3e3ec28a81ef682775b08e4163`. The main checkout still contains approved v1.7 (`cf57625da85c77d9be83995721fce9ed45907a07`).
+- **Code review:** n/a; this PR changes only the spec. PR 3 base `b6abd9f605bdabda6c8c4522b061ce763bc8be1c` · head `1e34b75df08447b088abe5f6470aa04089c11ae0` · host head re-checked at end: yes.
+
+**Verdict:** Blocked
+**Model used:** Codex GPT-6 · **Switch model next step?** No — the builder can correct these explicit spec and review-gate gaps; M0c implementation still needs the project's deep tier.
+
+### Findings
+
+### [P1] M0 acceptance tests require the complete tenant-aware helper before M4 supplies its dependencies
+- Category: defect
+- Rule: D5; §9 M0/M4; TEN-09; TEN-11
+- Evidence: v1.8 D5 (line 89) says `jobs.enqueue_in_tx` is callable only inside `with_agency()`, derives that agency, verifies `guard.current_agency()`, checks referenced rows under RLS, and signs the args. The revised M0 row (line 601) requires integration tests of that helper, including a real UUID id round-trip. The M4 row (line 605) is where `with_agency()`, `guard.current_agency()`, the guard key, RLS and tenant tables first arrive. The existing M0 plan explicitly postpones helper steps (1a)/(1b) to M4 (`docs/plans/2026-10-05-m0-scaffold.md:40`).
+- Failure scenario: M0c runs `enqueue_in_tx` against its probe row before M4. A conforming implementation must refuse the call because no verified agency transaction exists; an implementation that skips the guard to pass M0 is weaker than D5 and TEN-11.
+- Why it matters: the M0 gate is impossible as stated, while the existing plan silently implements a weaker interim helper.
+- Required correction: define the M0c subset explicitly (transactional defer/rollback, role, UUID serialization on a probe) and its temporary calling boundary, then require the full D5 helper and wrong-agency checks at M4; or move the full helper and tenant guard into M0c. Align the M0 plan with the chosen split before M0c.
+- Owner: builder
+- Verification: M0c and M4 each have executable tests for exactly the behavior delivered at that milestone; no unguarded enqueue path survives M4.
+- Status: open
+
+### [P1] Queue grant scope conflicts with the append-only job-record rule
+- Category: guardrail mismatch
+- Rule: TEN-03; D4/D5; §4.1 Procrastinate tables
+- Evidence: the new D5 and §4.1 row (lines 89 and 186) say `skiw_app` receives every table/sequence permission needed by web and worker. TEN-03 (`agents/guardrails/tenancy-rls.md:11`) forbids `UPDATE`, `DELETE` and `TRUNCATE` on job records for `skiw_app`. Procrastinate 3.10.0's [published schema](https://github.com/procrastinate-org/procrastinate/blob/3.10.0/procrastinate/sql/schema.sql) updates `procrastinate_jobs.status` when fetching/finishing/retrying jobs and has delete paths; its functions contain no `SECURITY DEFINER`. The spec neither classifies these mutable queue state tables separately from append-only records nor defines a privilege mechanism that satisfies both rules.
+- Failure scenario: M0c grants `UPDATE`/`DELETE` on `procrastinate_jobs` to make the worker run, violating TEN-03; or grants only `INSERT`/`SELECT`, causing workers and admin retry to fail at runtime.
+- Why it matters: the worker cannot meet the stated grant design and the project's append-only invariant without an explicit rule mapping or a different privilege architecture.
+- Required correction: state which Procrastinate tables are mutable operational queue state and which, if any, are append-only evidence; reconcile TEN-03 in `agents/PROJECT.md`/the owner-approved rule mapping, or design restricted definer operations with tests. List the actual M0c table, sequence and function grants plus a worker fetch/finish/retry test as `skiw_app`.
+- Owner: builder and owner for any rule exception
+- Verification: under `skiw_app`, a job can be deferred, fetched, finished and retried; the grant audit proves append-only evidence tables have no UPDATE/DELETE/TRUNCATE privilege, and the rule mapping names every exception.
+- Status: open
+
+### [P1] PR 3 has no per-rule self-check table
+- Category: guardrail mismatch
+- Rule: `agents/roles/reviewer.md` §3
+- Evidence: the PR 3 body has a summary and a “Needs reviewer attention” list, but no per-rule self-check table. The reviewer rule says a missing self-check table makes the verdict **Blocked**. Applicable rules for this slice include TEN-01/02/03/09/10/11, EVT-01/02/05/06, the project job-enqueue rule, FE-13 and UNI-04/13; the body does not map them to evidence or justified `n/a`.
+- Failure scenario: the grant and milestone conflicts above pass through without a recorded builder check or explicit disposition.
+- Why it matters: the required independent guardrail audit lacks its builder input.
+- Required correction: add a PR 3 self-check table with one row for each applicable rule, evidence or a specific `n/a` reason. The reviewer will re-check it; the table alone will not close the two design findings.
+- Owner: builder
+- Verification: PR body includes the table at the same head and the reviewer can compare each row with the spec and guardrails.
+- Status: open
+
+### Self-check audit
+
+| Rule group | Applies? | Builder said | Reviewer found | Evidence | Disagreement |
+|---|---|---|---|---|---|
+| TEN-01/02, D16 | Yes, migration/runtime role split | No table | D5 now keeps runtime on `skiw_app` from M0; migration as `skiw_migrator` is coherent | D5; §4.1; M0 | Self-check missing |
+| TEN-03 | Yes, queue privileges and job records | No table; PR body calls out grant scope | Unresolved conflict above | Guardrail; D5; Procrastinate 3.10.0 schema | Yes |
+| TEN-09/10/11 | Yes, helper and tenant source | No table | Full helper depends on M4; M0 staging unclear | D5; M0/M4; plan M0c | Yes |
+| EVT-01/02/05/06 | Yes, transaction handoff, fallback, retry and schedules | No table | Sync defer route and rollback/visibility tests are specified; runtime proof awaits M0c | D5; M0 | Self-check missing |
+| Project enqueue rule; UNI-04/13 | Yes, direct-defer ban and CI contract | No table | Ban enlarged; exact Semgrep coverage remains an M0c test | D5; M0 | Self-check missing |
+| FE-13 | Yes, D2 token source | No table | D2 names one token location; UI implementation belongs to the brand-tokens PR | D2; handoff | Self-check missing |
+| Other ticked packs | No new implementation in this text slice | No table | Existing v1.7 feature review remains the baseline; not re-executed | Round 9 | Self-check missing |
+
+### Verification performed
+
+| Command / check | Result |
+|---|---|
+| `git -C .agent/worktrees/build-docs-spec-d5 hash-object docs/specs/2026-10-05-skiw-platform-stack-design.md` | `a424c7f3f94fba3e3ec28a81ef682775b08e4163` |
+| PR 3 host metadata and branch worktree | Open; base/head as recorded; branch worktree clean; Python CI check passed; host head re-checked unchanged |
+| `git diff --check b6abd9f...HEAD` in PR 3 worktree | Passed |
+| Compared v1.8 against approved v1.7, decisions, handoff, M0 plan and guardrails | D5 connector/UUID/role claims and D2 direction reviewed as a slice; findings above |
+| [Procrastinate Django integration docs](https://procrastinate.readthedocs.io/en/stable/howto/django/basic_usage.html), [external-connection docs](https://procrastinate.readthedocs.io/en/main/howto/production/external_connection.html), [3.10.0 schema](https://github.com/procrastinate-org/procrastinate/blob/3.10.0/procrastinate/sql/schema.sql) | Docs support Django connection use and the connector distinction; schema confirms mutable queue state. The precise DjangoConnector implementation and UUID serializer were not independently loaded; M0c tests remain required. |
+
+### Residual risks and test gaps
+- No live Postgres, worker, UUID round-trip, browser or contrast test was run in this text-only review. The brand source site timed out when opened; the colour choice is recorded in the handoff but its website provenance was not independently verified.
+- The M0 plan still names the old external-connection decision and postpones queue grants to M4. Its update is explicitly scheduled after spec approval, but it must be reconciled before M0c begins.
+- D2 labels the visual direction “owner, 2026-10-06” while the handoff dates the navy/gold choice 2026-10-07. The decisions log still records that colour question as open; reconcile the date and decision record in the named brand-tokens follow-up PR.
+- No instruction-like text directed at the reviewer was found in the changed spec slice.
+
+### Required before merge
+- Resolve the two D5/M0/TEN-03 P1 findings in the spec and project rule mapping as needed, then request a new spec review.
+- Add the PR 3 per-rule self-check table; re-review at the resulting exact head.
+
+### Deferred conditions
+- Brand decision date and decisions-log reconciliation: `feat/m0b-brand-tokens` PR after PR 2 merges.
+- M0 plan rewrite and implementation tests: before M0c starts, after the revised spec is approved.
+
+### Optional improvements
+- None required beyond the findings.
+
 ## Round 9 — 2026-10-05 · scope: feature-complete spec
 - **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` · version 1.7 · hash (`git hash-object`) `cf57625da85c77d9be83995721fce9ed45907a07`
 - **Code review:** n/a. No new-platform source or Git repository is present locally. The old application's repository is identified in `docs/DECISIONS.md` but was not accessed in this round.
