@@ -1,0 +1,11 @@
+approval-receipt: 1
+pr: 3
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 07bd5bd3e2e7b0591fe65c2cc4da85cc9b41cbf0
+review-file: reviews/SPEC-2026-10-05-skiw-platform-stack-design.md
+review-file-hash: 3a4623794c57fba39ff24e0d03482d1a7e9815cf
+review-log-branch-commit: 730c0c6fdab8b385655abdfa1d7610dc07764f81
+verdict: Approved with conditions (spec review round 11)
+note: PR 3 is a spec PR; its reviewer record is the spec review file, not reviews/PR-3.md
+written-at: 2026-10-07T13:30:17Z
+pr-state-at-write: OPEN, unmerged
