@@ -1,14 +1,18 @@
 :root {
   color-scheme: light;
-  --color-bg: #edefed;
+  /* Brand: navy #001C30 and gold #FFB300 from skiwealth.com (owner choice, 2026-10-07).
+     Gold never carries text on white; text on gold is navy. */
+  --color-bg: #eef1f4;
   --color-surface: #ffffff;
-  --color-text: #16201a;
-  --color-text-muted: #55605a;
-  --color-primary: #0f3d2b;
+  --color-text: #0b1f2d;
+  --color-text-muted: #4a5a66;
+  --color-primary: #001c30;
   --color-primary-contrast: #ffffff;
-  --color-accent: #1f7a4d;
-  --color-border: #dfe4e0;
-  --color-focus: #1f7a4d;
+  --color-accent: #ffb300;
+  --color-accent-contrast: #001c30;
+  --color-border: #d9e0e6;
+  --color-focus: #001c30;
+  --color-focus-on-primary: #ffb300;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -18,7 +22,7 @@
   --radius-md: 0.75rem;
   --radius-lg: 1.5rem;
   --radius-pill: 999px;
-  --shadow-card: 0 1px 2px rgb(15 61 43 / 8%);
+  --shadow-card: 0 1px 2px rgb(0 28 48 / 8%);
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
@@ -47,8 +51,8 @@ body {
   inset-inline-start: var(--space-2);
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-pill);
-  background: var(--color-primary);
-  color: var(--color-primary-contrast);
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
   transform: translateY(-200%);
 }
 
@@ -88,6 +92,11 @@ main {
 .sidebar {
   grid-area: sidebar;
   padding: var(--space-3);
+  background: var(--color-primary);
+}
+
+.sidebar :focus-visible {
+  outline-color: var(--color-focus-on-primary);
 }
 
 .sidebar ul {
@@ -103,13 +112,14 @@ main {
   display: block;
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-pill);
-  color: var(--color-text);
+  color: var(--color-primary-contrast);
   text-decoration: none;
 }
 
 .sidebar a[aria-current="page"] {
-  background: var(--color-primary);
-  color: var(--color-primary-contrast);
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-weight: 600;
 }
 
 main {
