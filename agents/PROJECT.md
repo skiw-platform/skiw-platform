@@ -26,12 +26,12 @@ setup leaves no double braces anywhere in this file.
 | What | Path | Wins over |
 |---|---|---|
 | Product spec / proposal (latest) | docs/specs/2026-10-05-skiw-platform-stack-design.md | everything except the owner |
-| Spec hash at last reconcile | cf57625da85c77d9be83995721fce9ed45907a07 <!-- git hash-object of the spec (v1.7, review Round 9 Approved) when setup last filled this file --> | |
+| Spec hash at last reconcile | 67e36a52fd8e1cdb9f5b63e50b495323b9b5b6f3 <!-- git hash-object of the spec (v1.8, review Round 11 Approved with conditions, PR 3 merged 2026-10-08) when setup last filled this file --> | |
 | Decisions log (committed) | docs/DECISIONS.md | handoff, chat history |
 | Durable notes (other lasting facts) | none <!-- owner decision 2026-10-05: spec and decisions log hold lasting facts; add a notes file only when a distinct need appears --> | handoff, chat history |
 | Review files | `.agent/reviews/` (reviewer writes, builder reads; local only — the final round is copied into each PR log) | |
 | In-flight task state (handoff) | .agent/handoff.md | nothing — repo wins for code state |
-| Extra frontend standard (on top of `guardrails/frontend.md`) | none <!-- spec D2 names the SK iWealth design system (Doc2) as the design-token source, but no file of it is in this repo --> | |
+| Extra frontend standard (on top of `guardrails/frontend.md`) | none <!-- spec v1.8 D2: Fernly layout as visual reference only, SK iWealth navy #001C30 and gold #FFB300 (skiwealth.com); tokens live in web/src/styles.css (FE-13); no separate design-system file --> | |
 | Other standards | none | |
 | Notes the reviewer must always load | none | |
 | Extra in-flight files (checklists, cutover plans) | none | |
@@ -73,7 +73,7 @@ Spec wins for *what we should build*. If two of these disagree, stop and ask Yin
 
 - **Unit name:** Milestone (`M0` … `M19+`, then `Later`)
 - **Milestone list lives in:** docs/specs/2026-10-05-skiw-platform-stack-design.md §9 "Milestones" (plus its "Strangler / migration plan")
-- **Scaffold milestone:** M0 — Scaffold (repo layout, uv + pnpm lockfiles, ruff/mypy strict/eslint/tsc, pytest/vitest, Docker Compose, `.env.example`, import-linter contracts, CI pipeline, runbook skeleton, `jobs.enqueue_in_tx` transaction test) <!-- after this merges, never re-scaffold, re-init git, or redo its paperwork -->
+- **Scaffold milestone:** M0 — Scaffold (repo layout, uv + pnpm lockfiles, ruff/mypy strict/eslint/tsc, pytest/vitest, Docker Compose, `.env.example`, import-linter contracts, CI pipeline, runbook skeleton, `jobs.enqueue_in_tx` M0c subset transaction test as `skiw_app`; tenant guard and `args_mac` are M4) <!-- after this merges, never re-scaffold, re-init git, or redo its paperwork -->
 
 ## 6. Model tiers
 
