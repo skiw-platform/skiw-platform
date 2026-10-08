@@ -1,6 +1,6 @@
 # Agent kit — builder + reviewer setup for any app
 
-**Kit version: 1.7.1** · record it in each project's `PROJECT.md` when you copy the kit in.
+**Kit version: 1.7.3** · record it in each project's `PROJECT.md` when you copy the kit in.
 
 A two-agent workflow: a **builder** that writes code and a **reviewer** that checks every spec and PR
 before you merge. It works with any AI coding tool and any model.
@@ -149,6 +149,11 @@ Version rule: patch (1.3.x) = wording; minor (1.x.0) = new rule, pack or command
 change that breaks existing `PROJECT.md` files.
 
 ### Changelog
+- **1.7.3** — Reviewer works in tools whose sandbox makes `.git` read-only: if `git worktree add` fails, it reviews a
+  `git archive` snapshot of the exact head SHA (no clone, pin kept) and reports the checks it couldn't run.
+- **1.7.2** — `setup` applies listed defaults and reports them instead of asking: durable notes `none`, agent
+  tool folders `none`, helper and wrapper names (spec's name first), commit trailer `none`; owner name
+  always asked. Only genuinely unknown facts are asked. Existing projects need only `START.md` and `README.md`.
 - **1.7.1** — CRM migration findings: `START.md` accepts the `Read agents/START.md and run <command>` prefix it
   tells owners to type; TEN-09 allows `set_config(…, true)`; TEN-03 allows SELECT on append-only tables;
   EVT-01/02 outcome-based (outbox or transactional enqueue).

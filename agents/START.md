@@ -100,7 +100,11 @@ Skip if the repo has no earlier agent instructions.
    path if not given). No spec yet → stop here and tell the owner to run `spec <topic>`.
 2. Resolve every required field from the spec and the repo. Optional fields → `none`. Commands that
    don't exist yet → `pending scaffold`. No remote repository yet → Remote = `pending remote`. These
-   three values are valid, not unresolved. Never guess a value; ask.
+   three values are valid, not unresolved.
+   **Defaults.** Where a field's comment in `PROJECT.md` names a default, use it unless the spec says
+   otherwise, and list every one under "Defaults I applied" in your reply so the owner can change any.
+   The owner's name is always asked, never defaulted.
+   Ask only where there is neither a spec value nor a default. Never guess business facts.
 3. Tick the guardrail packs that apply. One line per ticked pack on why; one line per unticked pack
    whose topic appears in the spec on why not.
 4. Set **Spec hash at last reconcile** (`PROJECT.md` §2) to `git hash-object <spec path>`.
