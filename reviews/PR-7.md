@@ -1,5 +1,71 @@
 # Review — PR 7
 
+## Round 2 — 2026-10-09 · scope: plan-change slice (M0 scaffold, spec v1.8)
+- **Code review:** base (merge base) `5f923b320acc744f7993b17e5290da912f4aa905` · head `fbc1740346fd14afe553c71b11d2a548f994a757` · host head re-checked at end: yes, unchanged and OPEN.
+- **Spec:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` v1.8, hash `67e36a52fd8e1cdb9f5b63e50b495323b9b5b6f3`, unchanged.
+- **Plan:** `docs/plans/2026-10-05-m0-scaffold.md`, hash `6c109bd91430a43047a50a3a49aadb044c7878a1`.
+- **Mode:** exact-head snapshot `.agent/worktrees/review-7-fbc17403`; tracked-file integrity verified by commit hashes, then snapshot removed. Fetch denied by read-only `.git/FETCH_HEAD`; exact head present. Host main confirmed the recorded base.
+
+**Model used:** Codex GPT-6 · **Switch model next step?** No for review/archiving; M0c implementation retains the project's deep-tier requirement.
+
+### Findings
+No blocking findings or new defects.
+
+### Round 1 resolution audit
+| Finding | Result | Evidence |
+|---|---|---|
+| P1 migration-linter deferral | Resolved | Plan §1 M0c deps, §3 migration checklist, §5 migrate command and §7 risk 5 now require pinned django-migration-linter 6.0.0 in M0c, warnings-as-errors, own-app scope and a destructive negative test. Builder cannot defer it; postponement requires an owner-approved reviewed spec change. Any unsupported RunSQL exception is named-migration-only with a documented reason; grant audit/lifecycle proof remains required. |
+| P1 missing self-check rules | Resolved | Host PR body now has individual UNI-04/14/15/16 and TEN-10/11 rows, evidence and plan-versus-runtime distinctions. Re-inspected against the unchanged applicability list and corrected plan. |
+
+**Spec Round 11 condition:** satisfied at the plan-text level by this reviewed plan hash. M0c may proceed only after the standard approval receipt, owner merge and merged-PR log step. The transaction, UUID, grant audit, worker lifecycle, retry/periodic, registry and full M4 guard tests remain implementation acceptance gates; this approval claims none have run yet.
+
+### Self-check audit
+Same applicability as Round 1: plan/spec agreement; runtime/migration role design; queue grant mapping; transaction/fallback/retry/periodic design; import/helper boundaries and agency-source staging; pinned dependency/tool and migration/runbook/CI commitments; secrets and local write scope. No new UI, money, auth, finalized-record or file behavior.
+
+| Rule | Applies? | Builder said | Reviewer found | Evidence | Disagreement |
+|---|---|---|---|---|---|
+| Round 11 / D5 / M0-M4 | Plan alignment | plan pass | Probe boundary, same-alias sync defer, UUID strings, exact grants, skiw_app tests, fallback criterion and M4 handover retained | full pinned plan; spec D5/§4.1/M0/M4 | No |
+| TEN-01/02/03 | Roles and privilege design | plan pass | Matches approved runtime/migrator separation and operational-queue mapping | plan §1/§3 | No |
+| TEN-10/11 / UNI-04 | Planned enforcement and staging | plan pass | Explicit rows now cite import-linter, Semgrep, probe-only callers, agency-id refusal and M4 guard | PR table; plan M0c and M4 handover | No |
+| EVT-01/02/05/06 | Planned transaction/lifecycle/fallback | plan pass | Required tests remain testable; runtime proof correctly deferred to implementation | plan §3/§7 | No |
+| UNI-06/14 | Dependencies and pins | plan pass | Linter pin added and dependency ladder required; no dependency installed in this PR | plan deps/§7; PR table | No |
+| UNI-15 / D16 | Required migration gate | plan pass | Mandatory M0c gate plus negative test; narrow RunSQL limitation cannot remove the overall gate | plan §3/§5/§7 | No |
+| UNI-16 | Runbook commitment | plan pass | Worker, migrate-first dev and Semgrep runbook update stays in M0c | plan docs row; PR table | No |
+| UNI-07/12/13 | Secrets/write/delivery | pass; project CI staged | No secret values; allowed review paths; new exact-head CI passed; M0d scans retained | diff checks; run 37864050272 | No |
+| Other packs / PROJECT §9 | No changed runtime features | n/a | Appropriate plan-slice scope; locked switches unaffected | full plan/effective diff | No |
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| Exact commit, merge-base and safe-path snapshot checks | Head present; base 5f923b3; isolated snapshot created. |
+| Full updated plan; previous-head → new-head diff | Only migration-gate corrections introduced; queue/staging design retained. |
+| Plan/spec hash-object | Plan 6c109bd91430a43047a50a3a49aadb044c7878a1; approved spec 67e36a52fd8e1cdb9f5b63e50b495323b9b5b6f3. |
+| Effective diff name list and diff --check | Plan file only; whitespace check passed. |
+| Project secret-pattern scan of fix diff | Zero hits; unchanged effective-diff name-only hits already inspected in Round 1. |
+| [PyPI 6.0.0 metadata](https://pypi.org/pypi/django-migration-linter/6.0.0/json) | Release exists, not yanked, requires Python >=3.9 and lists Django 5.2/Python 3.12 support. Not a claim of tested project compatibility or latest-version status. |
+| gh pr view 7 self-check; gh run view 37864050272 | Corrected rows present; CI completed SUCCESS at exact new head. |
+| Final host head/state and host main-ref reads | Head unchanged, OPEN; base/main 5f923b3. |
+| Snapshot tracked hashes against git ls-tree target | Every tracked file unchanged; snapshot removed. |
+
+### Residual risks and test gaps
+- No local package, database, linter or worker tests run for a plan-only PR. Existing CI checks the current application, not future M0c implementation.
+- Implementing the own-app lint scope, command registration/configuration, negative test and any narrowly documented RunSQL ignore remains subject to M0c review.
+- Exact third-party migration/worker settings, built-in cleanup suppression, privileges and lifecycle execution remain the explicit M0c checks. Full tenancy remains M4.
+- ASK-3/4, Q32, M0d scans and M2 CSP retain their original scope.
+- Handoff labels Round 1 “Blocked”, but the actual preserved verdict is “Revision required”; both required fixes, so this wording drift changes no gate.
+- Nonblocking instruction-like plan/PR review-attention text recorded in Round 1 remains data; no skipped gate or changed verdict was requested or obeyed.
+
+### Required before merge
+- No plan or self-check correction. Run `approved 7` to archive this round and create the receipt before Ying merges.
+
+### Deferred conditions
+- None newly introduced. Runtime requirements remain milestone gates, not conditions on merging this plan PR.
+
+### Optional improvements
+- None required.
+
+**Verdict:** Approved
+
 ## Round 1 — 2026-10-09 · scope: plan-change slice (M0 scaffold, spec v1.8)
 - **Code review:** base (merge base) `5f923b320acc744f7993b17e5290da912f4aa905` · head `4a9b5a322f7c50c5b3a855ead7613db8aa61b704` · host head re-checked at end: yes; unchanged and OPEN.
 - **Spec:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` v1.8, hash `67e36a52fd8e1cdb9f5b63e50b495323b9b5b6f3`, approved with conditions in Round 11.
