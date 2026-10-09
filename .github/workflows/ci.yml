@@ -105,8 +105,6 @@ jobs:
           image-ref: skiw-platform:ci
           version: v0.75.0
           severity: HIGH,CRITICAL
-          # Unfixed findings have no action available; Dependabot moves the base digests when fixed.
-          ignore-unfixed: true
           exit-code: "1"
 
   infra:

@@ -9,7 +9,7 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY web ./web
 RUN pnpm install --frozen-lockfile && pnpm -C web build
 
-FROM python:3.12.15-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
+FROM python:3.12.15-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -18,7 +18,7 @@ ENV UV_COMPILE_BYTECODE=1 \
     PATH="/srv/.venv/bin:$PATH" \
     PYTHONPATH=/srv/app
 
-RUN useradd --system --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nologin skiw
+RUN adduser -S -u 10001 -h /nonexistent -H -s /sbin/nologin skiw
 
 WORKDIR /srv
 COPY pyproject.toml uv.lock .python-version ./

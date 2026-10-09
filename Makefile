@@ -56,7 +56,7 @@ audit-web: check-node
 image-scan:
 	@command -v trivy >/dev/null || { echo "trivy is required: brew install trivy"; exit 1; }
 	docker build -t skiw-platform:scan .
-	trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 skiw-platform:scan
+	trivy image --severity HIGH,CRITICAL --exit-code 1 skiw-platform:scan
 
 # Points git at .githooks (pre-push secret scan); one-time per clone. Needs gitleaks installed.
 hooks:
