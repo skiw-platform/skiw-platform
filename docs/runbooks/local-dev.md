@@ -30,7 +30,7 @@ All come from `.env` (copied from `.env.example`; never committed). The app fail
 `DJANGO_SECRET_KEY` or `DATABASE_URL` is missing.
 - `DATABASE_URL` is the runtime URL and uses `skiw_app`. The `app` container and any host-run app or test use it (TEN-02).
 - `MIGRATION_DATABASE_URL` uses `skiw_migrator`. Only `make migrate` reads it, and it injects it as `DATABASE_URL` for that one process (TEN-01).
-- The `worker` container (`python app/manage.py procrastinate worker`) also connects as `skiw_app`, with only the queue grants of spec §4.1 (migration `jobs.0001`). It keeps finished jobs (`delete_jobs = "never"`); there is no cleanup yet.
+- The `worker` container (`python app/manage.py runworker`, which checks migrations and then runs `procrastinate worker`) also connects as `skiw_app`, with only the queue grants of spec §4.1 (migration `jobs.0001`). It keeps finished jobs (`delete_jobs = "never"`); there is no cleanup yet.
 - TLS: `DATABASE_URL` may carry `sslmode`, `sslrootcert`, `sslcert`, `sslkey`, `sslcrl`; other options are rejected. Non-local deployments set `DJANGO_REQUIRE_DB_TLS=1`, which refuses any `sslmode` other than `verify-full` or `verify-ca`. Local values are placeholders, not secrets.
 
 ## Known local conflicts
@@ -40,6 +40,7 @@ All come from `.env` (copied from `.env.example`; never committed). The app fail
 ## Background jobs
 - Enqueue only with `jobs.enqueue_in_tx(task, **ids)` inside `transaction.atomic()`. Direct `.defer()` / `.defer_async()` / `.batch_defer*()` anywhere else fails `make lint` (Semgrep rule `semgrep/jobs-no-direct-defer.yml`; `.semgrepignore` keeps tests in scope).
 - Tasks are registered only through `jobs.registry.job`. Until M4 the only task is the probe `jobs.tasks.noop`.
+- Startup gate (spec D16): the web entrypoint (`config.asgi`) and `runworker` refuse to start, with an `unapplied migrations` error, when any migration is unapplied or `django_migrations` cannot be read as `skiw_app`. Run `make migrate` (as `skiw_migrator`) first; the gate never changes the schema.
 - Worker logs: `docker compose logs -f worker`. A permission error there means a queue grant is missing: rerun `make migrate`, and see spec §4.1 before adding any grant.
 
 ## Rebuilding the database roles

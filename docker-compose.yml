@@ -39,7 +39,7 @@ services:
 
   worker:
     build: .
-    command: python app/manage.py procrastinate worker
+    command: python app/manage.py runworker
     environment:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?set in .env}
       DATABASE_URL: postgres://skiw_app:${SKIW_APP_PASSWORD:?set in .env}@db:5432/${POSTGRES_DB:?set in .env}

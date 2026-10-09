@@ -60,8 +60,11 @@ class Migration(migrations.Migration):
                 f"GRANT USAGE ON SEQUENCE {SEQUENCES} TO {APP_ROLE}",
                 workers_identity_sequence(f"GRANT USAGE ON SEQUENCE %s TO {APP_ROLE}"),
                 f"GRANT EXECUTE ON FUNCTION {FUNCTIONS} TO {APP_ROLE}",
+                # Startup gate (D16, §4.1): skiw_app reads, never writes, the migration record.
+                f"GRANT SELECT ON TABLE django_migrations TO {APP_ROLE}",
             ],
             reverse_sql=[
+                f"REVOKE SELECT ON TABLE django_migrations FROM {APP_ROLE}",  # noqa: S608
                 f"REVOKE EXECUTE ON FUNCTION {FUNCTIONS} FROM {APP_ROLE}",
                 workers_identity_sequence(f"REVOKE USAGE ON SEQUENCE %s FROM {APP_ROLE}"),
                 f"REVOKE USAGE ON SEQUENCE {SEQUENCES} FROM {APP_ROLE}",
