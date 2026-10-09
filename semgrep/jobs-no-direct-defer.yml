@@ -1,0 +1,16 @@
+rules:
+  - id: jobs-no-direct-defer
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Enqueue jobs only through jobs.enqueue_in_tx (spec D5, PROJECT.md §9). A direct
+      .defer(), .defer_async(), .batch_defer*() or .configure(...).defer*() skips the
+      same-transaction and job-argument checks.
+    paths:
+      exclude:
+        - /app/jobs/enqueue.py
+    pattern-either:
+      - pattern: $TASK.defer(...)
+      - pattern: $TASK.defer_async(...)
+      - pattern: $TASK.batch_defer(...)
+      - pattern: $TASK.batch_defer_async(...)

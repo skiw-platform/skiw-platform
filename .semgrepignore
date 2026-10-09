@@ -1,0 +1,2 @@
+# Replaces Semgrep's default ignore list, which skips tests/: the custom rules in semgrep/
+# (jobs-no-direct-defer) apply to test code too (spec D5). .gitignore still applies.

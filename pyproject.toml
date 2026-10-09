@@ -9,6 +9,7 @@ dependencies = [
     "gunicorn==26.2.0",
     "uvicorn==0.54.0",
     "uvicorn-worker==0.4.0",
+    "procrastinate[django]==3.10.0",
 ]
 
 [dependency-groups]
@@ -20,6 +21,7 @@ dev = [
     "import-linter==2.15",
     "pytest==9.1.1",
     "pytest-django==4.14.0",
+    "django-migration-linter==6.0.0",
 ]
 infra = [
     "aws-cdk-lib==2.272.0",
@@ -40,6 +42,7 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "DJ", "C4", "SIM", "RUF"]
 [tool.ruff.lint.per-file-ignores]
 "app/**/tests/**" = ["S101", "S105", "S603"]
 "app/tests/**" = ["S101", "S105", "S603"]
+"app/*/migrations/**" = ["RUF012"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -59,13 +62,13 @@ addopts = "-ra --strict-markers -m 'not live'"
 markers = ["live: needs the Compose database (make test-live)"]
 
 [tool.importlinter]
-root_packages = ["config", "health", "shell"]
+root_packages = ["config", "health", "shell", "jobs"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Apps do not reach into config internals"
 type = "forbidden"
-source_modules = ["health", "shell"]
+source_modules = ["health", "shell", "jobs"]
 forbidden_modules = ["config"]
 
 [[tool.importlinter.contracts]]
@@ -75,11 +78,17 @@ source_modules = ["config", "health", "shell"]
 forbidden_modules = ["psycopg"]
 
 [[tool.importlinter.contracts]]
+name = "Apps other than jobs do not import Procrastinate (spec D5)"
+type = "forbidden"
+source_modules = ["health", "shell"]
+forbidden_modules = ["procrastinate"]
+
+[[tool.importlinter.contracts]]
 name = "config sits above the apps"
 type = "layers"
-layers = ["config", "health | shell"]
+layers = ["config", "health | shell | jobs"]
 
 [[tool.importlinter.contracts]]
 name = "App modules are independent of each other"
 type = "independence"
-modules = ["health", "shell"]
+modules = ["health", "shell", "jobs"]
