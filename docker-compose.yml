@@ -37,5 +37,18 @@ services:
       db:
         condition: service_healthy
 
+  worker:
+    build: .
+    command: python app/manage.py runworker
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?set in .env}
+      DATABASE_URL: postgres://skiw_app:${SKIW_APP_PASSWORD:?set in .env}@db:5432/${POSTGRES_DB:?set in .env}
+    # The image's HEALTHCHECK probes the web port, which the worker does not serve.
+    healthcheck:
+      disable: true
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   db-data:

@@ -3,6 +3,15 @@ revision = 3
 requires-python = "==3.12.*"
 
 [[package]]
+name = "appdirs"
+version = "1.4.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/d8/05696357e0311f5b5c316d7b95f46c669dd9c15aaeecbb48c7d0aeb88c40/appdirs-1.4.4.tar.gz", hash = "sha256:7d5d0167b2b1ba821647616af46a749d1c653740dd0d2415100fe26e27afdf41", size = 13470, upload-time = "2020-05-11T07:59:51.037Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/00/2344469e2084fb287c2e0b57b72910309874c3245463acd6cf5e3db69324/appdirs-1.4.4-py2.py3-none-any.whl", hash = "sha256:a841dacd6b99318a741b166adb07e19ee71a274450e68237b4650ca1055ab128", size = 9566, upload-time = "2020-05-11T07:59:49.499Z" },
+]
+
+[[package]]
 name = "asgiref"
 version = "3.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -121,6 +130,18 @@ wheels = [
 ]
 
 [[package]]
+name = "croniter"
+version = "6.2.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/37/57/2e2a65aee2a70483cb28e2b7e15a072d00a523207593b44400d4717bb100/croniter-6.2.4.tar.gz", hash = "sha256:fc124f751b1b04805c2a04b061898b436b45ab2320b045e1e052ea895de65189", size = 166267, upload-time = "2026-07-10T09:52:59.955Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cd/ba/d678e5bd329646ca51d3c92addbc77804e86d21f4b6b6a027218e6abb010/croniter-6.2.4-py3-none-any.whl", hash = "sha256:8ef3d544107a5c05a150a2d78f8bf5a8eb9c5c4d93405a736b824109574e3f4d", size = 46677, upload-time = "2026-07-10T09:52:58.425Z" },
+]
+
+[[package]]
 name = "django"
 version = "5.2.17"
 source = { registry = "https://pypi.org/simple" }
@@ -132,6 +153,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d5/d8/43e9d000519adceb189620b6869ff88031e046df91c2e9da72f8f6918399/django-5.2.17.tar.gz", hash = "sha256:9d4d93be539a18ab80d058eb515900e10951e04c537c5a6b394fc49528d3251f", size = 10889740, upload-time = "2026-08-04T15:04:03.173Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/df/f8/ce120525ca78f12b07daf65786679c5d0b54a75285a8958d3ae55e39da35/django-5.2.17-py3-none-any.whl", hash = "sha256:f04fb3b36ee119e1af4fa1d397d5fd6cf12700f49321e84d4f4c642c5b1973db", size = 8315563, upload-time = "2026-08-04T15:03:59.1Z" },
+]
+
+[[package]]
+name = "django-migration-linter"
+version = "6.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "appdirs" },
+    { name = "django" },
+    { name = "toml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5c/0c/fed1d01477ecb8547750df6b4922129cbf4bab26433df77c81fa77da06df/django_migration_linter-6.0.0.tar.gz", hash = "sha256:b7fdd4fe55862795378d99b4d8d80d454408c22647909d0fa533b63f9545c63e", size = 35917, upload-time = "2026-01-04T13:08:26.454Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/65/22/1f99542f53f0f55ad766ed2fe4c788f1a6120dbdbb2d05446c5127dfb84e/django_migration_linter-6.0.0-py3-none-any.whl", hash = "sha256:8fbac51a77fbe86d814e2b996b80aa831d21499982085cda1cacc84b7b4971a5", size = 27660, upload-time = "2026-01-04T13:08:23.819Z" },
 ]
 
 [[package]]
@@ -346,6 +381,29 @@ wheels = [
 ]
 
 [[package]]
+name = "procrastinate"
+version = "3.10.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "asgiref" },
+    { name = "attrs" },
+    { name = "croniter" },
+    { name = "packaging" },
+    { name = "psycopg", extra = ["pool"] },
+    { name = "python-dateutil" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3a/8a/ab3a9841b38b9349eb3cb871c47d0683ce4811669c9f0fb7b889343bea8f/procrastinate-3.10.0.tar.gz", hash = "sha256:3668da769088682abf91b8c760de467be1203218411872f1a26ac7515d4f980d", size = 91101, upload-time = "2026-09-23T21:22:57.59Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/52/51/c7ea18faef04260a1e67cb60c2c815ff0f2792c323c4f3a733478cbfc883/procrastinate-3.10.0-py3-none-any.whl", hash = "sha256:949ad25b4377c30e03a9d0e053d15dfa47ef02b3f12ae8a7f3254686183c152c", size = 155244, upload-time = "2026-09-23T21:22:55.873Z" },
+]
+
+[package.optional-dependencies]
+django = [
+    { name = "django" },
+]
+
+[[package]]
 name = "psycopg"
 version = "3.3.6"
 source = { registry = "https://pypi.org/simple" }
@@ -508,6 +566,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "django" },
     { name = "gunicorn" },
+    { name = "procrastinate", extra = ["django"] },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "uvicorn" },
     { name = "uvicorn-worker" },
@@ -515,6 +574,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "django-migration-linter" },
     { name = "django-stubs" },
     { name = "django-stubs-ext" },
     { name = "import-linter" },
@@ -531,6 +591,7 @@ infra = [
 requires-dist = [
     { name = "django", specifier = "==5.2.17" },
     { name = "gunicorn", specifier = "==26.2.0" },
+    { name = "procrastinate", extras = ["django"], specifier = "==3.10.0" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = "==3.3.6" },
     { name = "uvicorn", specifier = "==0.54.0" },
     { name = "uvicorn-worker", specifier = "==0.4.0" },
@@ -538,6 +599,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "django-migration-linter", specifier = "==6.0.0" },
     { name = "django-stubs", specifier = "==5.2.9" },
     { name = "django-stubs-ext", specifier = "==5.2.9" },
     { name = "import-linter", specifier = "==2.15" },
@@ -555,6 +617,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5f/d3/3f06a1006f2261d1342aefb3c71eed02f5d4ca5bdbecd86ebc12ad38306e/sqlparse-0.6.0.tar.gz", hash = "sha256:113c35c75365ab9cc9c7231d68c6428fb11c085fc8e9eb1ad659b7ddbf6cd2b9", size = 178477, upload-time = "2026-08-13T19:16:06.396Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d9/50/f00935da0ec7cbf325f8dc4f772ae46fbc7b672dd62876e73f0a94adda57/sqlparse-0.6.0-py3-none-any.whl", hash = "sha256:b861c0288ce2fa56209a9a6412d2e066ac664b3873b89c26c9d8415e8e32996f", size = 50070, upload-time = "2026-08-13T19:16:04.062Z" },
+]
+
+[[package]]
+name = "toml"
+version = "0.10.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/be/ba/1f744cdc819428fc6b5084ec34d9b30660f6f9daaf70eead706e3203ec3c/toml-0.10.2.tar.gz", hash = "sha256:b3bda1d108d5dd99f4a20d24d9c348e91c4db7ab1b749200bded2f839ccbe68f", size = 22253, upload-time = "2020-11-01T01:40:22.204Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/6f/7120676b6d73228c96e17f1f794d8ab046fc910d781c8d151120c3f1569e/toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b", size = 16588, upload-time = "2020-11-01T01:40:20.672Z" },
 ]
 
 [[package]]

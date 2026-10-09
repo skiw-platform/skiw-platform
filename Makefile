@@ -2,6 +2,7 @@
 
 export PYTHONPATH := app
 NODE_MAJOR := $(shell node -p "process.versions.node.split('.')[0]" 2>/dev/null)
+SEMGREP_VERSION := 1.179.0
 TOOL_ENV := DJANGO_SECRET_KEY=tooling-only-not-a-secret DATABASE_URL=postgres://u:p@localhost:5432/db
 
 check-node:
@@ -15,6 +16,8 @@ lint: check-node
 	uv run ruff check .
 	uv run ruff format --check .
 	$(TOOL_ENV) uv run lint-imports
+	uvx semgrep==$(SEMGREP_VERSION) --config semgrep/ --metrics=off --error app
+	uvx semgrep==$(SEMGREP_VERSION) --test --metrics=off semgrep/
 	pnpm -C web lint
 
 typecheck: check-node
@@ -43,10 +46,14 @@ build: web-build
 	cp .env.example .env
 
 dev: .env web-build
+	docker compose up -d --wait db
+	$(MAKE) migrate
 	docker compose up --build
 
 e2e: .env web-build
-	docker compose up -d --build --wait
+	docker compose up -d --wait db
+	$(MAKE) migrate
+	docker compose up -d --build --wait app
 	pnpm -C web exec playwright test
 
 db-up: .env
@@ -55,6 +62,7 @@ db-up: .env
 migrate: .env
 	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py migrate
 	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py makemigrations --check --dry-run
+	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py lintmigrations --settings config.settings_migration_lint --warnings-as-errors --exclude-apps procrastinate --no-cache --quiet ignore
 
 clean:
 	docker compose down -v
