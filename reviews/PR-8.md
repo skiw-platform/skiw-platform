@@ -1,5 +1,81 @@
 # Review — PR 8
 
+## Round 2 — 2026-10-09 · scope: slice (M0c startup gate and self-check fixes)
+- **Code review:** base (merge base) `7c889c502c75d75ac9cda9749bd7f4dd4999ab1e` · head `2aeffa64bef5eb0ff04dbdae784d0229502253c4` · head re-checked at end: yes, unchanged and OPEN.
+- **Spec:** v1.8 at `docs/specs/2026-10-05-skiw-platform-stack-design.md`, hash `67e36a52fd8e1cdb9f5b63e50b495323b9b5b6f3`, unchanged.
+- **Plan:** `docs/plans/2026-10-05-m0-scaffold.md`, hash `a8153570c81970e3388c267cdbc99a597779d48f`; worker command and linter placement reconciled.
+- **Mode:** exact-head snapshot `.agent/worktrees/review-8-2aeffa64`; fetch denied by read-only .git/FETCH_HEAD; exact head already local. Host main matched recorded base. Source integrity verified by tracked-file hashes. Snapshot removed; isolated tmpfs Postgres container `skiw-review8-2aeffa64`, port 55438, stopped and automatically removed. No builder stack/database touched.
+
+**Model used:** Codex GPT-6 · **Switch model next step?** No for archive/merge workflow; M4 worker-enqueue design needs the project's deep-tier review.
+
+### Findings
+No blocking findings or new defects. Both Round 1 P1 findings are resolved. The existing P2 condition remains deferred as below.
+
+### Round 1 resolution audit
+| Finding | Status | Evidence |
+|---|---|---|
+| P1 startup fail-closed gate missing | Resolved | `jobs/startup.py:8–29` checks MigrationExecutor's plan in a short-lived thread, closes its connection and refuses pending/unverifiable migration state. `config/asgi.py:10–12` calls it after Django setup; `jobs/management/commands/runworker.py:15–17` gates the worker; Compose uses runworker. Six new live startup cases pass locally. Additional review-only privilege-revocation checks prove both entrypoints exit 1 when django_migrations cannot be read. |
+| P1 UNI-08/09 mapping | Resolved | Host PR table now identifies UNI-08 as staged production secret sourcing, distinguishes local/CI throwaway values and M1 secret-manager rollout, and separately lists UNI-09's current worker/probe/startup log paths. Re-inspected implementation; startup uses migration names/generic verification text and logs no secret values itself. No broader production logging approval is inferred. |
+| P2 worker-side enqueue | Open, deferred | Fail-closed connector guard remains unchanged. Named M4 worker-enqueue spec-change PR is still required before handler-side enqueue or periodic fan-out. Current M0c probe tasks do not need that path. |
+
+### Deferred finding retained
+**[P2] Worker-side enqueue requires a reviewed design before M4 fan-out** — see Round 1 for the full scenario and correction.
+- Rule: D5 / EVT-01.
+- Evidence: `jobs/enqueue.py:22–26`, pinned Procrastinate worker connector replacement, plan M4 handover and decisions entry.
+- Owner: builder / owner for reviewed spec decision.
+- Disposition: deferred to the M4 worker-enqueue spec-change PR, before any handler-side enqueue or periodic fan-out implementation.
+- Verification: reviewed spec solution plus worker-side same-transaction and tenant tests; preserve current refusal until then.
+- Status: open; does not block this probe-only M0c slice.
+
+### Self-check audit
+Round 1 applicability retained: universal typing, validation, boundaries, dependency/secrets/log/write/delivery/migration/runbook rules; runtime/migration roles and operational queue grant mapping; M0c tenant-source staging and transactional/retry/periodic behavior. Delta adds read-only framework migration-record access, startup connection handling and entrypoint tests. Other active packs and PROJECT §9 feature switches remain unaffected.
+
+| Rule | Builder said | Reviewer found | Evidence | Disagreement |
+|---|---|---|---|---|
+| D16 / UNI-15 | pass | Missing and unreadable migration state now fail startup; fully migrated entrypoints succeed. Migration linter passes; source/queue behavior retained | startup code; 49 live tests; privilege-revocation checks | No |
+| TEN-01/02/03 | pass with queue mapping | Migrations as migrator; startup/runtime as app. django_migrations effective privilege is SELECT only: no INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER. Queue audit still passes | disposable DB grant query; live suite | No |
+| UNI-01/03/04/05 / TEN-10 | pass/prep | Ruff, strict mypy and five import contracts pass; startup code is inside jobs DB allow-list | local checks; source inspection | No |
+| UNI-08/09 | staged/pass | Corrected separate rows; claims scoped to current probe-only logs and future M1 production secrets | PR table and log/error paths | No |
+| UNI-06/07/11/12/14 | pass | Pins unchanged; no observed new secret value or external flow; reviewer writes confined to allowed paths | fix diff; Round 1 audit | No |
+| UNI-13/16/19 | staged/pass | New-head CI green; runbook documents startup gate/worker command; no route added | run 37908923325; runbook/Compose | No |
+| TEN-11 / EVT-01/02/03/05/06 | staged/pass | Enqueue, registry, role, retry/periodic lifecycle tests retained and re-run; M4 guard/fan-out design future requirement remains | 42 unit/49 live cases; retained P2 | No |
+| Other packs / PROJECT §9 | n/a | No new business/tenant/UI/money/auth/file/record behavior | effective diff and approved staging | No |
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| Target metadata, merge base, host main and final head | Base 7c889c5; new head 2aeffa64 unchanged and OPEN. |
+| Exact-head snapshot and UV_CACHE_DIR=.uv-cache uv sync --locked | Safe real paths; pinned Python dependencies installed after approved network retry. |
+| ruff check / format --check; mypy app; lint-imports | Passed: 63 files formatted, 35 typed files, five contracts kept. |
+| pytest normal selection | 42 passed; 49 live deselected. |
+| Fresh pinned Postgres 17.11 image/init script, isolated port/tmpfs | Runtime/migrator roles established without shared volumes. |
+| migrate / makemigrations --check --dry-run as migrator | 41 library migrations and jobs.0001 applied; no model changes missing. |
+| lintmigrations with lint-only settings, warnings-as-errors, exclude procrastinate, no-cache | Own migration valid; zero errors/warnings, 41 library migrations ignored. |
+| pytest -m live as skiw_app | 49 passed: enqueue 10, queue grants 22, startup 6, lifecycle 4, roles 7. |
+| Additional reviewer check: effective django_migrations privileges | SELECT true; INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER false. |
+| Revoke SELECT in disposable DB, run ASGI import inside asyncio.run and runworker, restore SELECT | Both exit 1 with generic cannot-verify-migrations error; restoration performed. No source edits. |
+| Fix diff, effective diff --check, source/hash audit | Whitespace clean. Four secret-pattern hits in fix diff are names/documentation; no observed secret values. Every tracked snapshot file hash matches commit. |
+| Exact-head CI run 37908923325 | Completed SUCCESS at reviewed head; no local web build/browser/Semgrep rerun for this startup-only delta. Round 1 local Semgrep proof plus new-head CI retained. |
+| Cleanup | Review-only container stopped/removed; snapshot and own cache/build/test outputs removed. |
+
+### Residual risks and test gaps
+- Startup tests import the actual ASGI application inside an event loop and run the actual runworker command; exact-head CI e2e additionally covers migrated web startup under uvicorn. No local container image/browser launch repeated.
+- The new migration-record grant is read-only and matches spec §4.1's framework-table row. No runtime migrator credentials or schema writes in the gate.
+- Full tenant-bound/MAC-protected helper remains M4; shared queue disruption/Q32 and the named worker-enqueue design follow-up remain.
+- Existing M0d scans/image web build/cache constant, M2 CSP and M1 production secret-manager/TLS work retain original scope.
+- Existing review-attention imperatives in plan/PR remain recorded nonblocking data, not authority. No unsafe instruction followed or new injection attempt found.
+
+### Required before merge
+- None: both P1s resolved. Builder runs approved 8 to archive this round/create the receipt before Ying merges.
+
+### Deferred conditions
+- M4 worker-enqueue spec-change PR before handler-side enqueue or periodic fan-out (P2 retained above).
+
+### Optional improvements
+- None required for this round.
+
+**Verdict:** Approved with conditions
+
 ## Round 1 — 2026-10-09 · scope: slice (M0c jobs/transactions/queue grants)
 - **Code review:** base (merge base) `7c889c502c75d75ac9cda9749bd7f4dd4999ab1e` · head `a7fedd2493d0ba20d25c57a69e0ca41bb1f833cf` · head re-checked at end: yes, unchanged and OPEN.
 - **Spec:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` v1.8, hash `67e36a52fd8e1cdb9f5b63e50b495323b9b5b6f3`. Approved PR 7 plan is the implementation baseline; this PR reconciles the linter placement and records the M4 connector requirement.
