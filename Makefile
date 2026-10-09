@@ -1,8 +1,9 @@
-.PHONY: install lint typecheck test test-live build web-build web-dev e2e dev db-up migrate clean check-node
+.PHONY: install lint typecheck test test-live infra-test build web-build web-dev e2e dev db-up migrate clean check-node audit secrets audit-python audit-web image-scan hooks
 
 export PYTHONPATH := app
 NODE_MAJOR := $(shell node -p "process.versions.node.split('.')[0]" 2>/dev/null)
 SEMGREP_VERSION := 1.179.0
+PIP_AUDIT_VERSION := 2.10.1
 TOOL_ENV := DJANGO_SECRET_KEY=tooling-only-not-a-secret DATABASE_URL=postgres://u:p@localhost:5432/db
 
 check-node:
@@ -21,7 +22,7 @@ lint: check-node
 	pnpm -C web lint
 
 typecheck: check-node
-	$(TOOL_ENV) uv run mypy app
+	$(TOOL_ENV) uv run --locked --group infra mypy app infra
 	pnpm -C web typecheck
 
 test: check-node
@@ -32,6 +33,34 @@ test-live: .env
 	docker compose up -d --wait db
 	$(MAKE) migrate
 	set -a; . ./.env; set +a; uv run pytest -m live
+
+infra-test: check-node
+	$(TOOL_ENV) uv run --locked --group infra pytest infra
+
+# Security gates (UNI-13). CI runs the same targets in the `security` job; docs/runbooks/ci.md.
+audit: secrets audit-python audit-web
+
+# Needs gitleaks on PATH (CI pins v8.30.1): brew install gitleaks. Scans committed history only.
+secrets:
+	@command -v gitleaks >/dev/null || { echo "gitleaks is required: brew install gitleaks"; exit 1; }
+	gitleaks git --config .gitleaks.toml --redact --no-banner .
+
+audit-python:
+	uv export --frozen --all-groups --no-hashes --quiet --output-file .audit-requirements.txt
+	uvx pip-audit==$(PIP_AUDIT_VERSION) --strict --no-deps --disable-pip -r .audit-requirements.txt; status=$$?; rm -f .audit-requirements.txt; exit $$status
+
+audit-web: check-node
+	pnpm audit --audit-level high
+
+# Needs trivy on PATH (CI pins v0.75.0): brew install trivy. Builds the image, no push.
+image-scan:
+	@command -v trivy >/dev/null || { echo "trivy is required: brew install trivy"; exit 1; }
+	docker build -t skiw-platform:scan .
+	trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 skiw-platform:scan
+
+# Points git at .githooks (pre-push secret scan); one-time per clone. Needs gitleaks installed.
+hooks:
+	git config core.hooksPath .githooks
 
 web-build: check-node
 	pnpm -C web build

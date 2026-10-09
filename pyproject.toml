@@ -34,7 +34,7 @@ package = false
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["app"]
+src = ["app", "infra"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "DJ", "C4", "SIM", "RUF"]
@@ -42,12 +42,13 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "DJ", "C4", "SIM", "RUF"]
 [tool.ruff.lint.per-file-ignores]
 "app/**/tests/**" = ["S101", "S105", "S603"]
 "app/tests/**" = ["S101", "S105", "S603"]
+"infra/tests/**" = ["S101", "S603"]
 "app/*/migrations/**" = ["RUF012"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
-mypy_path = "app"
+mypy_path = "app:infra"
 explicit_package_bases = true
 plugins = ["mypy_django_plugin.main"]
 

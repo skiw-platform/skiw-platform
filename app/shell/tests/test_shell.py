@@ -5,6 +5,8 @@ import pytest
 from django.test import Client
 from pytest_django import Settings
 
+from shell.views import ASSET_CACHE_SECONDS
+
 
 @pytest.fixture
 def dist(tmp_path: Path, settings: Settings) -> Path:
@@ -43,7 +45,7 @@ def test_assets_are_served_with_long_immutable_caching(dist: Path) -> None:
     response = Client().get("/assets/index-abc.js")
     assert response.status_code == 200
     assert "immutable" in response["Cache-Control"]
-    assert "max-age=31536000" in response["Cache-Control"]
+    assert f"max-age={ASSET_CACHE_SECONDS}" in response["Cache-Control"]
 
 
 @pytest.mark.parametrize(
