@@ -19,7 +19,7 @@ Applies from M0a. Production deployment, rollback and restore runbooks arrive wi
 | `make typecheck` | mypy (strict, django-stubs) and `tsc` |
 | `make test` | pytest (no database needed) and vitest |
 | `make web-build` / `make web-dev` | production build of the shell into `web/dist` / Vite dev server with `/healthz` and `/api` proxied to `:8000` |
-| `make e2e` | builds the shell, starts the database and migrates, starts Compose, runs Playwright on desktop and mobile widths (axe, keyboard, overflow, no-JS, console errors) |
+| `make e2e` | builds the shell, starts the database and migrates, starts the app (not the worker), runs Playwright on desktop and mobile widths (axe, keyboard, overflow, no-JS, console errors) |
 | `make test-live` | starts the database, migrates as `skiw_migrator`, then runs the `live` tests as `skiw_app`: role checks, `jobs.enqueue_in_tx` commit/rollback/visibility and refusals, the queue-grant audit and the worker lifecycle |
 | `make db-up` | starts only the database and waits until healthy |
 | `make migrate` | runs migrations with `MIGRATION_DATABASE_URL` (`skiw_migrator`), then `makemigrations --check`, then `lintmigrations --warnings-as-errors` on the project's own apps (django-migration-linter; Procrastinate's migrations are excluded) |

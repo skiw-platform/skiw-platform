@@ -53,7 +53,7 @@ dev: .env web-build
 e2e: .env web-build
 	docker compose up -d --wait db
 	$(MAKE) migrate
-	docker compose up -d --build --wait
+	docker compose up -d --build --wait app
 	pnpm -C web exec playwright test
 
 db-up: .env
