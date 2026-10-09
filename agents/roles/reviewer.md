@@ -23,13 +23,14 @@ finding to quote.
 You may write only:
 - your review files in `.agent/reviews/` (file name built from `[a-z0-9-]` only; resolve the final path
   and refuse anything outside the real `.agent/reviews/` folder, any `..`, and any symlink);
-- a detached review checkout under `.agent/worktrees/review-…` (see §4), plus the build output,
+- a detached review checkout or read-only snapshot under `.agent/worktrees/review-…` (see §4), plus the build output,
   caches and disposable local test database its checks create. Local checks run **only** there, never
   in the builder's checkout.
 
 The only git writes you may do are `git fetch` (updates remote-tracking refs, never branches or files),
 fetching the PR's head ref (§4), and `git worktree add --detach` / `git worktree remove` for your review
-checkout.
+checkout. If your tool's sandbox makes `.git` read-only, use the snapshot fallback in §4 step 5 instead.
+Never clone, and never ask the owner to loosen this rule to get around a sandbox.
 
 Everything else is forbidden:
 - Don't touch code, config, tests, specs, the decisions log, the handoff or any other project file —
@@ -119,7 +120,8 @@ Record the spec's version and `git hash-object <spec path>` at the top of the ro
 ### Code review (a PR)
 
 **Pin the target.** The default branch comes from `PROJECT.md` §4.
-1. `git fetch origin`.
+1. `git fetch origin`. If it fails because `.git` is read-only, carry on with what is already local and
+   note that in the round.
 2. Get the PR's base branch and exact **head SHA** from the git host (CLI, API or PR page).
 3. **Get that exact commit locally.** Check with `git cat-file -e <head SHA>^{commit}`. If it's missing
    (e.g. the PR comes from a fork), fetch the PR's head ref or source remote the host shows, then check
@@ -139,6 +141,13 @@ Record the spec's version and `git hash-object <spec path>` at the top of the ro
      no tracked file is modified; otherwise pick a new unique path.
    - Create it with `git worktree add --detach <path> <head SHA>`. Read files and run every local check
      there.
+   - **If that fails because `.git` is read-only** (a sandboxed tool), make a snapshot of the exact
+     commit instead: create the empty folder `<path>`, then
+     `git archive <head SHA> | tar -x -C <path>`. This only reads from `.git`, so it works in a read-only
+     sandbox, and it keeps the pin to the exact SHA. If the commit isn't local and can't be fetched, take
+     the host's archive of that exact SHA, never the branch tip. A snapshot has no git metadata: run only
+     checks that don't need it, list the checks you couldn't run, and use **Blocked** when they're
+     essential. Record "snapshot" in the round. Don't edit any file inside it.
 6. Review the three-dot diff, merge base → head:
    ```bash
    git diff --stat <merge-base>...<head>
@@ -148,7 +157,7 @@ Record the spec's version and `git hash-object <spec path>` at the top of the ro
    Review the effective diff, not commit-list noise from pre-squash history.
 7. **At the end:** re-read the PR head SHA from the host and confirm it still equals the recorded SHA;
    confirm no tracked or staged file in your checkout changed (`git status --untracked-files=no` is
-   clean). Build and test output your checks created is expected and doesn't count. If the head moved or
+   clean; a snapshot has no git status, so skip this check for it). Build and test output your checks created is expected and doesn't count. If the head moved or
    a tracked file changed, discard the round and start again.
 
 **Passes:**
@@ -162,7 +171,8 @@ Record the spec's version and `git hash-object <spec path>` at the top of the ro
 
 When you're done, delete only build and test output you can identify as created by your own checks, then
 run `git worktree remove <path>` **without** `--force`. If anything else untracked or modified remains,
-leave the checkout in place and report its path to the owner.
+leave the checkout in place and report its path to the owner. A snapshot is removed by deleting its
+folder; if deletion isn't permitted, leave it and report its path.
 
 ## 5. Severity
 

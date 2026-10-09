@@ -2,6 +2,14 @@
 
 <!-- Committed. Newest at the top. One entry per decision. A settled decision is reopened only by the owner. -->
 
+## 2026-10-08 — Agent kit upgraded 1.7.1 → 1.7.3
+- **Decision:** The kit files `agents/README.md`, `agents/START.md` and `agents/roles/reviewer.md` are replaced with kit 1.7.3 (owner, `go` on 2026-10-08). `agents/PROJECT.md` "Kit version used" is now 1.7.3; nothing else in that file changed. 1.7.2 adds Part B defaults (setup applies listed defaults and reports them). 1.7.3 adds the reviewer snapshot fallback for a read-only `.git`: if `git worktree add` fails, the reviewer works from an exact-commit snapshot. Checked by sha256: README `5d4b6f2a…`, START `93ec136e…`, reviewer `29febdaf…` (the hashes the owner gave). The other 17 kit files are byte-identical to the committed 1.7.1 copies (git shows them unmodified); no manifest file was available to compare.
+- **Why:** The reviewer sandbox cannot write `.git/worktrees`, which blocked reviews of PR 1 and PR 4 round 1.
+- **Alternatives rejected:** Rebasing PR 4 to carry the upgrade (the PR was already approved; a new head would void its receipt).
+- **Scope / affects:** `agents/` only. No CRM behaviour change.
+- **Exception to a rule?** no
+- **Decided by:** owner
+
 ## 2026-10-07 — Brand colours and the reviewer environment
 - **Decision:** (1) **Brand colours (owner, 2026-10-07, option A):** navy `#001C30` and gold `#FFB300`, read from https://www.skiwealth.com/ (home page CSS), on the Fernly-style layout. Navy is the primary (sidebar, brand text); gold is the active item and the skip link, always with navy text on it. Gold is never text on white (about 1.8:1) and never a focus ring on white: the focus ring is navy, and gold inside the navy sidebar. The earlier Doc2 lime is dropped. The site font (Poppins) is not adopted; the system font stack stays until the owner decides. Spec D2 wording is in PR 3 (spec v1.8). (2) **Reviewer environment (owner, 2026-10-06, PR 1 round 2, option A):** the reviewer needs a detached checkout and a working browser/Docker. Until that is fixed the reviewer uses an isolated local clone, and CI (`make test-live`, `make e2e`) is the independent runtime proof.
 - **Why:** Owner choice; contrast rules A11Y-02 and FE-13 (tokens only in `web/src/styles.css`).
