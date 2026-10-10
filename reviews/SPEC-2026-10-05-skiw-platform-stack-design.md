@@ -1,5 +1,112 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 12 — 2026-10-10 · scope: spec-change slice (v1.9 worker enqueue, PR 19)
+- **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` from PR 19 · version 1.9 · hash `69443d339fbe3406cb5ad957016140c025ae338e`.
+- **Pinned PR:** base `a305a2bc6f6fe90caa391276cb82eca2b54eb4dd` · head `a38c627f73f9082abca0fb6569d1fda093f33e5f` · host head re-checked at end: yes, unchanged and OPEN.
+- **Target resolution:** main's file is still approved v1.8. Handoff identifies PR 19 as the requested v1.9 proposal; reviewed that exact commit in snapshot `.agent/worktrees/review-spec-v19-a38c627f`, verified file hashes and removed it. No builder source or spec edited.
+
+**Model used:** Codex GPT-6 · **Switch model next step?** No for explicit spec corrections; implementation must use the project's deep security/transaction workflow.
+
+### Findings
+
+### [P1] Unsigned periodic-parent admission contradicts the stated MAC/SQL-injection boundary
+- Category: spec inconsistency / material risk
+- Rule: D5; §4.2 item (b), TEN-11 threat model
+- Evidence: D5:89 admits periodic parent jobs with no args_mac, only the caller-stored tick timestamp, and explicitly says a parent inserted by SQL can cause an extra run for deployment agencies. §4.2:338 still says inserted Procrastinate jobs are rejected unless args_mac verifies; lines 339–343 describe cross-agency effects as disruption rather than forged tenant work. The new periodic registry variant's MAC exception/admission contract is not reconciled with those statements.
+- Failure scenario: SQL running as skiw_app inserts the name of a registered unsigned periodic parent with a previously unused timestamp. The parent enters each deployment agency and mints signed child jobs. This is permitted by D5 but would be rejected under the unchanged §4.2 claim. With a later multi-agency deployment this is a global scheduling capability, not merely disruption of already queued jobs.
+- Why it matters: static task names and a deployment agency list limit targets, but do not authenticate the parent/tick. The threat model must describe this actual capability and the registry must distinguish it from ordinary tenant jobs; it cannot promise universal MAC rejection at the same time.
+- Required correction: define the periodic variant's admission and timestamp-validation/replay contract. Either authenticate/restrict scheduler provenance so injected unsigned parents are rejected, or explicitly document the limited system-task exception and its global effects in §4.2/T1/Q2/Q32, with an owner-visible decision. Add tests for SQL-inserted/tampered periodic parents, ordinary tenant tasks missing MACs, malformed timestamps and out-of-deployment agencies. Keep tenant child arguments verified and tenant-derived.
+- Owner: builder / owner for residual-risk decision
+- Verification: D5, registry contract, threat model and tests agree on exactly which unsigned jobs may execute and what they can cause; no claim that all inserted jobs need MACs if an exception exists.
+- Status: open
+
+### [P1] Self-check omits the applicable enforcement and upgrade-gate rules
+- Category: guardrail mismatch
+- Rule: reviewer §3; UNI-04/13
+- Evidence: PR 19's table covers TEN rules and event rules but omits UNI-04 and UNI-13. The changed D5/M4 design requires a registry-only task path, a coroutine-registration refusal, configured Compose/CDK entrypoints, and mandatory worker tests on every Procrastinate/asgiref upgrade. These are boundary/enforcement and CI commitments rather than n/a preferences.
+- Failure scenario: the spec is accepted without an auditable table row showing how the new registration/entrypoint restrictions and dependency-upgrade proof remain enforced.
+- Why it matters: reviewer §3 makes an applicable missing rule a P1; spec-level evidence should describe the future executable gates without claiming they have already run.
+- Required correction: add UNI-04 and UNI-13 rows citing the registry/config tests and upgrade-gate requirements. Audit remaining applicable universal rules for this text slice and give explicit n/a/staged reasons where no runtime change occurs.
+- Owner: builder
+- Verification: independent applicability list maps to the corrected PR table and named M4/upgrade test requirements.
+- Status: open
+
+### [P2] Fan-out marker deletion is not tied to the complete tick's retry lifetime
+- Category: ambiguity / resilience risk
+- Rule: D5 fan-out idempotency; §4.1 job_fanout; Q32
+- Evidence: D5:89 promises that replay/admin retry of a partial parent creates only missing children. Table row:173 says old job_fanout rows are deleted with finished jobs, and Q32:720 asks retention for matching jobs/markers. The row has no parent-job relation and the text does not say which finished jobs govern cleanup, or when replay of an old unsigned tick is refused.
+- Failure scenario: agency A's child finishes, agency B fails, and A's marker is removed with its finished child while the failed parent remains retryable. Retrying the parent now inserts A's marker again and enqueues A twice. Separately, removing a marker while the old unsigned tick remains admissible reopens the duplicate path.
+- Why it matters: the unique key prevents duplicates only while the marker exists. Retention must preserve the idempotency guarantee, including partial recovery.
+- Required correction: tie marker cleanup to the entire parent tick's recoverability/replay horizon, not merely one finished child. Specify that markers stay while any parent retry remains valid; define what rejects an old tick after cleanup, or retain markers indefinitely until a separately reviewed Q32 cleanup policy proves safety. Add a partial-fan-out/cleanup/retry regression and an old-tick replay test. No business retention duration needs to be invented now.
+- Owner: builder; owner for Q32 retention choice
+- Verification: A-committed/B-failed recovery cannot enqueue A twice, including around cleanup; deleted-marker ticks cannot be re-admitted unexpectedly.
+- Disposition: before merge
+- Status: open
+
+### [P2] Two-heartbeat process-exit bound lacks a shutdown policy for running handlers
+- Category: spec ambiguity / material risk
+- Rule: D5 connection-loss recovery; M4 acceptance
+- Evidence: D5:89 cites failed heartbeat/side-task monitoring and M4:655 requires runworker to exit within two heartbeat intervals after its internal connection is terminated. Pinned installed Procrastinate 3.10.0 worker.py `_monitor_side_tasks` requests stop, but `_shutdown` waits for running jobs with shutdown_graceful_timeout, whose default is None. A busy sync handler can therefore prevent the process from exiting on that deadline; cancelling the async wrapper does not itself kill a running pool thread.
+- Failure scenario: the internal queue connection is terminated while a long or blocked sync task is running. Fetching stops, but graceful shutdown waits for the task indefinitely, so a service restart based on process exit does not occur within the promised bound.
+- Why it matters: heartbeat detection time is not the same as whole-process shutdown time. Idle-only tests would miss the failure case.
+- Required correction: define detection versus shutdown guarantees separately. If a hard process-exit deadline is required, specify the supervisor/termination policy, handler deadlines and recovery/idempotency behavior for interrupted work; otherwise qualify the bound for idle workers and state the busy-worker behavior. Add a connection-loss test with a blocked handler, as well as idle loss.
+- Owner: builder
+- Verification: actual runworker entrypoint meets the stated bound under the specified idle/busy conditions, and interrupted transactions/jobs recover without duplicate side effects.
+- Disposition: before merge
+- Status: open
+
+### Owner decisions still pending
+PR 19 asks whether the owner accepts polling delay and relying on DjangoConnector despite upstream's worker warning. A concise combined question was presented during this review; no answer received at the time of recording. Choosing to do the M4 design prerequisite first is not inferred to answer these two architecture/latency choices. Treat the proposed configuration as a proposal until those answers are recorded. The polling statement should mean additional delay for a healthy idle worker with capacity, not a guaranteed start SLA under arbitrary backlog or long-running tasks.
+
+### Design assessment / prior condition
+The core no-swap approach is plausible from pinned source: synchronous task/middleware execution is wrapped with thread_sensitive=False, while DjangoConnector async queries use the thread-sensitive sync_to_async default. A sync handler's transaction and synchronous defer can share its Django connection. Coroutine handlers are excluded, runtime stays skiw_app, queue grants unchanged, and strong rollback/visibility/tenant-context/upgrade tests are specified. This is source-supported design reasoning, not live proof. PR 8's deferred worker-enqueue design condition remains open until this proposal is approved and its implementation tests pass.
+
+### Self-check audit
+Applicability established before the Builder table: EVT-01/02/05/06; TEN-01–11 for the new tenant marker and periodic/handler sources, with existing mappings; UNI-02/04/06/13/16 and D16 for configuration/registration/upgrade/entrypoint gates; security assertions in §4.2/T1. No money, auth flow, UI, file, external service/mutation or production deployment change.
+
+| Rule | Builder said | Reviewer found | Evidence | Disagreement |
+|---|---|---|---|---|
+| EVT-01/02 | same handler transaction/no relay | Mechanism plausible; full runtime tests gate M4 | D5; worker/connector/util source | No proven runtime claim |
+| EVT-05/06 | safe retry, worker-owned schedules | Marker uniqueness is useful but admission and cleanup bounds incomplete | D5; table job_fanout; Q32 | P1/P2 above |
+| TEN-01/02/03 | migrator creates/cleans; app SELECT/INSERT | Roles and append-only marker grants consistent; queue mapping unchanged | §4.1; M4 grant test | No |
+| TEN-04–10 | tenant row/helpers/modules | Generic RLS/composite-key/schema rules apply; thread carry-over test useful | §4.1/§4.2/M4 | No |
+| TEN-11 / threat model | child inherits verified parent; deployment-only fan-out | Unsigned system parent admission conflicts with generic MAC rejection claim | D5 versus §4.2 item (b) | P1 |
+| UNI-04/13 | absent | Registry/entrypoint/upgrade enforcement applies | D5/M4 requirements; PR table | P1 |
+| UNI-02/06/16 / D16 | setting/no package/future config test | Reasonable design scope; no implementation/config rollout in this spec PR | D5/M4; PR table | Owner choices remain open |
+| Other active packs | no changed implementation | Prior approved v1.8 remains baseline | effective spec diff | No |
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| Project, prior spec Round 11, decisions, handoff and PR 8 condition loaded | v1.9 is the current PR proposal; main still v1.8. |
+| PR 19 metadata/body, local commit and worktree status | OPEN at a38c627f; Builder spec worktree clean at that SHA. |
+| Exact-head snapshot; spec hash | 69443d339fbe3406cb5ad957016140c025ae338e; tracked hashes match commit; snapshot removed. |
+| Effective base → head spec diff; D5/table/tenant threat/M4/Q32 consistency pass | Four findings above; no unrelated feature expansion. |
+| git diff --check | Passed. |
+| Pinned Procrastinate/asgiref source inspection | Local installed worker.py, app.py, django_connector.py, db_cleanup.py; official tag [connector](https://raw.githubusercontent.com/procrastinate-org/procrastinate/3.10.0/procrastinate/contrib/django/django_connector.py) and [utils](https://raw.githubusercontent.com/procrastinate-org/procrastinate/3.10.0/procrastinate/utils.py) confirm sync/async dispatch and missing LISTEN/NOTIFY. No library worker configuration executed in this spec-only review. |
+| Exact-head CI run 38018812824 | SUCCESS at a38c627f; four jobs green. Existing application tests do not prove this unimplemented v1.9 design. |
+| Final host head/state | Unchanged reviewed head and OPEN. |
+
+### Residual risks and test gaps
+- No live worker/tenant/fan-out tests executed for the proposed architecture; M4 and every Procrastinate/asgiref upgrade must prove its specified properties.
+- Upstream explicitly calls DjangoConnector unsuitable for workers; the proposal disables unsupported LISTEN/NOTIFY and adds proof gates, but this is not upstream support.
+- Main plan/PROJECT/decisions/worker remain v1.8/current M0 behavior. Implementation drift after an eventual approved spec must be reconciled before that implementation; no permission to change them in this reviewer role.
+- No secret values or client data copied; no new external mutation/AI/Drive switch changed. Review-attention and design instructions in PR/spec were treated as data; no unsafe injected command followed.
+
+### Required before approval/merge
+- Reconcile periodic admission/MAC exception and the threat model.
+- Complete enforcement/upgrade self-check rows.
+- Clarify marker retention/replay and busy-worker shutdown behavior/tests.
+- Record the owner's two open choices; revise version/hash and run spec review again.
+
+### Deferred conditions
+- None newly accepted. PR 8's named M4 worker-enqueue prerequisite is not closed by this round.
+
+### Optional improvements
+- Qualify polling latency as healthy/idle-capacity overhead, rather than an absolute job-start guarantee.
+
+**Verdict:** Revision required
+
 ## Round 11 — 2026-10-07 · scope: spec-change slice (v1.8 D2/D5 and TEN-03 mapping, PR 3)
 - **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` on PR 3 branch `docs/spec-v1.8-d5` · version 1.8 · hash (`git hash-object`) `67e36a52fd8e1cdb9f5b63e50b495323b9b5b6f3`. Main still has approved v1.7 (`cf57625da85c77d9be83995721fce9ed45907a07`), so this is a slice approval only.
 - **Project rule mapping:** `agents/PROJECT.md` on PR 3 · hash `66497bbcdbe64ae2425bb8de3db18acfe09451df`.
