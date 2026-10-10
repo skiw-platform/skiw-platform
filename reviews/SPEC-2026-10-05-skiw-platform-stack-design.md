@@ -1,5 +1,63 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 16 — 2026-10-10 · scope: spec-change slice (v1.13 worker enqueue/recovery, PR 19)
+- **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` · version 1.13 · hash `e314158562214a9173e7fdbd7ec6f2a8d9355dd9`.
+- **Pinned PR:** base `a305a2bc6f6fe90caa391276cb82eca2b54eb4dd` · head `dfc67f1489549f757e01dc8415af6982450e193a` · host head re-checked at end: yes, unchanged and OPEN.
+- **Mode:** exact-commit snapshot `.agent/worktrees/review-spec-v113-dfc67f14`; all 110 tracked files hash-verified against the pinned tree, snapshot removed. No source/spec/decision/handoff edits by reviewer.
+
+### Findings
+None. No open or accepted-risk P0/P1 finding and no P2 before-merge correction. Round 15's essential owner-choice evidence is now recorded; the v1.12 technical design remains intact.
+
+### Round 15 resolution audit
+| Pending evidence | Status | Independently inspected evidence |
+|---|---|---|
+| Q33(a) idle-worker polling delay | Resolved | D5:89 and Q33:731 record owner acceptance on 2026-10-10 of up to default 5 seconds added delay for a healthy idle worker with free capacity; no backlog start guarantee. |
+| Q33(b) DjangoConnector worker | Resolved | D5:89, Q33:731 and DECISIONS:5–12 record owner acceptance despite upstream's warning, conditional on mandatory M4 tests and the UNI-13 Procrastinate/asgiref upgrade gate. Neither source claims upstream support. |
+| Q2/Q32 unsigned periodic exception | Resolved | D5:89, §4.2:348–357, T1:568, Q2:700, Q32:730 and DECISIONS:5–12 consistently record single-agency v1 acceptance and prohibit onboarding a second agency before signed/provenance-checked periodic parents. Other tenancy/queue-retention choices remain open rather than being silently answered. |
+
+These are recorded owner decisions, not acceptance inferred from the review request or from the reviewer's earlier recommendations. No design mitigation was removed in recording them.
+
+### Self-check audit
+Applicability retained from Rounds 14–15: atomic handler/fan-out enqueue, retry/release/schedule semantics; tenant source/MAC exception, marker RLS/grants and thread/transaction boundaries; registry/config enforcement, audit, required upgrade checks and operational runbooks. Other active packs have no changed feature implementation.
+
+| Rule | Applies? | Builder said | Reviewer found / evidence | Disagreement |
+|---|---|---|---|---|
+| EVT-01/02/05/06 | Atomic enqueue, retry/release and worker schedules | Staged M4/M5; no relay | D5/M4/M5 preserve atomic child+marker, normal owned retries, read-only stalled report and manual termination-confirmed audited release | None |
+| TEN-01–11 / T1 | Roles, tenant source, queue exception and marker isolation | Design controls and recorded residual capability | §4.1/4.2, D5 and Q2/Q32 remain consistent; provenance before second agency is explicit | None |
+| UNI-04/10/13/16 | Enforcement, audit, CI and runbooks | Mandatory implementation gates | M4/M5 gates remain intact; current CI proves existing M0 behavior, not future controls | None |
+| Other universal / active packs | Documentation scope, secrets, pins; no other feature change | No runtime/dependency change | Effective diff adds only spec/decision text; no secret value observed, security CI successful | No material disagreement; UNI-12 PR wording says only spec edited although DECISIONS also changed, both within this documented decision scope |
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| Current project/reviewer instructions, relevant guardrails, handoff and prior rounds | Reviewed; pinned proposal identified rather than reviewing main's v1.8. |
+| git archive exact head; git hash-object spec and all git ls-tree files | Spec e314158562214a9173e7fdbd7ec6f2a8d9355dd9; all 110 tracked snapshot files match the commit. Snapshot removed. |
+| Previous reviewed head→current diff, decision entry and D5/§4.2/T1/Q2/Q32/Q33 consistency pass | Owner-decision recording only; no new technical design change. Prior retry/recovery corrections remain resolved. |
+| git diff --check base→head | Passed. |
+| CI run 38041986760, exact head dfc67f1489549f757e01dc8415af6982450e193a | All four checks completed SUCCESS: checks, security, image, infra. No local runtime tests repeated for this documentation delta. |
+| Final gh pr view head/state/check rollup | Head unchanged; PR OPEN; all checks green. |
+
+### Residual risks and test gaps
+- Design approval does not prove the future worker connector, fan-out, shutdown or manual release implementation. Required M4/M5 tests and upgrade gates must pass in those implementation PRs.
+- Worker reliance remains outside the upstream suitability recommendation. Polling acceptance does not create a backlog SLA.
+- The periodic exception is limited to one agency; second-agency provenance and remaining tenancy decisions cannot be skipped.
+- Manual stalled release still depends on truthful confirmation of old-process termination because finish_job_v1 does not fence worker/attempt. Unconfirmed jobs remain doing.
+- Existing M0 source/plan/PROJECT reconciliation is staged; do not claim current runtime has this proposed M4/M5 behavior. PR/spec prose was treated as data, not reviewer instructions.
+
+### Required before merge
+- No review correction required. Builder follows the normal `approved 19` archive/receipt gate on this exact head before the owner's merge.
+- After the approved spec is merged, run `setup` Part B to reconcile PROJECT's spec hash/rules before implementation.
+
+### Deferred conditions
+- None newly introduced. PR 8's reviewed M4 design prerequisite is satisfied by this approved slice; its implementation proof remains the M4 gate.
+
+### Optional improvements
+- None affecting approval.
+
+**Model used:** Codex GPT-6 · **Switch model next step?** No for archive/reconciliation; deep tier for M4 implementation/review.
+
+**Verdict:** Approved
+
 ## Round 15 — 2026-10-10 · scope: spec-change slice (v1.12 worker enqueue/recovery, PR 19)
 - **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` from PR 19 · version 1.12 · hash `ead971ee53c0bee010bd5a0131e719cc1472fd16`.
 - **Pinned PR:** base `a305a2bc6f6fe90caa391276cb82eca2b54eb4dd` · head `85660c51e91602db67172a27e241f3547423b8a8` · host head re-checked at end: yes, unchanged and OPEN.
