@@ -206,7 +206,7 @@ Things unique to this product. Generic rules belong in a guardrail pack, not her
 | FAME / ePartner write code | none exists | never (spec non-goal) | spec §2, D11, M15 contract test |
 | Bedrock extended thinking / prompt caching | not enabled (no `thinking`, no `cachePoint`) | a reviewed spec revision | spec Flow 5.8, M11 |
 | Sentry (error tracker) | not adopted | a TIA is done; then `send_default_pii=False` + scrubbing | spec D17, D19 |
-| Second agency onboarding | not allowed | the owner reviews the T1 "not contained" list (Q2) | spec D18, §4.2, Q2 |
+| Second agency onboarding | not allowed | the owner reviews the T1 "not contained" list (Q2), and periodic parents are signed or otherwise provenance-checked (owner decision 2026-10-10) | spec D18, §4.2 item (b) second-agency gate, T1, Q2, Q32 |
 | Per-module cutover flags (M17) | off for all users | flag on for 1 pilot user for 3 days with zero P0/P1 incidents | spec §9 M17 |
 | Old app repo `apiskiw/skiw-assistant` | read-only reference | the owner says otherwise | docs/DECISIONS.md 2026-10-05 |
 
