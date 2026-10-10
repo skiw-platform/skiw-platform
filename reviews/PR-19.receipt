@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 19
+repo: charliekhc/skiw-platform
+reviewed-head-sha: dfc67f1489549f757e01dc8415af6982450e193a
+review-file: reviews/SPEC-2026-10-05-skiw-platform-stack-design.md
+review-file-hash: 27b0e6f6cfe8b0d9496af8a77290f8e659cd979f
+review-log-branch-commit: a3c46ebbb5826676f988cab535f06aadd5fe02e3
+verdict: Approved (spec review round 16)
+ci: checks, image, infra, security all success on the reviewed head
+note: PR 19 is a spec PR; its reviewer record is the spec review file, not reviews/PR-19.md
+written-at: 2026-10-10T09:42:02Z
+pr-state-at-write: OPEN, unmerged
