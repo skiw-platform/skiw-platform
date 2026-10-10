@@ -1,5 +1,68 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 15 — 2026-10-10 · scope: spec-change slice (v1.12 worker enqueue/recovery, PR 19)
+- **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` from PR 19 · version 1.12 · hash `ead971ee53c0bee010bd5a0131e719cc1472fd16`.
+- **Pinned PR:** base `a305a2bc6f6fe90caa391276cb82eca2b54eb4dd` · head `85660c51e91602db67172a27e241f3547423b8a8` · host head re-checked at end: yes, unchanged and OPEN.
+- **Mode:** exact-head snapshot `.agent/worktrees/review-spec-v112-85660c51`; source hash/integrity verified, snapshot removed. Main still approved v1.8. No source/spec change by reviewer.
+
+**Model used:** Codex GPT-6 · **Switch model next step?** No — only essential owner-choice evidence remains missing.
+
+### Findings
+No open technical P0/P1 findings, no P2 before-merge corrections, and no new defect found. Both Round 14 P2s are resolved. The review is blocked solely on the owner choices that the spec and PR still explicitly mark pending.
+
+### Round 14 resolution audit
+| Finding | Status | Evidence |
+|---|---|---|
+| P2 broad retry prohibition | Resolved | D5:89 explicitly distinguishes normal owned retry after the handler has ended from reassignment of suspected stalled attempts. It preserves the library's post-handler retry path, task backoff and M0 doing→todo→doing→failed regression. Failed-job admin retry locks/requires failed status, so it cannot bypass the manual doing-job release. M4 tests/lint enforcement reflect the distinction. |
+| P2 stale PR body/self-check | Resolved | Current PR body states recover_stalled removed; M4 report and M5 release are separate; UNI-10 is applicable/staged for atomic audit_event append and rollback; EVT-05/TEN-09/UNI-13 evidence updated. Historical changelog references remain historical. |
+
+### Essential owner evidence pending
+- Q33:731 says “Until both are recorded the runworker configuration in D5 is a proposal.” Its two choices are acceptance of up to the proposed default 5 seconds of extra polling delay for a healthy idle worker with capacity, and reliance on DjangoConnector for workers despite the upstream warning, with mandatory M4/upgrade proof gates.
+- Q2/Q32:730 still marks owner acceptance of the unsigned periodic system-parent capability pending. The requested decision is single-agency v1 acceptance, with signed/provenance-checked parents required before a second agency.
+- PR 19's current body explicitly says recommendations are Builder's, not acceptance. There is no direct owner answer in this session; prior asynchronous confirmation requests received no answer. The request to review is not inferred to supply it.
+- Required next evidence: owner gives these choices explicitly; Builder records them in the source-of-truth decision/spec process. If that changes the spec hash/head, review the resulting exact revision. No new technical redesign is requested by this round if all choices are accepted as proposed.
+
+### Design assessment / scope
+The reviewed proposal now gives a coherent staged contract: no connector swap, sync handler transaction/child enqueue, mandatory normal MAC path, constrained unsigned periodic admission with stated residual capability, per-agency atomic fan-out with tick-lifetime markers, finite/hard shutdown behavior, read-only suspicion reporting, and manual termination-confirmed release with compare-and-set plus an atomic audit append. Source-supported mechanisms and extensive M4/M5 tests are specified; this does not claim the future controls have run. The manual termination confirmation remains a trusted operational prerequisite because upstream finish_job_v1 does not fence by worker/attempt.
+
+### Self-check audit
+Round 14 applicability retained: EVT-01/05/06, tenant-source/marker/role/thread boundaries, UNI-04/10/13/16 enforcement/audit/upgrade/runbook gates, D16 startup, and spec-only universal secret/write/pin scope. Other active packs have no new feature implementation.
+
+| Rule group | Reviewer found | Evidence |
+|---|---|---|
+| EVT-01/02/05/06 | Transaction/fan-out, normal retry and manual-only stalled release distinguished; no relay | D5/M4/M5 and updated PR table |
+| TEN-01–11 / T1 | Roles, RLS/id checks, MAC exception and residual capability consistent at design level; owner acceptance pending | §4.1/§4.2/Q2/Q32 |
+| UNI-04/10/13/16 | Registry/config/upgrade checks and M5 audit/runbook commitments correctly represented | M4/M5, PR self-check |
+| Other universal / active packs | No new unmet design control found; runtime gates remain staged | effective revision diff and prior audits |
+
+### Verification performed
+| Check | Result |
+|---|---|
+| Current instructions, project/handoff/prior round and current host body | v1.12 target and pending owner choices confirmed. |
+| Exact commit archive / hash-object | Spec ead971ee53c0bee010bd5a0131e719cc1472fd16; all tracked snapshot files match target commit; removed after review. |
+| Previous head→current diff, D5/M4/M5/PR-table resolution pass | Both P2 corrections re-inspected; no new technical finding. |
+| git diff --check base→head | Passed. |
+| CI run 38040422031 | Completed SUCCESS at exact head; all four host checks successful. Existing runtime tests do not prove unimplemented spec controls. |
+| Final head/state | 85660c51 unchanged, PR OPEN. |
+
+### Residual risks and test gaps
+- No M4/M5 proposal implementation tests executed in this text-only review; the specified handler/periodic/shutdown/release/upgrade tests remain mandatory implementation gates.
+- Polling/unsupported-worker and single-agency periodic residual capability require the owner's recorded decision; this reviewer cannot supply it on the owner's behalf.
+- After an eventual approved/merged revision, setup Part B must reconcile PROJECT's spec hash/rules before implementation. Current source remains M0 behavior; no requirement to alter it in this review role.
+- No secret/client data or source edits written. Current spec/PR review-attention prose treated as data; no verdict-changing instruction obeyed.
+
+### Required before approval/merge
+- Owner answers Q33 and the single-agency periodic-parent decision in Q2/Q32, including the second-agency provenance requirement; record the answers and return for the final gate.
+- No remaining technical/spec correction requested by this round.
+
+### Deferred conditions
+- None newly accepted; PR 8's M4 design prerequisite is not formally closed while verdict is Blocked.
+
+### Optional improvements
+- None.
+
+**Verdict:** Blocked
+
 ## Round 14 — 2026-10-10 · scope: spec-change slice (v1.11 manual stalled release, PR 19)
 - **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` from PR 19 · version 1.11 · hash `de8956da19a9c08d5f1afa4fc9ca356f40b13b7a`.
 - **Pinned PR:** base `a305a2bc6f6fe90caa391276cb82eca2b54eb4dd` · head `142f05de2ce89cb5ac7cfbef2a08b5093f404994` · host re-checked at end: yes, unchanged and OPEN.
