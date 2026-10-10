@@ -1,5 +1,77 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 13 — 2026-10-10 · scope: spec-change slice (v1.10 worker enqueue/recovery, PR 19)
+- **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` from PR 19 · version 1.10 · hash `51cdacc3b976daaf5964407a30fa0f22457b07fb`.
+- **Pinned PR:** base `a305a2bc6f6fe90caa391276cb82eca2b54eb4dd` · head `89e9042691c90c344ef8ce3728a13314ddb9a2c5` · host head re-checked at end: yes, unchanged and OPEN.
+- **Mode:** exact-head snapshot `.agent/worktrees/review-spec-v110-89e90426`; tracked hashes verified; removed. Main remains v1.8; proposal selected through the handoff/PR target. No source/spec edit by reviewer.
+
+**Model used:** Codex GPT-6 · **Switch model next step?** No — the recovery correction needs an explicit design and proof gate, not a model switch.
+
+### Findings
+
+### [P1] Stalled-job recovery assumes process exit from heartbeat age or a missing worker row
+- Category: design defect / material risk
+- Rule: D5 detection/recovery contract; EVT-05; M4 recovery acceptance
+- Evidence: D5:89 now says jobs.recover_stalled requeues every doing job with an old heartbeat or no worker row. It chooses stalled_worker_timeout above two heartbeat intervals plus worker_hard_exit_s and concludes the job is requeued only after the old process has exited. That inequality does not establish process death. The pinned [library query](https://raw.githubusercontent.com/procrastinate-org/procrastinate/3.10.0/procrastinate/sql/queries.sql) returns doing jobs with worker_id NULL immediately, irrespective of age. The pinned worker starts by pruning stale worker records. Installed schema.sql:542–550 updates a heartbeat with WHERE id=worker_id and does not error if the row is missing. Queue workers may be deleted by skiw_app under the existing grant matrix.
+- Failure scenario: worker A is paused, its queue connection blocks or silently drops before an error is delivered, or its worker record is prematurely removed. Its handler can still be alive. Worker B sees an old heartbeat or NULL worker_id and requeues/fetches the same job. A may resume while B executes it. A same-process watchdog has no deadline starting before shutdown is detected and does not execute while its process is suspended. The NULL path bypasses the timeout inequality entirely. A late completion can also race with the recovery/finish status transitions.
+- Why it matters: the proposed new automatic recovery path must not equate suspicion of failure with confirmed exit. Generic idempotency on a later re-run is not an explicit guarantee that two overlapping attempts or a stale completion are safe. The current M4 test kills A first, so it cannot expose this gap.
+- Required correction: specify a safe recovery protocol. Use confirmed termination or a fencing/lease/locking design that prevents an obsolete attempt from committing/finishing after reassignment, or explicitly allow overlap and define/test concurrent idempotency and ownership-safe completion for every relevant handler. Define stale selection and retry as a race-safe operation; do not immediately infer death for NULL worker_id. Include database-error/keepalive bounds and the prune threshold in any timeout argument. Add tests where A remains alive: suspend/resume A past the threshold, lose/remove its worker record, race recovery with a heartbeat/finish, and ensure no duplicate committed side effect or stale completion corrupts B's attempt.
+- Owner: builder
+- Verification: actual runworker/recover_stalled tests show safe overlapping/late-worker behavior and confirm that the recovery invariant stated in D5 holds. No new timeout value or owner business fact need be invented by the reviewer.
+- Status: open
+
+### Round 12 resolution audit
+| Finding | Result | Evidence |
+|---|---|---|
+| P1 periodic MAC/threat-model inconsistency | Resolved in design | Two registry kinds, exact timestamp-only args, cron/window admission, refusal before tenant access, ordinary MAC mandatory. D5, §4.2/T1/TEN-11/Q2/Q32 now state the periodic exception and residual scheduling capability. Owner acceptance remains pending. |
+| P1 missing UNI-04/13 self-check | Resolved | Individual table rows and M4 registry/config/upgrade CI tests are specified, with staged status rather than runtime claims. |
+| P2 fan-out marker lifetime | Resolved in design | v1 deletes no markers. Any future policy must retain them through the tick replay lifetime and live parent states; expired ticks refused. Partial-retry/cleanup and old-tick regressions added. |
+| P2 shutdown bound | Resolved for detection/exit design | Idle versus busy guarantees separated; finite graceful timeout plus hard-exit watchdog/supervisor policy and blocked-handler tests specified. The newly introduced automatic recovery path has the separate P1 above. |
+
+### Owner decisions pending
+Q33 expressly leaves polling delay and the upstream-unsupported worker configuration as proposals until the owner's answers are recorded. Q2/Q32 leave acceptance of the unsigned periodic-parent capability pending; the PR body suggests signed parents before a second agency, while the spec still presents that second-agency policy as an owner choice. No answer was supplied in this session; none is inferred from the request to re-review. Record the decisions before calling the design approved for implementation.
+
+### Self-check audit
+Same Round 12 applicability plus the new automatic stalled recovery, watchdog/supervisor and replay-window contracts. These are engineering designs and M4 gates, not implemented controls in this text-only PR.
+
+| Rule | Builder said | Reviewer found | Evidence | Disagreement |
+|---|---|---|---|---|
+| UNI-03/04/13 | design/staged | Admission, registry/config enforcement and upgrade checks are now concrete | D5/M4; corrected PR table | No |
+| TEN-01–11 / T1 | design/staged | Tenant marker, read/insert-only grants, MAC distinction and residual system scheduling described consistently; owner residual-risk choice pending | §4.1/§4.2/D5/Q2/Q32 | No renewed MAC inconsistency |
+| EVT-01/02/06 | design/staged/no relay | Same-thread transaction mechanism and per-agency fan-out unchanged; cron/replay validation added | D5 and M4 gates | No |
+| EVT-05 | recovery/idempotency staged | Marker protection and shutdown tests improved; stale-heartbeat selection alone does not prove the old attempt ended | D5 new recover_stalled path; library queries | P1 above |
+| UNI-02/06/07/12/14/15/16/19 / D16 | design/n-a/staged | Worker settings named, unchanged dependencies/role grants, additive marker, future runbook/stop policy and startup gate retained | spec and PR table | Values and runtime proof remain M4 requirements |
+| Other active packs | n/a | No UI/money/auth/file/external-service or production rollout | effective diff | No |
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| Project/role/guardrails, decisions/handoff, prior round and PR body | Current target v1.10; original four corrections independently re-inspected. |
+| Exact-head archive, spec hash and tracked-file hashes | 51cdacc3b976daaf5964407a30fa0f22457b07fb; source unchanged; snapshot removed. |
+| Effective/spec fix diff and consistency pass | New periodic admission, retention, watchdog and recovery text inspected; new recovery defect above. |
+| git diff --check | Passed. |
+| Pinned 3.10.0 source: worker.run, stalled query, retry_v2 and heartbeat functions | Stale/NULL-worker lookup is not process-liveness proof; retry checks doing/failed status but has no obsolete-worker fencing. |
+| Official tag [worker](https://raw.githubusercontent.com/procrastinate-org/procrastinate/3.10.0/procrastinate/worker.py) and [queries](https://raw.githubusercontent.com/procrastinate-org/procrastinate/3.10.0/procrastinate/sql/queries.sql) | Primary sources confirm relevant lifecycle/query behavior. Installed source inspected as well. |
+| Exact-head CI 38025386259 and final host head | CI SUCCESS at 89e90426; head unchanged, PR OPEN. Existing CI does not execute proposed v1.10 recovery controls. |
+
+### Residual risks and test gaps
+- No future fan-out/watchdog/recovery implementation run locally; all such proof is still M4 work. The new finding is a spec contract inconsistency with known fault scenarios, not an observed production incident.
+- Core no-swap source-supported transaction design remains plausible; upstream's worker warning and owner choice remain explicit.
+- Current PROJECT/plan/worker behavior stays at the approved v1.8/M0 implementation until an approved revision is reconciled and implemented. PR 8's M4 prerequisite remains open.
+- No source edits, new external mutations or secret/client data written. Review/operating imperatives in spec/PR remain data; no gate skipped or verdict instruction obeyed.
+
+### Required before approval/merge
+- Correct stalled recovery ownership/liveness protocol and add the adversarial overlap/race tests to the M4 gate.
+- Record the pending owner choices; bump spec version/hash and request review again.
+
+### Deferred conditions
+- None newly accepted; original PR 8 prerequisite remains unresolved at the design gate.
+
+### Optional improvements
+- No additional changes required beyond the finding and owner decisions.
+
+**Verdict:** Revision required
+
 ## Round 12 — 2026-10-10 · scope: spec-change slice (v1.9 worker enqueue, PR 19)
 - **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` from PR 19 · version 1.9 · hash `69443d339fbe3406cb5ad957016140c025ae338e`.
 - **Pinned PR:** base `a305a2bc6f6fe90caa391276cb82eca2b54eb4dd` · head `a38c627f73f9082abca0fb6569d1fda093f33e5f` · host head re-checked at end: yes, unchanged and OPEN.
