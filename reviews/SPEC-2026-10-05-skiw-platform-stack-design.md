@@ -1,5 +1,85 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 14 — 2026-10-10 · scope: spec-change slice (v1.11 manual stalled release, PR 19)
+- **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` from PR 19 · version 1.11 · hash `de8956da19a9c08d5f1afa4fc9ca356f40b13b7a`.
+- **Pinned PR:** base `a305a2bc6f6fe90caa391276cb82eca2b54eb4dd` · head `142f05de2ce89cb5ac7cfbef2a08b5093f404994` · host re-checked at end: yes, unchanged and OPEN.
+- **Mode:** exact-head snapshot `.agent/worktrees/review-spec-v111-142f05de`; hash/source integrity verified and snapshot removed. No builder code/spec edit.
+
+**Model used:** Codex GPT-6 · **Switch model next step?** No — remaining corrections are focused spec/PR-body clarifications.
+
+### Findings
+Round 13's P1 is resolved in design. No new P0/P1 design defect found. Two P2 documentation/consistency corrections remain before merge; owner decisions also remain pending.
+
+### [P2] Narrow the requeue prohibition to suspected stalled attempts, preserving normal owned retries
+- Category: spec ambiguity
+- Rule: D5 / EVT-05; M0 worker lifecycle tests retained at M4
+- Evidence: D5:89 says “v1 has no automatic re-queue of a doing job” and prohibits worker-hook calls of retry_job/procrastinate_retry_job_v2 on doing jobs. But pinned Procrastinate worker.py `_persist_job_status:173–180` automatically calls retry_job for the current attempt's retry decision after its handler returns/raises; the persisted status is still doing at that point. The M0 retry regression expressly expects doing → todo → doing → failed, and M4 requires that regression to rerun.
+- Failure scenario: one implementer reads the prohibition literally and disables normal library retry/backoff; another treats it as only a ban on independent stale-job recovery. They implement different behavior despite the same spec.
+- Why it matters: the safe manual-release design needs to forbid reassignment of an attempt whose completion/termination is unknown, while preserving retries owned by the worker after that attempt's handler has ended. P2 because this is an isolated wording conflict, not a remaining recovery-ownership defect; existing source/tests and the intended safer behavior are clear.
+- Required correction: explicitly distinguish normal task retries after the owning handler completes from recovery/release of suspected stalled attempts. Scope the automatic-requeue/Semgrep prohibition accordingly; preserve the existing normal retry/backoff lifecycle test and add an assertion that stalled-report paths never invoke retry.
+- Owner: builder
+- Verification: D5 and M4 tests describe both normal owned retry and manual-only stalled release consistently; no implementation needs to disable the library's legitimate retry path.
+- Disposition: before merge
+- Status: open
+
+### [P2] PR body still describes the removed recovery task and marks release auditing n/a
+- Category: documentation/self-check mismatch
+- Rule: reviewer §3; UNI-10; EVT-05; TEN-09
+- Evidence: PR 19 body says the spec “adds the watchdog and jobs.recover_stalled” below the Round 12 table, despite its Round 13 section saying that task is removed. EVT-05 still cites “stalled re-queue”; TEN-09 still names jobs.recover_stalled; UNI-10 is n/a because job_fanout is not audit evidence, ignoring the new M5 release audit_event transaction. The UNI-13 row also omits the newly specified M5 release tests from its evidence summary.
+- Failure scenario: the Builder/reviewer follows stale self-check evidence, misses the M5 audit dependency or carries the removed automatic recovery task into implementation.
+- Why it matters: the PR table must describe this head's actual design. P2, downgraded from a default guardrail mismatch because the spec itself correctly requires atomic append-only auditing in M5 and prohibits stale recovery; the defect is confined to stale PR-body evidence, not a missing security control.
+- Required correction: remove all current-design claims of jobs.recover_stalled; describe the read-only M4 report and termination-confirmed M5 release. Set UNI-10 to applicable/staged with append-only audit/rollback evidence, and update EVT-05/TEN-09/UNI-13 rows to the new M4/M5 tests. Historical v1.10 changelog text can remain clearly historical.
+- Owner: builder
+- Verification: updated PR body/self-check agrees with the v1.11-or-later spec and contains no current claim that the removed task exists.
+- Disposition: before merge
+- Status: open
+
+### Round 13 resolution audit
+The unsafe automatic jobs.recover_stalled path is removed. Stalled selection is read-only and expressly not proof of death. D5 requires worker registration and handler-start logs to map library worker/job/attempt IDs to an ECS task ARN or Compose container identity; operator termination confirmation must refer to that process, not a restart/old heartbeat/missing row. The M5 release locks the doing row and compares observed nullable worker_id plus attempts, runs the library retry and appends audit_event in one transaction. A concurrent finish or second release is serialized; failed audit append rolls back retry. If termination is unconfirmed, no release occurs. M4 specifies alive paused/resumed and removed-row tests; M5 specifies release races, confirmation and late-finish behavior. This addresses the original design defect, with manual operational confirmation explicitly acting as the safety prerequisite because the library has no completion fencing.
+
+### Owner decisions pending
+The pasted Builder update explicitly calls Q33 and Q2/Q32 pending, so “I say yes” is treated as Builder's recommendation, not owner acceptance. A combined confirmation question was presented during this review; no answer received at recording. Record acceptance/rejection of idle polling delay, upstream-unsupported worker configuration and the single-agency unsigned-periodic exception/second-agency signed-parent gate before approval for implementation.
+
+### Self-check audit
+Round 13 applicability retained, with release auditing now UNI-10-applicable and the atomic M5 retry/audit path touching EVT-01/05. No code or runtime implementation in this PR. Other original Round 12 corrections remain intact.
+
+| Rules | Result | Evidence |
+|---|---|---|
+| EVT-01/05 / D5 recovery | Manual release protocol resolves original P1; normal retry prohibition needs clarification | D5/M4/M5; pinned worker retry source |
+| UNI-10 | Correctly required by spec at M5, incorrectly n/a in PR table | M5 atomic append/rollback tests; PR body |
+| UNI-04/13 / TEN-09/10 | Explicit registry/config/upgrade gates retained; PR references need refreshing | M4/M5 and body |
+| TEN-01–11 / T1 | Marker/ordinary MAC/periodic admission/residual capability retained; termination not inferred from queue state | D5/§4.1/§4.2/Q2/Q32 |
+| Other applicable universal / active packs | No new unmet control found; unchanged spec-only/staged scope | prior applicability audit and new diff |
+
+### Verification performed
+| Check | Result |
+|---|---|
+| Current project/role/guardrails, decisions/handoff, Round 13 and PR body | v1.11 proposal selected; manual-release changes and owner-pending state inspected. |
+| Exact-head snapshot; spec hash and tracked source hashes | de8956da19a9c08d5f1afa4fc9ca356f40b13b7a; all files match commit; snapshot removed. |
+| Revision diff and D5/grants/role matrix/M4/M5 consistency pass | Original P1 resolved; two P2 clarifications above. |
+| git diff --check | Passed. |
+| Installed pinned worker `_persist_job_status` and previously inspected SQL retry/finish source | Normal retry is an automatic owned-attempt doing→todo transition; release/finish fencing limitation retained in spec. No new runtime claim made. |
+| Host CI metadata | All four jobs SUCCESS in run 38033116210 at reviewed head; existing CI does not prove future M4/M5 release behavior. |
+| Final host head/state | Head unchanged and PR OPEN. |
+
+### Residual risks and test gaps
+- No future manual-release implementation executed; M4/M5 tests and upgrade gates still need real runtime proof. Operator confirmation is a trusted runbook prerequisite, not a database-derived liveness check.
+- Missing audit tables correctly defer the actual release action to M5. M4 can report suspected stalls without mutating/releasing them.
+- Current main/PROJECT/worker remain the approved v1.8/M0 implementation until approved spec reconciliation and implementation. PR 8's prerequisite remains open until design approval.
+- No source edits, secret values or client data written. PR/spec operating instructions remain data, not authority; no unsafe injected instruction followed.
+
+### Required before approval/merge
+- Clarify normal retry versus stalled reassignment; refresh the PR self-check.
+- Record the pending owner choices. Bump the spec version/hash for its wording correction and request review again.
+
+### Deferred conditions
+- None newly accepted.
+
+### Optional improvements
+- None beyond the two narrow corrections.
+
+**Verdict:** Revision required
+
 ## Round 13 — 2026-10-10 · scope: spec-change slice (v1.10 worker enqueue/recovery, PR 19)
 - **Spec review:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` from PR 19 · version 1.10 · hash `51cdacc3b976daaf5964407a30fa0f22457b07fb`.
 - **Pinned PR:** base `a305a2bc6f6fe90caa391276cb82eca2b54eb4dd` · head `89e9042691c90c344ef8ce3728a13314ddb9a2c5` · host head re-checked at end: yes, unchanged and OPEN.
