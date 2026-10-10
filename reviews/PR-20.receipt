@@ -1,0 +1,11 @@
+approval-receipt: 1
+pr: 20
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 582d8c158863fcb66b2c582050e7330e0a5cd428
+review-file: reviews/PR-20.md
+review-file-hash: ebae671ac0e2c37acd1e7860819bce818b7e3a8b
+review-log-branch-commit: 8c5f3f6ed22c24df83488b50542e299c4874c2c4
+verdict: Approved (round 2)
+ci: checks, image, infra, security all success on the reviewed head (run 38043211839)
+written-at: 2026-10-10T15:06:15Z
+pr-state-at-write: OPEN, unmerged
