@@ -1,10 +1,11 @@
 # Runbook — local development
 
-Applies from M0a. Production deployment, rollback and restore runbooks arrive with M0d and M1.
+Applies from M0a. Other runbooks: [README](README.md); deployment, rollback and restore are skeletons until M1.
 
 ## Prerequisites
 - `uv` (installs Python 3.12 from `.python-version`), Docker with Compose, GNU make.
 - Node 24.21.0 and pnpm 11 for the web shell. Use `fnm` (`fnm install` then `fnm use`; it reads `.node-version`). `make` refuses other Node majors (`make check-node`).
+- Once per clone: `make hooks` and `brew install gitleaks`. The pre-push hook then scans the commits you push for secrets and blocks the push if gitleaks is missing.
 - First end-to-end run only: `pnpm -C web exec playwright install chromium`.
 
 ## First run
@@ -21,6 +22,10 @@ Applies from M0a. Production deployment, rollback and restore runbooks arrive wi
 | `make web-build` / `make web-dev` | production build of the shell into `web/dist` / Vite dev server with `/healthz` and `/api` proxied to `:8000` |
 | `make e2e` | builds the shell, starts the database and migrates, starts the app (not the worker), runs Playwright on desktop and mobile widths (axe, keyboard, overflow, no-JS, console errors) |
 | `make test-live` | starts the database, migrates as `skiw_migrator`, then runs the `live` tests as `skiw_app`: role checks, `jobs.enqueue_in_tx` commit/rollback/visibility and refusals, the queue-grant audit and the worker lifecycle |
+| `make infra-test` | CDK synth test of the empty `infra/` stack (installs the locked `infra` group; no AWS calls) |
+| `make audit` | `make secrets` (gitleaks, needs `brew install gitleaks`), `make audit-python` (pip-audit), `make audit-web` (pnpm audit) |
+| `make image-scan` | builds the image and scans it with Trivy (needs `brew install trivy`) |
+| `make hooks` | enables `.githooks/pre-push` (secret scan of pushed commits) |
 | `make db-up` | starts only the database and waits until healthy |
 | `make migrate` | runs migrations with `MIGRATION_DATABASE_URL` (`skiw_migrator`), then `makemigrations --check`, then `lintmigrations --warnings-as-errors` on the project's own apps (django-migration-linter; Procrastinate's migrations are excluded) |
 | `make clean` | stops the stack and deletes the local database volume |
@@ -47,4 +52,4 @@ All come from `.env` (copied from `.env.example`; never committed). The app fail
 Roles are created only on the first start of an empty volume (`docker/postgres/10-roles.sh`). After changing it, run `make clean` and `make dev`.
 
 ## CI
-`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: install, lint (including Semgrep), typecheck, unit tests (pytest and vitest), live database tests (`make test-live` against a disposable Postgres; `make migrate` there also runs the migration linter), and the Playwright end-to-end tests (`make e2e`). Actions are pinned by commit SHA. The M0d PR extends this workflow (secret scan, dependency audit, image scan, web build stage in the image).
+`.github/workflows/ci.yml` runs the `checks`, `security`, `image` and `infra` jobs on every pull request and on pushes to `main`. See [ci.md](ci.md) for the jobs, how to run each gate locally and the GitHub Free plan limits. The production image builds the web shell in a Node stage and fails if `web/dist/.vite/manifest.json` is missing, malformed, or names a missing file (`python -m shell.verify_dist`); `docker compose` still bind-mounts `./web/dist` over it for local runs.

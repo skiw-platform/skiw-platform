@@ -1,0 +1,29 @@
+#!/bin/sh
+# Pre-push secret scan (UNI-07). Scans the commits being pushed with gitleaks and fails closed.
+# Install once per clone: make hooks. A local hook is bypassable; CI scans full history after push.
+# Escape (visibly logged, CI still scans): SKIW_SKIP_SECRET_SCAN=1 git push
+
+remote="$1"
+
+if [ "${SKIW_SKIP_SECRET_SCAN:-}" = "1" ]; then
+    echo "pre-push: WARNING secret scan SKIPPED by SKIW_SKIP_SECRET_SCAN=1" >&2
+    exit 0
+fi
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-push: gitleaks is not installed, so the push is blocked (fail closed)." >&2
+    echo "Install it (brew install gitleaks), or skip once with SKIW_SKIP_SECRET_SCAN=1." >&2
+    exit 1
+fi
+
+zero=0000000000000000000000000000000000000000
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    [ "$local_sha" = "$zero" ] && continue
+    # Commits not yet on the remote: everything pushed that no remote-tracking ref has.
+    if ! gitleaks git --config .gitleaks.toml --redact --no-banner \
+        --log-opts="$local_sha --not --remotes=$remote" .; then
+        echo "pre-push: gitleaks found a possible secret in the commits being pushed." >&2
+        exit 1
+    fi
+done
+exit 0

@@ -1,0 +1,12 @@
+# gitleaks config (UNI-07). Defaults plus the secret key names of agents/PROJECT.md §7.
+# Names alone are allowed (docs describe them); a literal value assigned to one is a finding,
+# in every path, including docs/specs (no path exemptions: PR 9 review R1).
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "skiw-secret-key-assignment"
+description = "A SKIW secret key name assigned a literal value"
+regex = '''(?i)(CRED_ENC_KEY|SUPABASE_SERVICE_KEY|ANTHROPIC_API_KEY|GAS_PROOF_URL|tenant_token_key|tenant_source_key|login_blob_key|approval_mac_key|audit_mac_key|private_key_id)["']?\s*[:=]\s*["']?[A-Za-z0-9+/_.:=-]{16,}'''
+keywords = ["cred_enc_key", "supabase_service_key", "anthropic_api_key", "gas_proof_url", "tenant_token_key", "tenant_source_key", "login_blob_key", "approval_mac_key", "audit_mac_key", "private_key_id"]

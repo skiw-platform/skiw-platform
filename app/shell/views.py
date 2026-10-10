@@ -11,6 +11,7 @@ from django.views.decorators.http import require_GET
 from django.views.static import serve
 
 ENTRY = "index.html"
+ASSET_CACHE_SECONDS = 31_536_000  # one year, hashed immutable assets
 
 
 def read_entry(dist: Path) -> dict[str, Any] | None:
@@ -38,6 +39,6 @@ def shell(request: HttpRequest) -> HttpResponse:
 
 
 @require_GET
-@cache_control(max_age=31_536_000, immutable=True)
+@cache_control(max_age=ASSET_CACHE_SECONDS, immutable=True)
 def asset(request: HttpRequest, path: str) -> HttpResponseBase:
     return serve(request, path, document_root=str(settings.WEB_DIST_DIR / "assets"))

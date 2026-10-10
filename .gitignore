@@ -12,3 +12,4 @@ __pycache__/
 playwright-report/
 test-results/
 .playwright-mcp/
+.audit-requirements.txt

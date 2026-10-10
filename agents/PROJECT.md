@@ -93,17 +93,20 @@ Leave a command out if the project doesn't have it yet; the scaffold milestone f
 
 ```bash
 # install
-pending scaffold   # M0: uv (Python) + pnpm (web) lockfiles — spec §9 M0, T17
+make install       # check-node, uv sync --locked && pnpm install --frozen-lockfile
 # fast checks (run before every push)
-pending scaffold   # typecheck: mypy strict + tsc — spec §8.3 CI
-pending scaffold   # lint: ruff + eslint, plus import-linter contracts and Semgrep rules — spec D1, D5, §8.3
-pending scaffold   # test: pytest + vitest — spec §8.3 CI
+make typecheck     # mypy app infra && pnpm -C web typecheck
+make lint          # ruff check/format --check, lint-imports, semgrep --config semgrep/ + --test, pnpm -C web lint
+make test          # pytest (no DB, `-m 'not live'`) && vitest
+make test-live     # Compose Postgres, migrate as skiw_migrator, pytest -m live as skiw_app (roles, jobs, queue grants)
+make audit         # gitleaks (history) && pip-audit && pnpm audit --audit-level high; needs gitleaks installed
 # database: start, migrate, run isolation tests
-pending scaffold   # local stack: Docker Compose (Postgres 17, ClamAV, MinIO, mail catcher) via `make dev` — spec §8.3
-pending scaffold   # Django migrations as skiw_migrator; CI also runs `makemigrations --check` + django-migration-linter — spec D16
-pending scaffold   # RLS isolation tests, schema check, forged-tenant tests under skiw_app — spec §4.2, M4
+make dev           # web build, db up, migrate, compose up (db :5433, app, worker; ClamAV/MinIO/mail catcher with M16/M3)
+make db-up         # docker compose up -d --wait db
+make migrate       # migrate with MIGRATION_DATABASE_URL (skiw_migrator), then makemigrations --check, then `lintmigrations --warnings-as-errors` (django-migration-linter; required gate, same command in CI)
+pending M4         # make db-test: RLS isolation, schema check, forged-tenant tests under skiw_app
 # end-to-end
-pending scaffold   # Playwright — spec §8.3 CI
+make e2e           # web build, compose up --wait, playwright test
 ```
 
 **Secret-scan pattern** (base pattern + this project's key prefixes):
