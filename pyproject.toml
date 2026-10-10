@@ -15,7 +15,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "django-stubs==5.2.9",
-    "django-stubs-ext==5.2.9",
+    "django-stubs-ext==6.1.2",
     "mypy==1.19.1",
     "ruff==0.16.10",
     "import-linter==2.15",
