@@ -1,5 +1,65 @@
 # Review — 2026-10-11-hosting-options
 
+## Round 4 — 2026-10-11 · scope: slice (hosting decision paper v1.6, recovery corrections)
+- **Spec review:** `docs/specs/2026-10-11-hosting-options.md` · version 1.6 · hash `4c642318dafcd8bdbd6b93b25cfb629f8ed4d5ba`.
+- **Pinned PR 21:** base `21db4511ffaa80741572d3adae35d54c3183a1f5` · head `67b0b53a43ae1899a10ede86d848d1387d350ff5` · host head re-checked at end: yes, unchanged and OPEN.
+- **Mode:** exact-commit snapshot `.agent/worktrees/review-spec-hosting-67b0b53a`; all tracked file hashes match pinned commit; snapshot removed. No source/document/handoff edit by Reviewer.
+- Approval applies to the comparison paper only. Platform spec v1.13 and its PROJECT reconciliation are unchanged; owner platform choice is still open.
+
+### Findings
+No new finding. Round 3's P1 and before-merge P2 are resolved. Existing Round 2 P2 remains deferred to the named adopting-spec follow-up.
+
+### Round 3 resolution audit
+| Finding | Status | Independently re-inspected evidence |
+|---|---|---|
+| P1 incomplete export recovery | Resolved | §3.5 separates row recovery from complete recovery. Items 10–14 list uploaded files, reproducible role/ownership/grant bootstrap, protected escrow of app-held key versions, configuration/digests, dump key and audit anchors. Item 12 and M6' require a fresh-host/cluster drill using off-host copies, recovered-file checksum, historical audit/MAC verification, encrypted-data sample and role checks before readyz. Coverage table narrows database-only claims. B4's local files explicitly require an off-host copy. No keys or actual artifacts written. |
+| P2 contradictory in-country/single-VPS branches | Resolved | §3.1 makes B3/B4 conditional and distinguishes the rejected unprotected hobby host. §3.4 decision tree and Q1 include B4/Azure Malaysian alternatives with operator/vendor/spike/recovery/Q10/adoption gates. Rankings state conditional and provisional rather than silently selecting a platform. |
+| Residual RPO/capacity notes | Addressed | Item 2 uses verified off-host copy age and measured freshness alerts. Item 8 distinguishes daily 35-GB vs hourly 840-GB example, with provisional rotation/costs. Item 13 excludes unquoted file/key costs from headline totals and warns rankings may move. |
+
+The single-database/roles limitation was rechecked against [PostgreSQL documentation](https://www.postgresql.org/docs/17/app-pgdump.html). Recovery requirements are now appropriately staged tests, not claims that a restore has already passed.
+
+### Self-check audit
+Round 3 applicability retained: options-only UNI-07/11/12/13, PROJECT residency/adoption gates and comparison constraints for database roles, secret custody, audit/recovery and uploaded files. No runtime/schema/permission/service adoption changed; paper §7 supplies staged guardrail mapping.
+
+| Rule / constraint | Builder said | Reviewer found | Disagreement |
+|---|---|---|---|
+| UNI-07/11/12 | Met; one options paper | Key names documented, no values; no real transfer/service enabled; project-only writes | None |
+| UNI-13 | Previous head green, current result at approved time | Exact current-head run 38142868064 has four successful checks | No CI defect; current result independently verified |
+| T13/T19 / UNI-08/10/16 / D14/D18 role/key/file constraints | Adoption/restore gates | Complete recovery inventory/drill and provisional cost scope cover prior defect | Resolved |
+| D19 / PROJECT §11 | Owner/adviser prerequisite | Existing statutory-condition/notice and whole-dataset Drive exposure wording retained | None |
+| Other active packs | No runtime change | Appropriate options-only scope; implementation gates remain later | None |
+
+### Verification performed
+| Check | Result |
+|---|---|
+| Current instructions/PROJECT, handoff, prior round and exact revision diff | Reviewed unchanged project constraints and all v1.5→v1.6 corrections. |
+| Exact archive/hash-object/all tracked snapshot-file hashes | 4c642318dafcd8bdbd6b93b25cfb629f8ed4d5ba; pinned tree intact, snapshot removed. |
+| Effective scope / git diff --check base→head | Hosting paper only; passed. |
+| Recovery inventory/drill, coverage table, milestones, questions and decision-tree consistency | Prior findings resolved; no new before-merge correction. |
+| Paper secret-pattern scan | Two matching lines document recovery key names, not secret values. No actual secret observed; not a full-history local scan. |
+| Primary source | PostgreSQL dump/globals limitation rechecked. Unchanged vendor prices/source assumptions not fully revalidated; prior spot checks retained. |
+| CI 38142868064 and final host check | checks/security/image/infra SUCCESS at exact 67b0b53a43ae1899a10ede86d848d1387d350ff5; head unchanged, OPEN. No local runtime tests repeated for the text delta. |
+
+### Residual risks and test gaps
+- No complete-recovery drill, vendor DB role spike, provisioning, runtime security test or real-data transfer performed. Paper approval is not production or adoption proof.
+- Owner platform, operator, RTO/RPO, key custody, single-web acceptance and residency decisions remain open/formal adoption prerequisites. Headline costs exclude explicitly provisional additional recovery artifacts and may change after cadence/retention/capability choices.
+- Backup role isolation, protected key escrow, file-copy consistency and recoverable audit-anchor boundaries must be designed and tested in adopting implementation; current role/DB-access/worker-only scheduling/Drive/AI switches are not waived.
+- Platform spec hash remains e314158562214a9173e7fdbd7ec6f2a8d9355dd9. Run setup Part B after the eventual approved adopting platform-spec change; do not replace PROJECT's platform hash with this options paper hash.
+- PR/source prose treated as review data; no verdict-changing instruction followed.
+
+### Required before merge
+- No correction required for this options-only PR. Builder archives the complete review and writes the normal exact-head receipt before owner merge; preserve the deferred condition.
+
+### Deferred conditions
+- Existing Round 2 P2, still at paper §7.1:843: in the hosting-adoption spec v1.14 PR, before M1 plan/implementation if A2 public-subnet tasks are selected, replace deny-all-inbound wording with necessary ALB-source service/health-check ingress and prohibited direct Internet ingress; require positive ALB readiness and negative direct-access checks. Another chosen route need not implement this alternative.
+
+### Optional improvements
+- Refresh the PR body's current-head CI citation and its old full-service savings statement when archiving. Independent evidence already resolves delivery status; no verdict effect.
+
+**Model used:** Codex GPT-6 · **Switch model next step?** No — deep tier remains appropriate for owner-choice/adopting security design.
+
+**Verdict:** Approved with conditions
+
 ## Round 3 — 2026-10-11 · scope: slice (hosting paper v1.5, lean VPS and export backups)
 - **Spec review:** `docs/specs/2026-10-11-hosting-options.md` · version 1.5 · hash `76ddea6a57f98db27e95a6be284c394ebff0d9fa`.
 - **Pinned PR 21:** base `21db4511ffaa80741572d3adae35d54c3183a1f5` · head `554f8ea1bebde03160c270158092eed5c6ef98aa` · host head re-checked at end: yes, unchanged and OPEN.
