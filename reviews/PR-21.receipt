@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 21
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 67b0b53a43ae1899a10ede86d848d1387d350ff5
+review-file: reviews/SPEC-2026-10-11-hosting-options.md
+review-file-hash: d013aeb5078a7061a399abe4ca19c65ed277526f
+review-log-branch-commit: 6f08776fe10b4e31e698745a6df0b9e5747278ff
+verdict: Approved with conditions (spec review round 4)
+ci: checks, image, infra, security all success on the reviewed head (run 38142868064)
+note: PR 21 is a decision-paper PR; its reviewer record is the spec review file, not reviews/PR-21.md. Approval covers the comparison paper only; no hosting platform is chosen.
+written-at: 2026-10-11T13:51:01Z
+pr-state-at-write: OPEN, unmerged
