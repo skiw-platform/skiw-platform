@@ -1,8 +1,8 @@
 # SKIW Platform — hosting options (decision paper)
 
 - Date: 2026-10-11 · Author: Builder (deep tier) · Status: draft
-- Version: 1.3 · This paper changes no spec text, so no spec hash moves. The review pins this paper's own
-  git hash (v1.0 was `40ab593a`, v1.1 was `c80a1899`, v1.2 was `667150a6`).
+- Version: 1.4 · This paper changes no spec text, so no spec hash moves. The review pins this paper's own
+  git hash (v1.0 was `40ab593a`, v1.1 was `c80a1899`, v1.2 was `667150a6`, v1.3 was `9670b835`).
 - Supersedes: nothing. Input to a possible spec change of `docs/specs/2026-10-05-skiw-platform-stack-design.md`
   (v1.13, hash `e3141585`) sections D3, D4, D12–D15, D17, D19, D23, D24, §8.2, §8.3, M1, M6.
 - Audience: the Reviewer ("Bob"), then the owner. The owner has **not** chosen a platform.
@@ -19,6 +19,16 @@
 - Prices are list prices in USD per month, 730 h, excluding AI tokens, tax and Google Workspace.
   RM uses **4.10** (BNM selling rate 4.096 on 2026-10-09 [V F29], rounded). The spec uses 4.25 [A];
   at 4.25 every RM figure is about 3.7 % higher.
+
+## Changes from 1.3
+
+Owner input (2026-10-11) on v1.3 hash `9670b835`: a DB standby (HA) is not needed in v1; it can come later.
+1. §1 records the input and how it is read. §10 Q3 is partly answered; Q7 is answered; new Q10 asks whether
+   "HA later" also covers one web instance.
+2. §3.2 compares v1 on the no-standby totals. The standby figures stay, labelled "later upgrade, not v1", with
+   the cost to add HA later per option. A (§8.2 Step 1) is already a single-AZ DB.
+3. §3.4 re-runs the recommendation on the no-standby totals. Same two options; the reasons change.
+4. PDPA position unchanged. New rows F42–F44.
 
 ## Changes from 1.2
 
@@ -56,9 +66,9 @@ Fixes review Round 1 (2026-10-11) on v1.0 hash `40ab593a`:
 
 ## Facts checked
 
-All rows checked 2026-10-11 unless stated. The table has **41 rows (F1–F41)**. The paper cites them in
-**129 verified-fact tags** (125 in §§1–10, 4 in the sections above; a tag may cite more than one row). v1.2 had
-39 rows and 103 tags; v1.1 had 34 rows and 81 tags. The v1.0 PR text said "37 verified fact tags"; v1.0 actually had 29 rows and 64 tags.
+All rows checked 2026-10-11 unless stated. The table has **44 rows (F1–F44)**. The paper cites them in
+**157 verified-fact tags** (153 in §§1–10, 4 in the sections above; a tag may cite more than one row). v1.3 had
+41 rows and 129 tags; v1.2 had 39 rows and 103 tags; v1.1 had 34 rows and 81 tags. The v1.0 PR text said "37 verified fact tags"; v1.0 actually had 29 rows and 64 tags.
 
 | # | Fact | Value | Source URL |
 |---|---|---|---|
@@ -103,12 +113,27 @@ All rows checked 2026-10-11 unless stated. The table has **41 rows (F1–F41)**.
 | F39 | Render object storage | The pricing page lists no object storage product. The docs offer MinIO, run by us as a paid web service with objects "on a 10 GB persistent disk" | https://render.com/pricing (HTML source), https://render.com/docs/deploy-minio |
 | F40 | Azure Malaysia West list prices (pay-as-you-go, Linux, per hour unless stated; × 730 h) | VM `Standard_B2as_v2` (2 vCPU, 8 GiB) $0.0855; `B2als_v2` (2 vCPU, 4 GiB) $0.0428. Standard SSD disk E6 $4.80/month. Standard static public IPv4 $0.005. Blob Hot LRS $0.018/GB-month. PostgreSQL flexible server: Burstable B1ms (1 vCore, 2 GiB) $0.0234; General Purpose $0.1098 per vCore; storage $0.1242/GB-month; storage 32 GiB minimum; backup retention 7–35 days. Burstable is "Not recommended for production workloads". Location field "MY West". Region with PostgreSQL flexible server: F26 | https://prices.azure.com/api/retail/prices (Microsoft retail price API, `armRegionName eq 'malaysiawest'`), https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/basv2-series, https://learn.microsoft.com/en-us/azure/postgresql/compute-storage/concepts-compute |
 | F41 | iCore Technology Sdn. Bhd. (Malaysian VPS host) | NVMe Linux VPS: NODE1 4 GB / 2 cores RM 39.90; NODE2 8 GB / 4 cores RM 59.90; NODE3 16 GB / 6 cores RM 119.90 per month; NVMe "From 50 GiB - 2 TiB"; unlimited data transfer; no contract. "All our servers are located at" CJ1 Data Center, Cyberjaya and AIMS Data Center, Kuala Lumpur (both "Tier III certified"). No managed PostgreSQL, object storage or API is listed; backup service price not shown | https://www.icore.com.my/nvme-vps |
+| F42 | DO: adding a standby later | Clusters created before the F30 restrictions apply to the account "are not affected": "You can continue to resize, fork, and restore these clusters from backups, including onto plans that are otherwise unavailable for new clusters, and add standby and read-only nodes." Neither the plan-change note nor the Advanced Edition how-to describes converting a Standard cluster to Advanced Edition; the how-to shows standby choices at cluster creation | https://docs.digitalocean.com/release-notes/upcoming/dbaas-plan-changes/, https://docs.digitalocean.com/products/databases/postgresql/how-to/use-advanced-edition-clusters/ |
+| F43 | Render: enabling HA later | "You can enable High Availability (HA) for any Render Postgres database with the required specs" (≥ 1 CPU, PostgreSQL ≥ 13). "Enabling HA requires a database restart. Your database will be unavailable temporarily (usually for less than five minutes)." Standby has the same plan and storage as the primary "and is billed accordingly" | https://render.com/docs/postgresql-high-availability |
+| F44 | AWS RDS: Multi-AZ later | "You can use the console to convert existing DB instances to Multi-AZ DB instance deployments by modifying the DB instance and specifying the Multi-AZ option" (also `modify-db-instance`) | https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.MultiAZSingleStandby.html |
 
 ## 1. Goal
 
 Give the Reviewer and the owner one honest comparison of where SKIW can run for less than §8.2 Step 1,
 with verified prices, the PDPA effect, the security controls each option keeps or loses, and the spec
 work each option needs, so the owner can choose (or keep AWS) before any spec change is written.
+
+**Owner input (2026-10-11), quoted:** "the HA option is still ok as this is not a huge application, it is being
+used by a small internal team of 5 people, so HA can be the afterthought."
+
+How this paper reads it, and no further:
+- **Accepted:** no database standby (no HA) in v1. HA becomes a later upgrade. The v1 comparison (§3.2, §3.4)
+  therefore uses the no-standby totals.
+- **Still required** unless the owner says otherwise: backups, PITR where the option has it, and a timed,
+  recorded restore test (UNI-16, T13).
+- **Not answered:** whether this also accepts **one web instance**. The spec asks for min 2 web tasks for
+  no-downtime deploys (D3, D15, §8.3). That stays an open question (Q10). Also open: the RTO and RPO numbers,
+  and how long a failed node may stay down (Q3).
 
 ## 2. Non-goals
 
@@ -132,7 +157,7 @@ work each option needs, so the owner can choose (or keep AWS) before any spec ch
 | B3 | B2 with Postgres on the same VPS | As B2, but Postgres runs in a container on the Droplet | ≈ US$63 (§3.2). Saves US$30.45 a month; we run backups, WAL archiving, PITR, restore tests and DB patching ourselves; app and DB share one failure domain. |
 | B4 | Malaysian VPS (iCore Technology) | One 8 GB / 4-core NVMe VPS in Cyberjaya or Kuala Lumpur [V F41], set up as B3; off-site backups to Azure Blob Malaysia West [V F40] | ≈ US$16 (RM 67) (§3.2). Data in Malaysia per the provider's page [V F41]; this is not a PDPA finding. No managed DB, object storage or API listed [V F41]; support, backups and security practice not verified [A]. Azure Malaysia West VM is the priced alternative (§3.2). |
 | C | DO App Platform + Managed PostgreSQL + Spaces (SGP1) | Containers for `web` (2) and `worker` (1), pre-deploy job `migrate`, Managed PG, Spaces | Managed containers, workers and pre-deploy jobs exist [V F9]; one vendor, one region, object storage included. Data in Singapore. A DB standby now needs Advanced Edition (≈ US$260 for 2 nodes [V F31]). **Shortlisted without a standby** if the PDPA step is accepted (§3.4). |
-| D | Render (Singapore) | Web services, background worker, pre-deploy command, Render Postgres; object storage elsewhere | Pre-deploy failure cancels the deploy [V F16]; good deploy model. No object storage of its own; dearer than C at equal sizing (§3.2); dedicated IP $100 [V F14]. Already the D24 fallback. Cheaper than C when a DB standby is needed (§3.2). |
+| D | Render (Singapore) | Web services, background worker, pre-deploy command, Render Postgres; object storage elsewhere | Pre-deploy failure cancels the deploy [V F16]; good deploy model. No object storage of its own; dearer than C at equal sizing (§3.2); dedicated IP $100 [V F14]. Already the D24 fallback. Cheaper than C when a DB standby is added (a later upgrade, not v1; §3.2). |
 | D2 | Render (Singapore), lean | Variant of D: Pro workspace, **one** web service `1c-2g`, one worker `1c-2g` (ClamAV inside), one Postgres `1c-2g` with no standby, Spaces SGP1 for files, no staging at first, no dedicated IP | Same platform, deploy model and PDPA step as D. Priced on Pro, not Hobby: Hobby has 3-day PITR, one seat and 7-day logs [V F35]. One web instance breaks "min 2 web tasks" (§8.2, §8.3): deploys stay zero-downtime [V F37], but a crash of that instance stops the service until it restarts [A]. ≈ US$135 without staging (§3.2). Builder's estimate; the owner can change it. |
 | E | Vercel | Serverless functions + CDN | **Rejected.** No persistent worker process for Procrastinate (D5); functions end at 300/800 s [V F19]; default region `iad1`, no Malaysia [V F19, F20]; outage rerouting moves compute to other regions [V F20]; no managed Postgres of its own; the Django ASGI long-poll (D26) and ClamAV do not fit the function model. |
 | F | Fly.io (`sin`) | Machines + Managed Postgres | Singapore, managed PG with HA [V F21]. Compute prices and role privileges not verified [A]. Same PDPA step as C. Not costed. |
@@ -147,6 +172,10 @@ monitoring. **Low** = single DB node and minimum sizes. **High** = DB standby, l
 For B and C the high case is split: **no standby** (Standard Edition, the only DO price that stays below
 US$200) and **HA** (Advanced Edition, the only DO standby a new cluster can have after 30 Nov 2026 [V F30]).
 
+**v1 uses the no-standby totals** (owner input, §1). Every figure with a DB standby is a **later upgrade, not
+v1**; the tables show what adding it would cost. A (§8.2 Step 1) is already a single-AZ DB with no standby, so
+its total does not change.
+
 Adoption date. This paper assumes the owner adopts after 30 Nov 2026, so the F30 rules apply to the
 owner's account whatever its history. It does not assume a cluster is created early to stay exempt.
 
@@ -154,16 +183,17 @@ owner's account whatever its history. It does not assume a cluster is created ea
 |---|---|---|---|---|---|
 | Web ×2 | 40 [A] | 32 (Savings Plan, provisional) [A] | 2 × 4 GB Droplet = 48 [V F2] (web+worker share) | 2 × 12 → 2 × 25 [V F8] | 2 × 7 → 2 × 25 [V F14] |
 | Worker ×1 | 20 [A] | 16 [A] | 0 → 24 (3rd Droplet) [V F2] | 25 [V F8] | 25 [V F14] |
-| Postgres | 45 single-AZ [A] | 45 → 90 Multi-AZ [A] | 30.45 single 2 GiB, no standby [V F3]; HA: 2 × 130 = 260 Advanced 8 GiB [V F31] | as B [V F3, F31] | 40 → 80 HA + 15 storage [V F14, F15] |
+| Postgres | 45 single-AZ [A] | 45 single-AZ (v1); later 90 Multi-AZ [A] | 30.45 single 2 GiB, no standby [V F3]; later HA: 2 × 130 = 260 Advanced 8 GiB [V F31] | as B [V F3, F31] | 40 + 15 storage (v1); later HA 80 + 30 storage [V F14, F43] |
 | Workspace / plan fee | — | — | — | — | 25 Pro (7-day PITR) [V F14] |
 | LB / WAF | 35 [A] | 20 ALB only [A] | 12 [V F11] | included [A] | included [A] |
 | NAT / fixed egress IP | 40 [A] | 5 NAT instance (0 for public-subnet tasks, no fixed IP) [A] | 0 (Droplet IP) [A] | 0 → 25 [V F8] | 0 → 100 [V F14] |
 | KMS, secrets, registry, storage, logs, traces, backup vault | 30 [A] | 13 [A] | 5 Spaces [V F11] + 0–20 registry [V F11] + 0–20 logs [A] | 5 Spaces [V F11] + 0–20 logs [A] | 5 (Spaces SGP1) [V F11] + 0–20 logs [A] |
 | Staging | 35 [A] | 15 (stopped off-hours) [A] | 12 + 15.15 [V F2, F3] | 12 + 12 + 15.15 [V F8, F3] | 7 + 7 + 19 [V F14] |
-| **Total USD** (low–high; B, C with no DB standby) | **245** (185–305) | **≈ 145–190** | **≈ 122–187** | **≈ 123–195** | **≈ 157–353** |
-| **Total USD, B and C with a DB standby** (Advanced Edition) | — | — | **≈ 352–416** | **≈ 353–424** | — |
-| **Total RM @ 4.10** (low–high; B, C with no DB standby) | **≈ 1 005** (760–1 250) | **≈ 595–780** | **≈ 500–765** | **≈ 505–800** | **≈ 645–1 445** |
-| **Total RM @ 4.10, B and C with a DB standby** | — | — | **≈ 1 445–1 705** | **≈ 1 450–1 740** | — |
+| **v1 total USD, no DB standby** (low–high) | **245** (185–305), single-AZ already | **≈ 145** | **≈ 122–187** | **≈ 123–195** | **≈ 157–313** |
+| **v1 total RM @ 4.10, no DB standby** | **≈ 1 005** (760–1 250) | **≈ 595** | **≈ 500–765** | **≈ 505–800** | **≈ 645–1 285** |
+| Later upgrade, not v1: cost to add a DB standby | +45 Multi-AZ [A]; convert in place [V F44] | +45 Multi-AZ [A]; convert in place [V F44] | +229.55 (2 × 130 Advanced in place of 30.45) [V F31]; a move to a new Advanced cluster [A] | as B | +55 (standby = same plan 40 + storage 15) [V F43]; DB restart, "usually for less than five minutes" [V F43] |
+| Later upgrade, not v1: total USD with a DB standby | ≈ 290 [A] | **≈ 190** | **≈ 352–416** | **≈ 353–424** | **≈ 212–368** |
+| Later upgrade, not v1: total RM @ 4.10 | ≈ 1 190 | **≈ 780** | **≈ 1 445–1 705** | **≈ 1 450–1 740** | **≈ 870–1 510** |
 | Removed vs A | — | WAF, managed NAT, X-Ray, 2nd-account locked vault, PR previews (§7.1) | KMS, IAM, WAF, private VPC subnets, Secrets Manager, CloudTrail, X-Ray, locked vault, in-country data, OIDC | same as B, but no servers to patch | same as C; dedicated IP costs $100 |
 
 **AWS vs lean options (D2, B2, B3, B4).** Same line items, in a second table so the main table stays readable.
@@ -174,15 +204,16 @@ base total. B3 and B4 are sub-variants of B2 and are shown apart from it.
 |---|---|---|---|---|---|---|
 | Web | ×2: 40 [A] | ×2: 32 (Savings Plan, provisional) [A] | **×1** `1c-2g` = 25 [V F36] | one 8 GB / 4 vCPU Droplet = 48 for web, worker, ClamAV and Caddy under Compose [V F2] | as B2: 48 [V F2] | one NVMe VPS 8 GB / 4 cores, RM 59.90 = 14.61 [V F41] |
 | Worker ×1 | 20 [A] | 16 [A] | `1c-2g` = 25, ClamAV inside (~2 GB [A]) [V F36] | 0, same Droplet | 0, same Droplet | 0, same VPS |
-| Postgres | 45 single-AZ [A] | 45 → 90 Multi-AZ [A] | `1c-2g` 40 + storage 15 (50 GB × 0.30; size [A]) = 55, no standby [V F36] | 30.45 managed 2 GiB, single node, Standard Edition [V F3, F30] | 0, self-run container on the Droplet [A] | 0, self-run on the VPS [A] |
+| Postgres | 45 single-AZ [A] | 45 single-AZ (v1); later 90 Multi-AZ [A] | `1c-2g` 40 + storage 15 (50 GB × 0.30; size [A]) = 55, no standby [V F36] | 30.45 managed 2 GiB, single node, Standard Edition [V F3, F30] | 0, self-run container on the Droplet [A] | 0, self-run on the VPS [A] |
 | Workspace / plan fee | — | — | 25 Pro [V F35] | — | — | — |
 | LB / WAF | 35 [A] | 20 ALB only [A] | included [A]; "Firewall & DDoS mitigation" [V F14] | 0, Caddy on the Droplet ends TLS; no WAF [A] | as B2 | as B2 |
 | NAT / fixed egress IP | 40 [A] | 5 NAT instance (0 for public-subnet tasks, no fixed IP) [A] | 0, no dedicated IP (+100 per IP set if needed [V F35]) | 0, Droplet IP [A] | as B2 | 0, VPS IP [A] |
 | KMS, secrets, registry, storage, logs, traces, backup vault | 30 [A] | 13 [A] | 5 Spaces SGP1 [V F11]; Render logs 14 days on Pro [V F35]; a 90-day log store is not included (0–20 [A]) | 5 Spaces [V F11] + 9.60 weekly Droplet backup (20 %) [V F2]; registry GHCR 0 [A]; log store not included (0–20 [A]) | as B2: 5 + 9.60; Spaces also holds WAL and base backups [A] | 1.80 off-site backups in Azure Blob Malaysia West (100 GB × 0.018; size [A]) [V F40]; files on the VPS disk [A]; provider backup service price not verified [A] |
 | Staging | 35 [A] | 15 (stopped off-hours) [A] | 0 at first; optional **+33** = 7 + 7 + 19 [V F36] | 0 at first; optional **+24**: a 2nd 4 GB Droplet with Postgres in a container [V F2] | optional **+24**, as B2 [V F2] | optional **+9.73**: NODE1 4 GB, RM 39.90 [V F41] |
 | Optional: ClamAV as its own service | — | — | +25 (`1c-2g`), only if ClamAV does not fit in the worker [V F36, F38] | — (fits on 8 GB [A]) | — | — |
-| **Total USD** | **245** (185–305) | **≈ 145–190** | **135** no staging · **168** with staging | **93.05** · **117.05** | **62.60** · **86.60** | **16.41** · **26.14** |
-| **Total RM @ 4.10** | **≈ 1 005** (760–1 250) | **≈ 595–780** | **≈ 555** · **≈ 690** | **≈ 380** · **≈ 480** | **≈ 255** · **≈ 355** | **≈ 67** · **≈ 107** |
+| **v1 total USD, no DB standby** | **245** (185–305) | **≈ 145** | **135** no staging · **168** with staging | **93.05** · **117.05** | **62.60** · **86.60** | **16.41** · **26.14** |
+| **v1 total RM @ 4.10** | **≈ 1 005** (760–1 250) | **≈ 595** | **≈ 555** · **≈ 690** | **≈ 380** · **≈ 480** | **≈ 255** · **≈ 355** | **≈ 67** · **≈ 107** |
+| Later upgrade, not v1: cost to add a DB standby | +45 [A], in place [V F44] | +45 [A], in place [V F44] | +55 (40 + 15 storage) [V F43]; DB restart < 5 min usually [V F43] | +229.55 Advanced 2 × 130 [V F31], via a new cluster [A] | a 2nd server (+48 + 9.60 = +57.60 [V F2]) plus replication we build and run [A] | a 2nd VPS (+RM 59.90 = +14.61 [V F41]) plus replication we build and run [A] |
 | Removed vs A | — | WAF, managed NAT, X-Ray, 2nd-account locked vault, PR previews (§7.1) | same as D, plus a single web instance, no DB standby, no staging at first | same as B, plus one server for everything (no LB, no 2nd host) | as B2, plus managed PITR, managed patching of the DB | as B3, on a small local host with no verified API, IaC or managed services [A]; data stays in Malaysia [V F41] |
 
 How the D2 totals are built (USD). D2 no staging = 25 web + 25 worker + 40 Postgres + 15 storage + 25 Pro +
@@ -228,25 +259,34 @@ total 93.72 (RM 384.25); Microsoft says Burstable is "Not recommended for produc
 General Purpose 2-vCore server it adds 164.28, total 236.95 (RM 971.49) [V F40]. These are list prices from
 Microsoft's retail price API; whether the region suits SKIW's other services was not checked [A].
 
-Cheapest first (USD/month; RM @ 4.10). A and A2 include staging in all their figures.
+**v1 ranking, cheapest first** (no DB standby, with staging so every option is on the same footing; USD/month,
+RM @ 4.10; low end where a range exists). "2 web" is the spec's min 2 web tasks (D3, D15, §8.3).
 
-| Rank | Option | No staging | With staging | Main thing given up |
-|---|---|---|---|---|
-| 1 | B4 Malaysian VPS (iCore), Postgres on the VPS | 16.41 (RM 67.28) | 26.14 (RM 107.18) | everything managed; small vendor, no API or IaC verified [A] |
-| 2 | B3 DO VPS, Postgres on the VPS | 62.60 (RM 256.66) | 86.60 (RM 355.06) | managed DB and PITR; one server |
-| 3 | B4 alt: Azure Malaysia West VM, Postgres on the VM | 72.67 (RM 297.95) | not costed | managed DB; one server |
-| 4 | B2 DO VPS + managed Postgres | 93.05 (RM 381.50) | 117.05 (RM 479.90) | one server for the app; no DB standby |
-| 5 | D2 Render lean | 135.00 (RM 553.50) | 168.00 (RM 688.80) | one web instance; no DB standby |
-| 6 | A2 trimmed AWS | — | ≈ 145–190 (RM ≈ 595–780) | WAF, locked vault, X-Ray, previews (§7.1) |
-| 7 | A AWS as specified | — | 245 (RM ≈ 1 005) | nothing |
+| Rank | Option | v1 USD | v1 RM | Data in Malaysia | 2 web | Needs a named server operator | HA later, + USD/month |
+|---|---|---|---|---|---|---|---|
+| 1 | B4 Malaysian VPS (iCore), Postgres on the VPS | 26.14 | 107.18 | yes [V F41] | no, one server | yes | +14.61 and self-built replication [A] |
+| 2 | B3 DO VPS, Postgres on the VPS | 86.60 | 355.06 | no | no, one server | yes | +57.60 and self-built replication [A] |
+| 3 | B2 DO VPS + managed Postgres | 117.05 | 479.90 | no | no, one server | yes | +229.55, new Advanced cluster [A] |
+| 4 | B DO Droplets (low) | 122.60 | 502.66 | no | yes, 2 hosts | yes | +229.55, new Advanced cluster [A] |
+| 5 | C DO App Platform (low) | 123.60 | 506.76 | no | yes | no | +229.55, new Advanced cluster [A] |
+| 6 | A2 trimmed AWS | ≈ 145 [A] | ≈ 595 | yes | yes | no (NAT instance if chosen) | +45 in place [A] [V F44] |
+| 7 | D Render (low) | 157.00 | 643.70 | no | yes, 2 × `0.5c-512mb` | no | +55 [V F43] |
+| 8 | D2 Render lean | 168.00 | 688.80 | no | no, one instance | no | +55 [V F43] |
+| 9 | A AWS as specified | 245 [A] | ≈ 1 005 | yes | yes | no | +45 in place [A] [V F44] |
+
+The Azure Malaysia West alternative to B4 (72.67 without staging, Postgres self-run) is not ranked: its staging
+was not costed. D low is cheaper than D2 with staging and keeps two (smaller) web instances; whether 512 MB is
+enough for a Django ASGI web process is not verified [A].
 
 How the B and C totals are built (USD). B low = 48 + 30.45 + 12 + 5 + 27.15 staging = 122.60. B high, no
 standby = 48 + 24 + 30.45 + 12 + 5 + 20 + 20 + 27.15 = 186.60. B HA = low and high with 260 in place of
 30.45 = 352.15–416.15. C low = 24 + 25 + 30.45 + 5 + 39.15 staging = 123.60. C high, no standby = 50 + 25 +
 30.45 + 25 + 5 + 20 + 39.15 = 194.60. C HA = 353.15–424.15. Staging keeps a single 1 GiB node (15.15).
 v1.0 used a US$60.90 Standard standby (B 122–217, C 123–225); a new cluster cannot buy that after
-30 Nov 2026 [V F30]. In the A2 and D columns the high end includes a DB standby (Multi-AZ or Render HA); A (§8.2 Step 1) is
-single-AZ and its range is the spec's ±25 %.
+30 Nov 2026 [V F30]. Up to v1.3 the A2 and D high ends included a DB standby. From v1.4 the v1 rows exclude
+it and the "later upgrade" rows add it: A2 v1 = 32 + 16 + 45 + 20 + 5 + 13 + 15 = 146 (≈ 145); D v1 high =
+353 − 40 = 313. The D standby is now +55, not +40, because Render bills the standby's storage too [V F43];
+so D with HA is 212–368. A (§8.2 Step 1) is single-AZ and its range is the spec's ±25 %.
 
 DO HA price limits.
 - US$260 is the only verified Advanced Edition price: 8 GiB/2 vCPU at US$130 per node [V F31]. That is four
@@ -254,14 +294,22 @@ DO HA price limits.
 - The new shared-CPU Advanced plans (8–64 GiB, from 15 Oct 2026 [V F30]) have no published price. Their
   cost is **blocked pending a DO quote**. It may be lower than US$260.
 - Advanced Edition in SGP1 is **not verified** [A]; DO says regions depend on the plan [V F32].
-- What this blocks: whether C with HA can undercut D with HA (D high US$353 is about US$71 below C HA high
-  at today's verified prices). It does not block A2, or C without a standby.
+- What this blocks: whether C with HA can undercut D with HA (D high with HA, US$368, is about US$56 below
+  C HA high at today's verified prices). It does not block A2, or C without a standby. With HA out of v1, it
+  blocks only the later-upgrade cost.
+- Adding HA later on DO. A cluster created before the F30 restrictions apply to the account may still "add
+  standby and read-only nodes" [V F42]. A cluster created after them cannot get a standby on Standard Edition
+  [V F30]. DO's docs do not describe converting a Standard cluster to Advanced Edition [V F42], so this paper
+  assumes HA later means a new Advanced cluster and a data move, with a cut-over window [A]. Creating the
+  cluster before the cutoff (15 Oct 2026 for accounts that never had one) would keep the cheap standby
+  option open; this paper does not assume it.
 
 Uncertainty. AWS `ap-southeast-5` prices were not checked line by line (the spec's ±25 % stands). Every
 non-AWS "logs" line is a placeholder: DO and Render have no in-country log store, so logs go to a host
 or a third party [A]. In the main table no option is cheaper by more than about US$125/month (RM 510) at its
-low end, and the low ends drop the DB standby that the owner's workload list asks for. With a standby, DO (B, C) is now the
-dearest option in this table. **D24 says ≈ US$100–150 for the Render fallback; current list prices give
+low end. The owner has accepted no DB standby in v1 (§1), so the low ends are valid v1 figures. If HA is added
+later, DO (B, C, B2) is the dearest upgrade (+US$229.55 and a new cluster [A]); Render (+US$55) and AWS
+(+US$45 [A]) add it in place [V F43, F44]. **D24 says ≈ US$100–150 for the Render fallback; current list prices give
 US$157 or more** (Pro workspace + 2 GB worker + 1-CPU DB) for D. D2 fits inside the D24 range only by
 dropping things: US$135 with one web instance, no DB standby and no staging; US$168 once staging is added
 (above the range). D24's figure therefore matches D2 without staging, not D. Render's own deploy and price
@@ -330,20 +378,25 @@ B3 and B4 (Postgres on the VPS) differ from B in the database rows:
 
 ### 3.4 Builder recommendation (not a decision)
 
-Two options at most:
+Two options at most. From v1.4 both are judged on the v1 (no DB standby) totals, with staging (§3.2 v1 ranking).
 
-1. **A2 — trimmed AWS in `ap-southeast-5`** (target ≈ US$145–190, RM 595–780 [A]), only if the owner
-   accepts the A2 cuts and their residual risks (§7.1, Q6). Same price band as the PaaS options, keeps a
-   Multi-AZ DB in its high case, no new cross-border flow, the smallest spec change.
-2. **C — DO App Platform + Managed PostgreSQL + Spaces in SGP1, without a DB standby** (≈ US$123–195,
-   RM 505–800 [V/A mix]), only if the owner accepts the Singapore PDPA step, the gaps in §7 and a single
-   DB node (recovery by PITR restore, Q3). If the owner needs a DB standby outside AWS, **D Render** (≈ US$157–353)
-   replaces C as the second choice, unless a DO quote for a shared-CPU Advanced plan in SGP1 brings C HA
-   below D (§3.2).
+1. **A2 — trimmed AWS in `ap-southeast-5`** (v1 ≈ US$145, RM ≈ 595 [A]), only if the owner accepts the A2 cuts
+   and their residual risks (§7.1, Q6). About US$21 above C, keeps two web tasks, no new cross-border flow, the
+   smallest spec change. HA later is +US$45 [A], added in place [V F44].
+2. **C — DO App Platform + Managed PostgreSQL + Spaces in SGP1, without a DB standby** (v1 ≈ US$123.60–194.60,
+   RM ≈ 505–800 [V/A mix]), only if the owner accepts the Singapore PDPA step and the gaps in §7. It is the
+   cheapest option that keeps two web instances and needs no named server operator. Its HA upgrade is the
+   dearest: +US$229.55 and a move to a new Advanced cluster [V F31, F42] [A]. If the owner expects to add HA
+   within a year or two, **D Render** (v1 US$157, HA later +US$55 in place [V F43]) is the better second
+   choice.
 
-D2 (lean Render) costs US$135 without staging, US$10 below A2's low end; with staging (US$168) it falls inside
-A2's range (US$145–190). It has one web instance, no DB standby and the Singapore PDPA step, while A2 keeps two
-web tasks and data in Malaysia. It does not change the ranking above.
+Did the ranking change? No. With HA out of v1, C (123.60), A2 (≈ 145) and D (157) sit in one band, about
+US$33 apart. A2 stays first because it keeps data in Malaysia at about US$21 more than C. What changed is the
+reason D can replace C: no longer "a standby is needed now", but "HA is likely later".
+
+D2 (lean Render) costs US$135 without staging and US$168 with it, above A2 (≈ US$145) and D low (US$157) on
+the same footing. It has one web instance and the Singapore PDPA step, while A2 keeps two web tasks and data in
+Malaysia. It does not change the ranking above.
 
 B2 (lean VPS, US$93.05 without staging, US$117.05 with it) is the cheapest of A2, D2 and B2, and B3 and B4 are
 cheaper still (§3.2). All three need a named person to patch, back up and restore one server (Q4, Q9). Without
@@ -357,10 +410,10 @@ Decision tree:
   If A2 is still too dear → ask which A2 cut is acceptable next (single `web` is not, §8.2).
 - Owner **accepts** the Singapore step (the PDPA adviser names the applicable section 129 condition and its
   evidence, the transfer notice is in place, Q15 contracts checked — §4) →
-  - no DB standby needed, lowest operations load → **C** (D Render if pre-deploy fail-stop and longer
-    timeouts matter more than ≈ US$35–120/month, both without a standby);
-  - DB standby needed → **D Render**, or C only after a DO quote and SGP1 check for shared-CPU Advanced
-    Edition (§3.2). DO HA at today's verified price (≈ US$353–424) costs more than A (US$245);
+  - v1 has no DB standby (owner input, §1), lowest operations load → **C** (D Render if pre-deploy
+    fail-stop and longer timeouts matter more than ≈ US$33–120/month, both without a standby);
+  - HA expected later → **D Render** (+US$55 in place), or C only after a DO quote and SGP1 check for
+    shared-CPU Advanced Edition (§3.2). DO HA at today's verified price (≈ US$353–424) costs more than A (US$245);
   - has a named person to patch and run servers → B is possible, but saves little over C.
 - Whichever is chosen, a **database spike** (§9, S1) must pass on the chosen managed Postgres before the spec
   is changed for real.
@@ -581,6 +634,9 @@ in Malaysia per the providers' pages [V F40, F41], so D19 only names the two new
 2. **Monthly cap:** what is the most you will pay for hosting per month (USD or RM), excluding AI tokens?
 3. **Availability target:** what RTO and RPO do you need (spec today: RTO ≤ 2 h, RPO ≤ 5 min, 14-day PITR)?
    Is 7-day PITR and no locked backup copy acceptable?
+   *Partly answered 2026-10-11 (§1):* no DB standby (HA) in v1; HA is a later upgrade. Still required: backups,
+   PITR where the option has it, and a timed, recorded restore test (UNI-16, T13). Still open: the RTO and RPO
+   numbers, and how long a failed DB node or server may be down before it is restored.
 4. **Operator:** who patches servers and answers alerts? If nobody, B is out.
 5. **AI route:** if hosting leaves AWS, should Bedrock still be called with AWS credentials from outside
    AWS, should AI use the Anthropic API fallback (D12), or stay off until Q13 is decided?
@@ -594,6 +650,8 @@ in Malaysia per the providers' pages [V F40, F41], so D19 only names the two new
    f. Staging hours, and a 1- or 3-year Savings Plan commitment (rates not yet verified)?
 7. **DB standby on DO (C only):** is a single DB node acceptable (recovery by PITR restore, RTO per Q3)? If not,
    should we ask DO for a shared-CPU Advanced Edition quote in SGP1, or move to D Render (§3.2, §3.4)?
+   *Answered 2026-10-11 (§1):* a single DB node is acceptable for v1. Remaining point: on DO, adding HA later
+   means a new Advanced cluster [A] [V F42]; on Render or AWS it is added in place [V F43, F44].
 8. **Lean Render (D2 only):**
    a. Workspace: Pro (US$25, 7-day PITR, unlimited seats, 14-day logs) or Hobby (US$0, 3-day PITR, one seat,
       7-day logs) [V F35]? Render calls Hobby "for individuals building personal projects and prototypes". No
@@ -607,3 +665,9 @@ in Malaysia per the providers' pages [V F40, F41], so D19 only names the two new
    b. Do you accept a single node's RTO and RPO: the service stops while the one server is rebuilt or restored,
       and data since the last backup or archived WAL may be lost (RTO/RPO per Q3)?
    c. B4: is a small Malaysian host acceptable before its support, backups and security practice are checked?
+10. **One web instance:** does "HA can be the afterthought" also cover running **one** web instance? The spec
+    asks for min 2 web tasks for no-downtime deploys (D3, D15, §8.3), and this paper does not read your input
+    as changing that. What is known: Render documents zero-downtime deploys with one instance (the new
+    instance takes traffic after its health check; the old one gets `SIGTERM` 60 s later) [V F37], but not how
+    long a crashed instance takes to restart [A]. DO App Platform's behaviour with one instance was not checked
+    [A]. With one instance (D2, B2–B4), a crash stops the service until it restarts or is rebuilt.
