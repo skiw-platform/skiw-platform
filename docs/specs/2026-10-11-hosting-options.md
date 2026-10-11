@@ -1,9 +1,11 @@
 # SKIW Platform — hosting options (decision paper)
 
 - Date: 2026-10-11 · Author: Builder (deep tier) · Status: draft
-- Version: 1.5 · This paper changes no spec text, so no spec hash moves. The review pins this paper's own
+- Version: 1.6 · This paper changes no spec text, so no spec hash moves. The review pins this paper's own
   git hash (v1.0 was `40ab593a`, v1.1 was `c80a1899`, v1.2 was `667150a6`, v1.3 was `9670b835`,
-  v1.4 was `8d0906e5`).
+  v1.4 was `8d0906e5`, v1.5 was `76ddea6a`).
+- Totals: the main §3.2 table holds the full-service totals (A, A2, B, C, D). The second table holds the lean
+  totals (D2, B2, B3, B4), which drop more controls; savings stated for one do not cover the other.
 - Supersedes: nothing. Input to a possible spec change of `docs/specs/2026-10-05-skiw-platform-stack-design.md`
   (v1.13, hash `e3141585`) sections D3, D4, D12–D15, D17, D19, D23, D24, §8.2, §8.3, M1, M6.
 - Audience: the Reviewer ("Bob"), then the owner. The owner has **not** chosen a platform.
@@ -20,6 +22,22 @@
 - Prices are list prices in USD per month, 730 h, excluding AI tokens, tax and Google Workspace.
   RM uses **4.10** (BNM selling rate 4.096 on 2026-10-09 [V F29], rounded). The spec uses 4.25 [A];
   at 4.25 every RM figure is about 3.7 % higher.
+
+## Changes from 1.5
+
+Fixes review Round 3 (2026-10-11) on v1.5 hash `76ddea6a`:
+
+1. **[P1] Database-only export is not complete recovery.** §3.5 now separates database recovery from complete
+   recovery and adds a recovery inventory (files, roles and grants, app-held key versions in escrow, config and
+   digests, dump decryption key, audit anchors), role bootstrap, a complete-recovery drill, provisional file and
+   key costs, a capacity example for hourly dumps, the real-RPO rule with a freshness alert, and adopting-spec
+   rules (EVT-06, closed role set, G-DRIVE and G-AI). The G / L / L + pull table covers only what each captures.
+   §7, §9 (M6' and B2–B4 scope) and Q11 follow. F48 adds the `pg_dump` single-database sentence.
+2. **[P2] In-country branch.** The decision tree, §3.1 (B3, B4 and the rejected unprotected single VPS), the
+   ranking note, §3.4 and Q1 now show B4 and its Azure alternative as a conditional in-country choice.
+3. Optional: the header and §3.2 separate full-service totals from lean totals.
+The Round 2 deferred condition (ALB-only ingress for A2 public-subnet tasks, §7.1) is unchanged. No cost or
+ranking figure changed.
 
 ## Changes from 1.4
 
@@ -82,7 +100,8 @@ Fixes review Round 1 (2026-10-11) on v1.0 hash `40ab593a`:
 ## Facts checked
 
 All rows checked 2026-10-11 unless stated. The table has **48 rows (F1–F48)**. The paper cites them in
-**187 verified-fact tags** (183 in §§1–10, 4 in the sections above; a tag may cite more than one row). v1.4 had
+**192 verified-fact tags** (188 in §§1–10, 4 in the sections above; a tag may cite more than one row). v1.5 had
+48 rows and 187 tags; v1.4 had
 44 rows and 157 tags; v1.3 had
 41 rows and 129 tags; v1.2 had 39 rows and 103 tags; v1.1 had 34 rows and 81 tags. The v1.0 PR text said "37 verified fact tags"; v1.0 actually had 29 rows and 64 tags.
 
@@ -135,7 +154,7 @@ All rows checked 2026-10-11 unless stated. The table has **48 rows (F1–F48)**.
 | F45 | Google Drive limits for uploads by a job | "Service accounts don't have storage quota and can't own files. Instead, they must upload files and folders into shared drives, or use OAuth 2.0 to upload items on behalf of a human user." Files in shared drives "belong to the organization". A shared drive holds at most 500 000 items. "Each user can upload and copy 750 GB to Drive within 24 hours"; files up to 5 TB. Drive API: 1 000 000 quota units per minute per project, 325 000 per user per project | https://developers.google.com/workspace/drive/api/guides/about-shareddrives, https://support.google.com/a/answer/7338880, https://developers.google.com/workspace/drive/api/guides/limits, https://knowledge.workspace.google.com/admin/drive/storage-and-upload-limits-for-google-workspace |
 | F46 | Google Workspace storage and data location | Pooled storage: Business Starter "30 GB times the number of End Users", Business Standard 2 TB, Business Plus 5 TB per user; content in shared drives counts toward the pool. Data regions for data at rest: "United States, European Union … or No preference" (no Malaysia or Asia option); supported on Business Standard and Plus, Enterprise and some other editions, not Business Starter; with "No preference" Google stores covered data without a location restriction | https://knowledge.workspace.google.com/admin/storage/google-workspace-storage-faq-for-admins, https://knowledge.workspace.google.com/admin/compliance/choose-a-geographic-location-for-your-data |
 | F47 | AWS RDS point-in-time restore | "RDS uploads transaction logs for DB instances to Amazon S3 every five minutes." You can restore "to any point in time within your backup retention period"; a restore creates a new DB instance | https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PIT.html |
-| F48 | PostgreSQL 17 `pg_dump` and row security | "By default, pg_dump will set row_security to off, to ensure that all data is dumped from the table. If the user does not have sufficient privileges to bypass row security, then an error is thrown." Superusers and `BYPASSRLS` roles always bypass RLS; table owners bypass it unless the table has `FORCE ROW LEVEL SECURITY`. `-Fc` custom format is "compressed by default" and restores with `pg_restore` | https://www.postgresql.org/docs/17/app-pgdump.html, https://www.postgresql.org/docs/17/ddl-rowsecurity.html |
+| F48 | PostgreSQL 17 `pg_dump` and row security | "By default, pg_dump will set row_security to off, to ensure that all data is dumped from the table. If the user does not have sufficient privileges to bypass row security, then an error is thrown." Superusers and `BYPASSRLS` roles always bypass RLS; table owners bypass it unless the table has `FORCE ROW LEVEL SECURITY`. `-Fc` custom format is "compressed by default" and restores with `pg_restore`. "pg_dump only dumps a single database"; global objects "such as roles and tablespaces" need `pg_dumpall` (rechecked in v1.6) | https://www.postgresql.org/docs/17/app-pgdump.html, https://www.postgresql.org/docs/17/ddl-rowsecurity.html |
 
 ## 1. Goal
 
@@ -193,8 +212,8 @@ downloadable on demand (Option L, §3.5). The Drive export is Option G.
 | A3 | AWS Lightsail in Malaysia | Lightsail VMs + Lightsail LB + Lightsail managed DB + bucket, same AWS account | In country [V F24], but VM ops like B, and Lightsail DB availability in Malaysia and its role privileges are **not verified** [A]. Hold until verified. |
 | B | DO Droplets + Managed PostgreSQL + Spaces (SGP1) | 2–3 Droplets running Docker Compose behind a DO Load Balancer (or Caddy), Managed PG (standby only on Advanced Edition after the F30 cutoff), Spaces | Cheapest at the low end, but **we operate the servers** (OS patches, Docker, TLS, log shipping), no OIDC (API token, F12), no in-country data, single datacentre [A]. Not shortlisted unless the owner names an operator. |
 | B2 | DO VPS, lean (SGP1) | **One** 8 GB / 4 vCPU Droplet running web, worker, ClamAV and Caddy under Docker Compose; weekly Droplet backups; Managed PG 2 GiB single node (Standard Edition); Spaces | Variant of B. ≈ US$93 without staging (§3.2). One server is a single point of failure; we patch it; no OIDC [V F12]; data in Singapore. Single-node Standard Edition stays on sale after the F30 cutoffs [V F30]. Builder's estimate. |
-| B3 | B2 with Postgres on the same VPS | As B2, but Postgres runs in a container on the Droplet | ≈ US$63 (§3.2). Saves US$30.45 a month; we run backups, WAL archiving, PITR, restore tests and DB patching ourselves; app and DB share one failure domain. |
-| B4 | Malaysian VPS (iCore Technology) | One 8 GB / 4-core NVMe VPS in Cyberjaya or Kuala Lumpur [V F41], set up as B3; off-site backups to Azure Blob Malaysia West [V F40] | ≈ US$16 (RM 67) (§3.2). Data in Malaysia per the provider's page [V F41]; this is not a PDPA finding. No managed DB, object storage or API listed [V F41]; support, backups and security practice not verified [A]. Azure Malaysia West VM is the priced alternative (§3.2). |
+| B3 | B2 with Postgres on the same VPS | As B2, but Postgres runs in a container on the Droplet | ≈ US$63 (§3.2). Saves US$30.45 a month; we run backups, WAL archiving, PITR, restore tests and DB patching ourselves; app and DB share one failure domain. **Conditional**: a named operator, spike S1, and a passed complete-recovery drill (§3.5) before the adopting spec accepts it. |
+| B4 | Malaysian VPS (iCore Technology) | One 8 GB / 4-core NVMe VPS in Cyberjaya or Kuala Lumpur [V F41], set up as B3; off-site backups to Azure Blob Malaysia West [V F40] | ≈ US$16 (RM 67) (§3.2). Data in Malaysia per the provider's page [V F41]; this is not a PDPA finding. No managed DB, object storage or API listed [V F41]; support, backups and security practice not verified [A]. Azure Malaysia West VM is the priced alternative (§3.2). App files live on the VPS disk, so they need their own off-host copy (§3.5). **Conditional**, as B3: named operator, vendor checks, spike S1, a passed complete-recovery drill, and adopting-spec acceptance. |
 | C | DO App Platform + Managed PostgreSQL + Spaces (SGP1) | Containers for `web` (2) and `worker` (1), pre-deploy job `migrate`, Managed PG, Spaces | Managed containers, workers and pre-deploy jobs exist [V F9]; one vendor, one region, object storage included. Data in Singapore. A DB standby now needs Advanced Edition (≈ US$260 for 2 nodes [V F31]). **Shortlisted without a standby** if the PDPA step is accepted (§3.4). |
 | D | Render (Singapore) | Web services, background worker, pre-deploy command, Render Postgres; object storage elsewhere | Pre-deploy failure cancels the deploy [V F16]; good deploy model. No object storage of its own; dearer than C at equal sizing (§3.2); dedicated IP $100 [V F14]. Already the D24 fallback. Cheaper than C when a DB standby is added (a later upgrade, not v1; §3.2). |
 | D2 | Render (Singapore), lean | Variant of D: Pro workspace, **one** web service `1c-2g`, one worker `1c-2g` (ClamAV inside), one Postgres `1c-2g` with no standby, Spaces SGP1 for files, no staging at first, no dedicated IP | Same platform, deploy model and PDPA step as D. Priced on Pro, not Hobby: Hobby has 3-day PITR, one seat and 7-day logs [V F35]. One web instance breaks "min 2 web tasks" (§8.2, §8.3): deploys stay zero-downtime [V F37], but a crash of that instance stops the service until it restarts [A]. ≈ US$135 without staging (§3.2). Builder's estimate; the owner can change it. |
@@ -202,7 +221,7 @@ downloadable on demand (Option L, §3.5). The Drive export is Option G.
 | F | Fly.io (`sin`) | Machines + Managed Postgres | Singapore, managed PG with HA [V F21]. Compute prices and role privileges not verified [A]. Same PDPA step as C. Not costed. |
 | G | Railway (Singapore) | Services + Postgres | Singapore region [V F22]; database features (PITR, HA, roles) not verified [A]. Not costed. |
 | H | Malaysia-region cloud other than AWS | Azure Malaysia West + Azure Database for PostgreSQL flexible server | In country, zone-redundant HA [V F26]. Not costed; the whole CDK/IAM/Bedrock/WIF design would be rewritten. No Malaysian-owned provider with a verifiable Malaysian region **and** managed PostgreSQL was verified. |
-| — | Single VPS, everything on one host | One Droplet with app, worker and self-run Postgres | **Rejected.** About US$35–50 [A], but breaks "min 2 web tasks" (§8.3), has no managed PITR, and one host failure loses service and possibly data. |
+| — | Single VPS, unprotected (hobby set-up) | One host with app, worker and self-run Postgres, with no off-host backup, no restore test and no named operator | **Rejected.** About US$35–50 [A]; one host failure loses service and possibly data. This is **not** B3 or B4: those add an off-host encrypted copy of the database, files and key material, a tested complete recovery and a named operator (§3.5), and stay conditional. |
 
 ### 3.2 Prices for Step 1 (USD/month, list prices)
 
@@ -317,6 +336,11 @@ The Azure Malaysia West alternative to B4 (72.67 without staging, Postgres self-
 was not costed. D low is cheaper than D2 with staging and keeps two (smaller) web instances; whether 512 MB is
 enough for a Django ASGI web process is not verified [A].
 
+Ranks 1–4 are **conditional**: each needs a named server operator; B3 and B4 also need a passed
+complete-recovery drill (§3.5), and every non-AWS option needs spike S1. The VPS figures cover the database
+copy only. The off-host copy of uploaded files and key material is **provisional** [A] (§3.5 item 13). Q11's
+choice of dump cadence and retention can move these costs, and so the ranking.
+
 How the B and C totals are built (USD). B low = 48 + 30.45 + 12 + 5 + 27.15 staging = 122.60. B high, no
 standby = 48 + 24 + 30.45 + 12 + 5 + 20 + 20 + 27.15 = 186.60. B HA = low and high with 260 in place of
 30.45 = 352.15–416.15. C low = 24 + 25 + 30.45 + 5 + 39.15 staging = 123.60. C high, no standby = 50 + 25 +
@@ -345,8 +369,9 @@ DO HA price limits.
 
 Uncertainty. AWS `ap-southeast-5` prices were not checked line by line (the spec's ±25 % stands). Every
 non-AWS "logs" line is a placeholder: DO and Render have no in-country log store, so logs go to a host
-or a third party [A]. In the main table no option is cheaper by more than about US$125/month (RM 510) at its
-low end. The owner has accepted no DB standby in v1 (§1), so the low ends are valid v1 figures. If HA is added
+or a third party [A]. In the main (full-service) table no option is cheaper than A by more than about
+US$125/month (RM 510) at its low end. That statement does not cover the lean totals in the second table
+(D2, B2, B3, B4), which save more and give up more. The owner has accepted no DB standby in v1 (§1), so the low ends are valid v1 figures. If HA is added
 later, DO (B, C, B2) is the dearest upgrade (+US$229.55 and a new cluster [A]); Render (+US$55) and AWS
 (+US$45 [A]) add it in place [V F43, F44]. **D24 says ≈ US$100–150 for the Render fallback; current list prices give
 US$157 or more** (Pro workspace + 2 GB worker + 1-CPU DB) for D. D2 fits inside the D24 range only by
@@ -441,7 +466,8 @@ B2 (lean VPS, US$93.05 without staging, US$117.05 with it) is the cheapest of A2
 cheaper still (§3.2). All three need a named person to patch, back up and restore one server (Q4, Q9). Without
 that person they stay out of the shortlist, so the ranking above does not change. If the owner names an
 operator, B4 and its Azure Malaysia West alternative (US$72.67–93.72) are the only options under US$100 that
-keep data in Malaysia. iCore is not verified beyond its price page [A].
+keep data in Malaysia. iCore is not verified beyond its price page [A]. They are the **conditional in-country
+alternative** to A2 on the decision tree below, not a third recommended option.
 
 Owner inputs 2 and 3 (downtime and manual restore accepted; backups by export, §1, §3.5) change the points below.
 They change no ranking:
@@ -457,23 +483,36 @@ They change no ranking:
 
 Decision tree:
 
-- Owner does **not** accept moving primary data, backups, files and logs to Singapore → **A2**.
-  If A2 is still too dear → ask which A2 cut is acceptable next (single `web` is not, §8.2).
+- Owner does **not** accept moving primary data, backups, files and logs to Singapore (in-country branch) →
+  - no named server operator → **A2**. If A2 is still too dear → ask which A2 cut is acceptable next
+    (single `web` only if the adopting spec confirms Q10);
+  - a named server operator → **B4** (Malaysian VPS, iCore) or its **Azure Malaysia West** alternative are
+    also possible, **conditional** on: vendor checks (support, backups, security practice [A]), spike S1 on the
+    self-run Postgres, a passed complete-recovery drill (§3.5), single-web confirmation (Q10), and acceptance
+    in the adopting spec. Until all pass, A2 remains the in-country default.
 - Owner **accepts** the Singapore step (the PDPA adviser names the applicable section 129 condition and its
   evidence, the transfer notice is in place, Q15 contracts checked — §4) →
   - v1 has no DB standby (owner input, §1), lowest operations load → **C** (D Render if pre-deploy
     fail-stop and longer timeouts matter more than ≈ US$33–120/month, both without a standby);
   - HA expected later → **D Render** (+US$55 in place), or C only after a DO quote and SGP1 check for
     shared-CPU Advanced Edition (§3.2). DO HA at today's verified price (≈ US$353–424) costs more than A (US$245);
-  - has a named person to patch and run servers → B is possible, but saves little over C.
-- Whichever is chosen, a **database spike** (§9, S1) must pass on the chosen managed Postgres before the spec
-  is changed for real.
+  - has a named person to patch and run servers → B, B2 or B3 is possible, under the same conditions as B4
+    (S1, complete-recovery drill, Q10, adopting-spec acceptance); B saves little over C.
+- Whichever is chosen, a **database spike** (§9, S1) must pass on the chosen Postgres (managed or self-run)
+  before the spec is changed for real, and M6' must prove complete recovery, not database readiness alone
+  (§3.5, §9).
 
 ### 3.5 Backup design for the owner's proposal
 
 The owner proposes a scheduled job that exports the database to a cloud storage provider such as Google Drive
-(§1, input 2). This section is provider-neutral, except where it names Drive. The export adds to the
-platform's own backups where an option has them; it does not replace them.
+(§1, input 2), or to the host's own disk (input 3). This section is provider-neutral, except where it names
+Drive. The export adds to the platform's own backups where an option has them; it does not replace them.
+
+**Two kinds of recovery.** Items 1–9 describe **database recovery**: getting the rows back. A database dump
+alone does **not** give **complete recovery** of the service after the loss of a host or a provider account.
+That also needs the uploaded files, the database roles and grants, the app-held keys, the configuration and
+image digests, the means to decrypt the dumps, and the audit anchors (items 10–14). An option is only
+recoverable when both are covered and a drill has proved it (item 12).
 
 1. **What is exported.** A logical dump in custom format (`pg_dump -Fc`, compressed, restored with
    `pg_restore`) [V F48]. **Row security matters here.** The spec puts `FORCE ROW LEVEL SECURITY` on every
@@ -486,20 +525,23 @@ platform's own backups where an option has them; it does not replace them.
    - On self-run Postgres (B3, B4) we hold the superuser.
    - This role reads every tenant's data. Its password is a production secret (UNI-08), and only the backup
      job uses it.
-2. **Schedule and RPO.** The RPO equals the interval: daily loses up to 24 h of work, 6-hourly up to 6 h, hourly
-   up to 1 h. A shorter interval costs no extra money at this size [A: database assumed to be a few GB at
-   most], but each run adds load and storage. Compare the platforms' own PITR:
+2. **Schedule and RPO.** The **nominal** RPO equals the interval: daily loses up to 24 h of work, 6-hourly up to
+   6 h, hourly up to 1 h. That holds only if each dump completes and reaches its off-host copy on time. For host
+   or account loss, the real RPO is the **age of the latest verified, recoverable off-host copy**, including dump
+   and pull delays and failed runs. The adopting backup plan must define a measured freshness policy and an
+   alert when the newest verified off-host copy is older than the agreed limit (item 6). Each run adds load and
+   storage; see item 8 for capacity. Compare the platforms' own PITR:
    - AWS RDS uploads transaction logs every five minutes and restores to any point in the retention period
      [V F47]; the spec sets 14 days (T13).
    - Render PITR: 3 days on Hobby, 7 days on Pro [V F35].
    - DO managed PostgreSQL: daily full backups plus WAL, PITR over the last 7 days [V F5].
    - B3 and B4 (self-run): no PITR unless we set up WAL archiving [A]. There the dump is the **only** copy,
      and RPO is the interval.
-3. **RTO and the restore drill.** Recovery is manual: create a clean instance → `pg_restore` with the
-   migrator or admin role → check row counts and run the audit-chain verification → point the app at it →
-   `/readyz` returns 200. How long this takes depends on the database size [A]. **Drill:** every quarter, restore
-   the latest dump into a clean instance, time it, and record it in the UNI-16 restore runbook (T13). A backup
-   that has never been restored does not count.
+3. **RTO and database restore.** Recovery is manual: create a clean instance → recreate roles and grants
+   (item 11) → `pg_restore` as the migrator or admin role → check row counts and run the audit-chain
+   verification → point the app at it. How long this takes depends on the database size [A]. This is a
+   **database** restore only. The quarterly drill must be the **complete-recovery drill** of item 12, timed and
+   recorded in the UNI-16 restore runbook (T13). A backup that has never been restored does not count.
 4. **Encrypt before upload.** Encrypt on the host before upload, with a public key (for example `age` or
    `gpg`). The host holds only the public key. The private key is held by the owner offline, with a sealed second
    copy for a named second person [O]. It is never in the backup storage, the platform secret store or the
@@ -528,10 +570,55 @@ platform's own backups where an option has them; it does not replace them.
    - Each user can upload 750 GB in 24 hours. Files can be up to 5 TB. A shared drive holds at most 500 000
      items [V F45]. The API quota is far above one upload an hour [V F45].
    - Shared-drive content counts toward the Workspace pool: Business Starter gives 30 GB per user [V F46]. With
-     5 users that is 150 GB. A 1 GB dump kept 35 days uses 35 GB [A].
+     5 users that is 150 GB.
+   - **Capacity assumption** [A]: a 1 GB compressed dump. Daily dumps kept 35 days use 35 GB. **Hourly** dumps
+     kept 35 days are 840 files and about 840 GB: more than the 150 GB pool, and about US$15/month in Azure Blob
+     Malaysia West (840 × 0.018) [V F40]. A mixed rotation (for example hourly for 2 days, daily for 35 days)
+     needs about 83 GB [A]. Q11's cadence and retention therefore move the backup cost, and can move the ranking.
 9. **Who can read the backups.** Any member of the shared drive can open the files. With encryption before
    upload they see only ciphertext. Without it, anyone with access sees the whole client database. Keep
    membership to the owner and the job's identity [A].
+10. **Recovery inventory.** Complete recovery needs each artifact below, from an off-host copy or a reproducible
+    source. No secret goes in the repo, and there is no routine plaintext backup.
+
+    | Artifact | Why it is needed | How it is recovered | Custody |
+    |---|---|---|---|
+    | Database (one database) | the rows | encrypted dump (items 1–9); platform PITR where it exists | off-host copy |
+    | Uploaded files (scans, IC images, drafts; spec D14) | restored rows point to them | A/A2: S3 in `ap-southeast-5` (a second copy is not in A2 [A]). B2, B3, C, D, D2: Spaces SGP1, one copy unless a second is made [A]. **B4 and the Azure alternative: files sit on the VPS disk**, so they must be copied off-host, encrypted, with the dump | same as the dump |
+    | Roles, ownership, grants | `pg_dump` dumps one database, not roles [V F48]; without them a restore can fail or grant the wrong authority | recreated from bootstrap and migration scripts in the repo before restore; no passwords backed up; new passwords set from the secret store | repo (scripts); secret store |
+    | App-held keys, every version still in use: `tenant_token_key`, `tenant_source_key`, `login_blob_key`, `approval_mac_key`, `audit_mac_key` (spec T16), Django `SECRET_KEY` with fallbacks, the CRM cookie-jar KEK (§7 T2) | without them, encrypted columns and login blobs cannot be read and audit MACs cannot be checked | **protected key escrow**: each version encrypted to the owner's offline key and stored off-host, apart from the dumps [A] | owner offline; sealed second copy [O] |
+    | Configuration and image digests | rebuild the same app | IaC, Compose file or app spec in the repo; image digest recorded per deploy; registry retention [A] | repo; registry |
+    | Dump decryption key | the dumps are useless without it | owner's offline private key and sealed second copy (item 4) | owner [O] |
+    | Audit anchors (spec T19) | historical audit verification checks against them | the spec requires S3 Object Lock anchors; off AWS a WORM store is needed (§7 T19) | WORM bucket |
+    | DB passwords, upload and pull credentials | to run after recovery | re-issued, not restored | secret store |
+11. **Role bootstrap.** Roles and tablespaces are global and are not in the dump [V F48]. Before `pg_restore`,
+    the bootstrap script creates `skiw_migrator`, `skiw_app`, the NOLOGIN definer owners (`skiw_tenant_guard`,
+    `skiw_auth_lookup`) and the backup role, with the attributes the spec states. The restore then keeps the
+    original owners. Item 12 rechecks the result.
+12. **Complete-recovery drill** (before go-live, then every quarter; this is M6', §9). Use a fresh host or
+    cluster and the off-host copies only:
+    - bootstrap the roles; restore the latest **verified** dump; restore the files; load the key versions from
+      escrow;
+    - recheck role attributes: `skiw_app` NOSUPERUSER NOBYPASSRLS with no CREATE; definer owners NOLOGIN; grants
+      as the spec lists; the backup role used only by the job;
+    - open at least one recovered file that a restored row references, and match its checksum;
+    - verify the historical audit chain and `event_mac` against the latest anchor with the recovered
+      `audit_mac_key`;
+    - decrypt a sample of encrypted columns and login blobs with the recovered keys;
+    - then `/readyz`.
+    Time it end to end and record the RTO and the age of the copy used (the real RPO). `/readyz` and row counts
+    alone do **not** pass.
+13. **Extra costs (provisional [A], not in the §3.2 totals).**
+    - File copy: size unknown [A]. Azure Blob Malaysia West costs US$0.018 per GB-month [V F40], about US$0.90
+      for 50 GB. For B2, B3, C, D and D2, a second store such as another Spaces costs US$5 [V F11].
+    - Key escrow: storage only, near US$0 [A].
+    - A pull to the owner's own machine: US$0.
+14. **For the adopting spec.**
+    - Backup and pull jobs are scheduled by the worker (EVT-06: no HTTP cron endpoints).
+    - The backup role is a new member of the closed role set (D4, TEN-02) and needs explicit spec text.
+    - Backup admin credentials live in the secret store (UNI-08).
+    - A Drive export (G) is a Drive write. It must respect the locked G-DRIVE switch (M16, Q24) and must not
+      bypass G-AI or any DB-access rule. There is no bypass.
 
 **PDPA and D19 (not legal advice).** A database backup in Google Drive is the **whole client dataset** (IC
 numbers, holdings, cases), stored wherever Google stores it. Workspace data regions offer only the United States,
@@ -550,10 +637,12 @@ Two alternatives keep the backup copy in Malaysia:
 
 Cost. Drive uses the existing Workspace pool [V F46]; Workspace is outside this paper's totals, so the line is
 US$0 while the pool has room. Azure Blob Malaysia West is about US$1.80/month for 100 GB [V F40]. A second
-iCore VPS is RM 39.90. None of these changes any ranking in §3.2.
+iCore VPS is RM 39.90. With daily dumps none of these changes any ranking in §3.2. Hourly dumps with long
+retention (item 8) and the file and key copies (item 13) can; they stay provisional until Q11 is answered.
 
-**Option L: dump to the host's own disk (owner input 3, quoted in §1).** The Drive proposal is **Option G**. Items 1–4 and 6–7 above apply to L as well: the `BYPASSRLS` dump role, the RPO equal to the
-interval, the restore drill, encryption with an offline key, checksums, and retention.
+**Option L: dump to the host's own disk (owner input 3, quoted in §1).** The Drive proposal is **Option G**.
+Items 1–4, 6–7 and 10–14 above apply to L as well: the `BYPASSRLS` dump role, the RPO rule, encryption with
+an offline key, checksums, retention, the recovery inventory and the complete-recovery drill.
 
 What L covers:
 - a DB crash, a bad migration, or DB corruption;
@@ -593,16 +682,19 @@ Where L can run:
 
 | | G: Drive export | L: dump on host disk | L + pull (to owner or a Malaysia-resident store) |
 |---|---|---|---|
-| Covers | DB loss; host loss; provider-account loss | DB crash, bad migration, corruption, DB unreachable | as L, plus host or disk loss, account loss, an intruder deleting the dumps (copies already pulled) |
-| Does not cover | a host intruder using the upload credential to delete or overwrite (unless versioned or locked) [A] | host or disk loss, account loss, an intruder on the host, VM deletion | dumps written after the last pull |
+| Covers (only what it captures) | **database rows** after DB, host or account loss, as of the newest uploaded dump | **database rows** after a DB crash, bad migration or corruption, or with the DB unreachable while the host is up | **database rows** as L, plus after host, disk or account loss, as of the newest pulled dump |
+| Does not cover | uploaded files, key versions, roles, config (item 10) unless the job also copies them; a host intruder using the upload credential to delete or overwrite (unless versioned or locked) [A] | files, keys, roles, config; host or disk loss; account loss; an intruder on the host; VM deletion | files, keys, roles, config unless also pulled (item 10); dumps written after the last pull |
+| Complete recovery (item 12) | only with the item 10 inventory | no: everything is on one host | only if files and key escrow are pulled too, and the drill passes |
 | Credential on host | **yes**: Drive key or token (D13 downgrade) | none | **none** (the pull starts outside the host) |
 | Residency | **Google's location**, not selectable as Malaysia [V F46]: whole-dataset cross-border flow | host country (Malaysia for B4; Singapore for B2, B3) | host country plus the pull target (owner's machine, or Malaysia [V F40, F41]) |
-| RPO | dump interval | dump interval | dump interval for DB faults; time since the last pull for host loss |
+| RPO | age of the newest verified uploaded dump (nominal: the interval) | the interval, for DB faults only | DB faults: the interval; host loss: age of the newest verified pulled copy (item 2) |
 | Cost (USD/month) | 0 within the Workspace pool [V F46] | 0 extra disk at this size [A]; DO daily snapshots +4.80 over weekly [V F2] | as L, plus about 1.80 (Azure Blob, 100 GB) [V F40], or RM 39.90 (second iCore VPS) [V F41], or 0 (owner's own machine) |
 
 **Builder recommendation (not a decision).** For a 5-person internal team on a VPS option, use **L + pull** (or
 L plus provider snapshots) as the default. The pull goes to a Malaysia-resident target or the owner's machine,
-keeps an encrypted copy off the host, and leaves no upload credential on the host. Use **G** only after the
+keeps an encrypted copy off the host, and leaves no upload credential on the host. The pull must carry the
+whole item 10 inventory that lives on the host (dumps, uploaded files on B4, key escrow), not the dumps alone,
+and the item 12 drill must pass. Use **G** only after the
 PDPA adviser accepts the whole-dataset transfer (§4 item 9), and then in addition to L + pull, not instead
 of it. On A2, C, D and D2 the platform's own backups are the first line; the extra copy is a dump to
 in-region object storage, or G under the same PDPA condition.
@@ -723,7 +815,8 @@ break-glass list of Q19 [O].
 D2 loses the same controls as D, plus a second web instance (single web instance).
 
 B2, B3 and B4 lose the same controls as B, plus a second host: one server is a single point of failure, so a
-timed restore test (UNI-16, T13) is required before go-live; deploys go over SSH from GitHub Actions with a
+timed **complete-recovery** drill (§3.5 item 12; UNI-16, T13) is required before go-live, not a database
+restore alone; deploys go over SSH from GitHub Actions with a
 token or SSH key (no OIDC to the host); we own the firewall and OS patching, and in B3 and B4 also Postgres
 backups, WAL archiving and patching.
 
@@ -786,7 +879,7 @@ What an adopting spec change (v1.14) and the M1 plan would contain.
 | S1 | **DB spike** (non-AWS only): on the vendor's managed PG 17, as the vendor admin: create `skiw_migrator`, `skiw_app` (NOSUPERUSER NOBYPASSRLS), NOLOGIN `skiw_tenant_guard`/`skiw_auth_lookup`, a SECURITY DEFINER function owned by a NOLOGIN role, `pgcrypto`, `ALTER DEFAULT PRIVILEGES`, grants on `django_migrations` and the Procrastinate tables; a read-only `skiw_backup` login role with `BYPASSRLS` and a full `pg_dump -Fc` as that role (§3.5) | `make test-live` (M0c tests) passes against the vendor DB as `skiw_app`; a script prints the role attributes; result in `docs/DECISIONS.md` |
 | SC | **Spec change** per the list below, with the owner's §4 record | Reviewer approves; owner records the decision; PROJECT.md §9 residency line updated |
 | M1' | **Infra staging** on the chosen target | Deploy to staging from CI with no long-lived cloud key where the vendor allows it; `/readyz` 200 via the LB; 25 s long-poll survives the platform timeout; `pgcrypto` confirmed |
-| M6' | **Production + backups** | Timed restore drill into a fresh cluster ≤ the agreed RTO; manual approval blocks prod deploy |
+| M6' | **Production + backups** | **Complete-recovery drill** (§3.5 item 12) on a fresh host or cluster from off-host copies only, ≤ the agreed RTO: roles bootstrapped and their attributes rechecked (`skiw_app` NOSUPERUSER NOBYPASSRLS, definer owners NOLOGIN); a recovered file referenced by a restored row opens and matches its checksum; historical audit chain and `event_mac` verify against the latest anchor with recovered keys; sample encrypted columns decrypt; then `/readyz` 200. Database readiness alone does not pass. Backup freshness alert tested (§3.5 item 2). Manual approval blocks prod deploy |
 
 Spec sections that change, and review effort (rounds, not days):
 
@@ -816,7 +909,8 @@ Spec sections that change, and review effort (rounds, not days):
 D2 has the same adoption scope as D; D3 and §8.3 must also accept one web instance in place of "min 2 web".
 
 B2, B3 and B4 have the same adoption scope as B, plus: D3 and §8.3 accept one server; M6' needs a recorded
-restore of the whole server (and, for B3 and B4, of self-run Postgres from WAL); in B4, data and backups stay
+complete recovery of the whole server from off-host copies (§3.5 items 10–12; for B3 and B4 also self-run
+Postgres, from WAL where archived), and the adopting spec adds the §3.5 item 14 rules; in B4, data and backups stay
 in Malaysia per the providers' pages [V F40, F41], so D19 only names the two new receivers.
 
 ## 10. Open questions (owner)
@@ -824,7 +918,9 @@ in Malaysia per the providers' pages [V F40, F41], so D19 only names the two new
 1. **PDPA step:** may primary data, backups, files and logs move to Singapore? If yes, your PDPA adviser must
    name the applicable section 129 condition for each flow and its evidence (a TIA where the condition is
    s129(2)), the transfer notice to clients must be in place, and the adviser's sign-off recorded (§4). This
-   paper does not say Singapore qualifies. If no, only A or A2 remain.
+   paper does not say Singapore qualifies. If no, the in-country choices are A or A2, and, **only with a named
+   server operator**, B4 or its Azure Malaysia West alternative, conditional on vendor checks, spike S1, a
+   passed complete-recovery drill and adopting-spec acceptance (§3.4 decision tree).
 2. **Monthly cap:** what is the most you will pay for hosting per month (USD or RM), excluding AI tokens?
 3. **Availability target:** what RTO and RPO do you need (spec today: RTO ≤ 2 h, RPO ≤ 5 min, 14-day PITR)?
    Is 7-day PITR and no locked backup copy acceptable?
@@ -870,9 +966,14 @@ in Malaysia per the providers' pages [V F40, F41], so D19 only names the two new
     long a crashed instance takes to restart [A]. DO App Platform's behaviour with one instance was not checked
     [A]. With one instance (D2, B2–B4), a crash stops the service until it restarts or is rebuilt.
 11. **Backups (§3.5):**
-    a. RPO: how much recent work may be lost? Hourly, 6-hourly or daily dumps (the RPO equals the interval).
+    a. RPO: how much recent work may be lost? Hourly, 6-hourly or daily dumps. The interval is the nominal RPO;
+       for host loss the real RPO is the age of the newest verified off-host copy, so also: what freshness alert
+       limit (§3.5 item 2)? Cadence and retention change storage and cost (§3.5 item 8) and can move the ranking.
     b. Who runs the restore when something is down, and who runs the quarterly restore drill?
     c. Where is the private decryption key kept (owner, offline), and who holds the sealed second copy?
     d. Where does the off-host copy live? Google Drive (Option G: needs the PDPA step in §4 item 9 and a Drive
        credential on the host), or a Malaysia-resident target pulled from outside (L + pull: owner's machine,
        a second Malaysian VPS, or Azure Blob Malaysia West)?
+    e. Complete recovery (§3.5 items 10–12): who holds the key escrow (all app-held key versions) and its sealed
+       second copy, and where is the off-host copy of uploaded files kept (needed for B4, where files sit on the
+       VPS disk)?
