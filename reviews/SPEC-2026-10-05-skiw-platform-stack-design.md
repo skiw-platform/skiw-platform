@@ -1,5 +1,82 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 18 — 2026-10-12 · scope: spec-change slice (v1.15 iCore corrections, PR 22)
+- **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.15 · hash 84498305f825be61b8dbfe9bf9d6de8169b14d82.
+- **Pinned PR:** base 896eb4cf519a2fbdf573d349d0ce98a85b273521 · head 13716db8018a621e76db09e885304fce3e669377 · final host head unchanged, OPEN.
+- **Mode:** exact-commit snapshot .agent/worktrees/review-spec-v115-13716db8; all tracked file hashes verified; own snapshot removed. Reviewer changed no source/spec/decision/handoff.
+
+### [P1] Restore epochs need authorization independent of the production host
+- Category: security design gap
+- Rule: T19 historical-tamper detection; UNI-10; H6 restore/anchor contract
+- Evidence: H6:939–945 permits a restored system to ignore later anchors from the old epoch, record a lost range, and start a new epoch chained from an earlier boundary. The witness at :933–938 stores new keys once and alarms on a conflicting re-read. No independently authenticated restore/epoch transition, witness authorization or unauthorized-transition test is specified.
+- Failure scenario: attacker with production root (explicit T23 threat, holds audit key) truncates to an earlier authentic prefix, claims a restore and creates a new epoch. Its new object keys do not conflict with old keys. The production-created recovery record says the later anchored range was lost, so the verifier no longer compares those preserved anchors to the active database. Keeping old objects does not prevent this downgrade of verification.
+- Why it matters: old immutable anchors are intended to detect historical tampering even after an attacker can recompute hashes/MACs. An unauthenticated restore exception lets that attacker redefine the trusted boundary. This is a new P1 in the proposed fix, not an objection to legitimate recovery.
+- Required correction: define a restore-transition record authenticated/approved outside the production trust domain (for example owner offline authorization accepted by the independent witness). Bind it to prior epoch, trusted recovery-set identity, per-agency restored head/boundary, preserved latest old anchors/loss range, and new epoch. Witness/verifier must reject or alarm on epoch changes without that authorization; production/app keys alone cannot authorize skipping historical anchors. Preserve evidence and prevent replay/rollback of the transition record.
+- Owner: Builder
+- Verification: a root-equivalent test with production keys can truncate/re-hash/create new epoch objects but cannot make verification succeed without independent authorization. Authorized restore from an older dump succeeds and preserves the full transition/loss evidence; tampered/replayed/mismatched transition is refused.
+- Status: open
+
+### [P2] Archive-after-dump does not guarantee a consistent file recovery set
+- Category: recovery consistency defect (continuation of Round 17 recovery-set P2)
+- Rule: H6 recovery-set manifest; T13; G-DRILL; UNI-16
+- Evidence: H6:887–892 binds a dump to file base/deltas and asserts that taking files after the dump means every dumped reference is present. H5 deletes/sweeps files; no capture barrier, immutable retained version or snapshot coordination protects files referenced by the dump while those later archives are captured.
+- Failure scenario: the dump snapshots a clean document row. Retention or a normal deletion removes that row and its file before the file delta is taken. The resulting tombstone removes the file from the reconstructed base; the restored DB still references it. This can also affect a new file not present in the previous base. Checksums validate available bytes but do not recover the missing version.
+- Why it matters: P2 isolated recovery contract gap: artifacts, dependency retention and a pre-real-data drill now exist, but the asserted consistency guarantee is false under a normal concurrent lifecycle operation. It must be specified before the recovery design is approved.
+- Required correction: coordinate a consistent DB/files cut or retain/version referenced files until every dependent snapshot is captured and safely retained. Define which deletes/tombstones belong to which recovery snapshot and how the manifest pins the actual DB snapshot and required file versions. Do not assume taking the archive later is sufficient.
+- Owner: Builder
+- Verification: deterministic backup barriers delete/replace a referenced file after the DB snapshot and before archive completion; the selected recovery set still restores every clean row's correct bytes/checksum. Include an upload during capture and rotation of dependent versions.
+- Disposition: before merge
+- Status: open
+
+### Round 17 resolution audit
+| Finding | Status | Independently re-inspected evidence |
+|---|---|---|
+| P1 self-check omissions | Resolved | H14 and PR table explicitly map FILE-01–04, UNI-04/11/15/17 and TEN-10/EVT-02 with staged proof and unchanged-pack reasons. |
+| P1 unsafe clean-file marker | Resolved | H5:815–854 uses temporary output, validated/fsynced atomic publication, committed size/hash, per-document lock, verified reuse/download and five crash/concurrent/altered-artifact tests. No exists→clean shortcut remains. |
+| P2 recovery-set ordering/dependencies | Partly resolved | Escrow installed before migrate, no silent key mint, complete manifests, base/delta dependencies and retention tests added. Concurrent file capture remains open above; new epoch authorization gap is separately P1. |
+| P2 manual rollback | Resolved | H3:759–768 records accepted digests, permits owner-key rollback without current staging check, rejects unknown/staging-only/cross-contract targets; M1 adds tests. |
+| P3 reviewer-directed wording | Resolved | PR no longer prescribes acceptance; dedicated ops worker determination retains its rationale. |
+| Q42 evidence | Recorded | Spec Q42/D15/H3 and DECISIONS record owner-held key outside GitHub and exact green-main-CI/staging digest. No further choice inferred or requested. |
+
+### Self-check audit
+Round 17 applicability retained, with audit restore epochs and coordinated recovery capture now part of UNI-10/T13/T19 proof.
+
+| Group | Reviewer assessment |
+|---|---|
+| FILE-01–04 / EVT-01/05 | Atomic file/DB completion and staged failpoints satisfy prior design finding; no implementation proof claimed. |
+| UNI-04/11/15/17 / TEN-10 / EVT-02 | Previously missing applicability/mapping supplied in H14 and PR body. |
+| UNI-08/10 / T13/T19 | Key restore order and dependency inventory improved; two recovery findings above remain. |
+| TEN roles / EVT-06 | Backup ops isolation and worker-owned schedule retained; no waiver required. |
+| UNI-07/09/12/13/14/16 | No secret value observed; pins/hardening/runbooks staged; current exact CI green. |
+| Auth/money/finalized/frontend/template rules | No new domain/UI implementation; preservation/n-a scope stated. |
+
+### Verification performed
+| Check | Result |
+|---|---|
+| Current START/project/reviewer requirements, prior round, handoff, owner decision record and relevant guardrails | Re-inspected; current v1.15 target selected. |
+| Exact archive / spec hash / tracked tree integrity | 84498305f825be61b8dbfe9bf9d6de8169b14d82; all tracked files match head; snapshot removed. |
+| v1.14→v1.15 effective correction pass | Self-check, clean-file completion, rollback, key order and dependency retention verified; recovery epoch/capture issues found. |
+| git diff --check base→head | Passed. |
+| Source verification | No new price/legal/provider claim used to decide this round. Findings derive from explicit concurrent-operation and trust-boundary contracts, not assumed vendor behavior. Prior primary-source checks retained. |
+| CI38201519229 / final host head | checks/security/image/infra all SUCCESS at 13716db8018a621e76db09e885304fce3e669377; final head unchanged, OPEN. |
+| Runtime | No DB/host provisioning, scan failpoint, restore or deployment tests run for this text-only review. All named implementation tests remain staged. |
+
+### Residual risks and test gaps
+AI and Drive routes remain deferred/locked. Vendor, backup cadence/custody/off-site selection and load/complete recovery proof still gate real data. Existing M0 CI does not prove proposed VPS controls. Legitimate data-loss recovery must preserve and independently authorize the distinction from historical tampering; a successful quarterly happy-path drill alone does not prove it.
+
+### Required before approval/merge
+Builder fixes the audit-epoch authorization and concurrent DB/files snapshot contract, updates their test/milestone evidence, bumps spec version and returns for exact-hash review. No implementation or live infrastructure is required in this spec PR.
+
+### Deferred conditions
+None newly accepted; unchosen A2 networking follow-up remains inapplicable to iCore.
+
+### Optional improvements
+None affecting verdict.
+
+**Model used:** Codex GPT-6 · **Switch model next step?** No — deep tier remains appropriate for recovery/audit security.
+
+**Verdict:** Revision required
+
 ## Round 17 — 2026-10-12 · scope: spec-change slice (v1.14 iCore adoption, PR 22)
 - **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.14 · hash 03c5d6b5c9b0dd6ad7024085246a95b873cc70cb.
 - **Pinned PR:** base 896eb4cf519a2fbdf573d349d0ce98a85b273521 · head ffebf4e9b9a7651e60550e5a2f70a5ef746e8fc7 · final host head unchanged, OPEN.
