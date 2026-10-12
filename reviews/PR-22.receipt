@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 22
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 3c7ecf56efed49876fdba8574c5d7bc0f38d17cf
+review-file: reviews/SPEC-2026-10-05-skiw-platform-stack-design.md
+review-file-hash: 28bd38ca0f7439d83d6105ae4221c8bec5dcec47
+review-log-branch-commit: 61936096df1294639476436022aad55f2c1fcf52
+verdict: Approved (spec review round 21)
+ci: checks, image, infra, security all success on the reviewed head (run 38227849967)
+note: PR 22 is a spec PR; its reviewer record is the spec review file, not reviews/PR-22.md. Spec v1.18 hash 0edfb3cdc514e1d5bbd3ae3d34875cd16c037644. Owner-open values Q34-Q41 and the pre-real-data gates remain open.
+written-at: 2026-10-12T09:21:45Z
+pr-state-at-write: OPEN, unmerged
