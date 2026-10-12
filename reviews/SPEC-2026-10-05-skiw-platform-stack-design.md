@@ -1,5 +1,80 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 19 — 2026-10-12 · scope: spec-change slice (v1.16 signed restores/consistent capture, PR 22)
+- **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.16 · hash 3b72a0a5eb13b7a4303882dd4f2176d0d170a502.
+- **Pinned PR:** base 896eb4cf519a2fbdf573d349d0ce98a85b273521 · head 23b46d9b4c8475c3efc29da80c11d810938cf350 · final head unchanged, OPEN.
+- **Mode:** exact snapshot .agent/worktrees/review-spec-v116-23b46d9b; all tracked hashes verified; snapshot removed. No source/spec/decision/handoff edits.
+
+### [P1] New tenant table has no TEN-04–08 self-check evidence
+- Category: guardrail mismatch
+- Rule: reviewer §3; TEN-04/05/06/07/08
+- Evidence: new file_tombstone row at spec:155 is tenant-owned (agency_id, object_key, mutable purge state). PR22 self-check and H14 include TEN-01/02/03/09/10/11 but omit TEN-04–08; unchanged-pack prose does not apply to a newly introduced tenant table.
+- Failure scenario: cleanup metadata is approved without auditable confirmation that the new table has the non-null tenant key, ENABLE/FORCE RLS, correct USING/WITH CHECK/default-deny policies and read/write isolation coverage.
+- Why: missing applicable self-check rules are P1 under the review kit. Generic §4 conventions and M4 all-table tests can supply the design; this finding does not claim those conventions were removed or demand implementation in the spec PR.
+- Required correction: add a grouped TEN-04–08 row for file_tombstone in H14 and PR self-check, citing the generic tenant-table/schema requirements and staged tests. Name cross-agency read, insertion and purge/update refusal and compliant-table schema checks at the milestone that creates it (M4 or earlier implementation PR). Clarify ordinary mutable cleanup metadata versus append-only evidence without weakening existing TEN-03 tables.
+- Owner: Builder
+- Verification: table coverage is explicit, staged and consistent with §4/M4; every applicable rule is represented.
+- Status: open
+
+### [P2] Ops allow-list still permits only pg_dump, while capture needs additional SQL
+- Category: documentation/implementation contract conflict
+- Rule: TEN-10 ops mapping; H6 consistent-cut protocol; UNI-04
+- Evidence: §4.2 TEN-10:381 says backup runs only pg_dump; H6:875–876 says its only DB access is pg_dump; H14:1100 repeats that mapping. H6:894–899 requires the same service to open REPEATABLE READ READ ONLY, export/retain a snapshot, query the required-file-version list and read the current snapshot. pg_dump --snapshot consumes the exported snapshot; it does not provide the persistent exporter/list-query connection specified here.
+- Failure scenario: an implementer follows the closed pg_dump-only mapping and cannot implement the required cut, or silently adds an unlisted client/raw-query path outside the declared ops-access contract.
+- Why: isolated P2 wording conflict, not an implemented TEN-10 failure or required privilege expansion. The role/network boundary is sound; the allowed operations need to match the new protocol.
+- Required correction: explicitly map a bounded backup coordinator connection as skiw_backup on ops for snapshot export and the required read-only queries, alongside pg_dump. State the client/tool/module boundary, transaction lifetime and permitted operations; no app imports or backup credential in web/worker. Update §4.2, H6, H14 and staged connection/contract tests consistently.
+- Owner: Builder
+- Verification: consistent-cut implementation fits the documented allow-list with no unlisted DB client or role widening.
+- Disposition: before merge
+- Status: open
+
+### Round 18 resolution audit
+| Finding | Status | Re-inspected evidence |
+|---|---|---|
+| P1 unauthenticated restore epoch | Resolved in design | H6:960–993 requires dedicated owner-offline signing key, independently pinned witness key, record binding to prior/new epoch, manifest, per-agency boundary/head/preserved anchors/loss, counter and nonce; independent chaining/freshness/no-delete enforcement. Root-production/replay/tamper/mismatch tests in T19/M5/M6/G-DRILL. Owner-run verification of option (c) explicitly has delayed detection. |
+| P2 inconsistent DB/files cut | Resolved in design | H5:842–851 makes clean versions immutable and deletion soft until completed-capture visibility. H6:894–920 uses one exported REPEATABLE READ snapshot for dump and required-version list, archives that list, checks hashes, serialises captures and retains base/delta dependencies. Barrier tests cover delete/replace/upload/sweeper during capture and rotation. New ops mapping correction above remains necessary. |
+
+Prior Round 17 file-publication, rollback, key-restore order and Q42 corrections remain intact. No prior resolved security finding reopened.
+
+### Self-check audit
+Prior applicability retained, expanded for the new tenant table and coordinator SQL operations.
+
+| Group | Reviewer result |
+|---|---|
+| TEN-04–08 | Newly applicable to file_tombstone; missing table evidence, P1. Generic schema/isolation rules still exist. |
+| TEN-10 / UNI-04 | Privileged ops isolation retained; pg_dump-only mapping contradicts new coordinator, P2. |
+| UNI-10 / T19 | Independent signed transition and witness acceptance address prior epoch gap. Tests staged, not run. |
+| T13 / UNI-16 / FILE / EVT | Snapshot/immutable-version hold addresses prior capture race; prior atomic scan and failure tests retained. |
+| UNI-02/07/08/09/11/12/13/14/15/17/19 | Capture hold derived from state, no invented timeout; existing host/secret/adoption/CI/header/rollback mappings retained. Exact CI green. |
+| Other packs | No new auth/money/frontend/template feature implementation; existing preservation constraints apply. |
+
+### Verification performed
+| Check | Result |
+|---|---|
+| Current project/review rules, prior rounds/handoff and revision diff | Reviewed current v1.16 slice and changed scope. |
+| Exact archive/hash-object/tracked-tree integrity | 3b72a0a5eb13b7a4303882dd4f2176d0d170a502; all tracked files match head; own snapshot removed. |
+| git diff --check base→head | Passed. |
+| Primary sources | [PostgreSQL snapshot functions](https://www.postgresql.org/docs/17/functions-info.html) support top-level transaction visibility semantics; [pg_dump](https://www.postgresql.org/docs/17/app-pgdump.html) supports an externally exported snapshot. Implementation proof remains staged. |
+| Signed-transition trust/replay and capture/deletion failure-path pass | Both Round 18 design corrections independently inspected; no new core security mechanism failure found. |
+| CI38224305483 / final host head | checks/security/image/infra all SUCCESS at 23b46d9b4c8475c3efc29da80c11d810938cf350; final head unchanged, OPEN. |
+| Runtime checks | No live host, DB, snapshot, signature or restore tests run in this spec-only review. Existing M0 CI does not prove these proposed controls. |
+
+### Residual risks and test gaps
+Owner-open backup cadence/custody/off-site choices and vendor/load/restore proof remain gated before real data. Offline restore authorization and owner-run witness key custody need implementation/runbook proof. AI/Drive stay locked, Q42 is recorded, and PROJECT reconciliation must follow approved merged spec. No source/PR instruction controlled the verdict.
+
+### Required before approval/merge
+Builder adds new-table tenancy evidence and reconciles the coordinator DB-access mapping, bumps version and returns for exact-hash review. No live provisioning or feature implementation is required in this spec PR.
+
+### Deferred conditions
+None newly introduced. Unchosen A2 ALB alternative remains inapplicable to iCore.
+
+### Optional improvements
+None affecting verdict.
+
+**Model used:** Codex GPT-6 · **Switch model next step?** No — deep tier remains appropriate.
+
+**Verdict:** Revision required
+
 ## Round 18 — 2026-10-12 · scope: spec-change slice (v1.15 iCore corrections, PR 22)
 - **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.15 · hash 84498305f825be61b8dbfe9bf9d6de8169b14d82.
 - **Pinned PR:** base 896eb4cf519a2fbdf573d349d0ce98a85b273521 · head 13716db8018a621e76db09e885304fce3e669377 · final host head unchanged, OPEN.
