@@ -1,5 +1,69 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 20 — 2026-10-12 · scope: spec-change slice (v1.17 tombstone/coordinator corrections, PR 22)
+- **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.17 · hash f363ec898752bf2723a6c49890f69341c0b92762.
+- **Pinned PR:** base 896eb4cf519a2fbdf573d349d0ce98a85b273521 · head 1dc550026cdd6025a6e600bc6436a4c07f51ebe8 · final head unchanged, OPEN.
+- **Mode:** exact snapshot .agent/worktrees/review-spec-v117-1dc55002; all tracked hashes verified; snapshot removed. No source/spec/decision/handoff edits.
+
+### [P2] Tombstone update trigger conflicts with its document-deletion FK action
+- Category: objective design consistency defect
+- Rule: file_tombstone lifecycle, H5 deletion contract; TEN tenant-key preservation
+- Evidence: §4.1:155 adds a composite document FK with ON DELETE SET NULL (document_id), but in the same row says a BEFORE UPDATE trigger rejects any change except setting purged_at once from NULL. The SET NULL action necessarily changes document_id, not purged_at.
+- Primary source: [PostgreSQL trigger behavior](https://www.postgresql.org/docs/17/trigger-definition.html) states FK referential actions execute updates/deletes on the referencing table and fire its triggers.
+- Failure scenario: documents.storage inserts the tombstone and deletes the parent document in one transaction as specified. The FK clears the tombstone's document_id; its update trigger rejects that update, so document deletion and the tombstone transaction roll back.
+- Why: isolated P2 conflict introduced by the new FK/guard design; no deployed schema or unsafe tenant grant exists. The intended normal lifecycle must be possible without allowing arbitrary tombstone edits.
+- Required correction: reconcile the FK action and trigger: explicitly permit the narrowly justified parent-deletion transition, or redesign the relationship/lifecycle. Preserve agency_id and all protected artifact/capture fields, one-time purge marking, tenant isolation and denial of unrelated edits.
+- Owner: Builder
+- Verification: the table-creation PR tests same-agency document deletion with a tombstone: parent removed, document_id NULL if retaining this FK, agency_id/hash/key/capture metadata unchanged, artifact retained until capture permits purge. Arbitrary document_id changes, cross-agency attachment and non-purge metadata edits remain denied.
+- Disposition: before merge
+- Status: open
+
+No open P0/P1 finding. Both Round 19 findings resolved.
+
+### Round 19 resolution audit
+| Finding | Status | Re-inspected evidence |
+|---|---|---|
+| P1 TEN-04–08 table evidence missing | Resolved | §4.1/H14/PR table now explicitly describe non-null tenant key, composite uniqueness/FK, ENABLE/FORCE RLS and the policy template; schema, read/write/purge/cross-agency FK/DELETE/metadata-update tests run with the first uploaded-file/table PR (M16 latest). Mutable cleanup metadata distinguished from unchanged append-only evidence. New FK/trigger interaction has the isolated P2 above. |
+| P2 backup coordinator outside ops mapping | Resolved | §4.2 TEN-10, H6/H14 and PR table permit a named isolated coordinator with fixed read-only snapshot/list SQL as skiw_backup on ops plus pg_dump. Transaction timeout/error cleanup and no-watermark-advance tests at M6; no role widening or app imports. |
+
+Prior signed independent restore transitions, immutable-file consistent capture, scan publication, key order, accepted-digest rollback, Q42 and AI/Drive locks remain intact.
+
+### Self-check audit
+Prior applicability retained; new tenant table evidence and coordinator ops mapping are complete at design/staged-test level. No missing applicability finding found this round.
+
+| Group | Assessment |
+|---|---|
+| TEN-04–08 / TEN-09/11 | Table policies and per-agency sweep isolation mapped; staged tests explicit. FK/trigger lifecycle needs P2 correction. |
+| TEN-10 / UNI-04/02 | Fixed read-only coordinator, role/network/client boundaries and bounded lifetime mapped. |
+| FILE / EVT / T13/T19 / UNI-10/16 | Earlier atomic publication, snapshot/hold, signed-transition and restore tests retained; no implementation evidence claimed. |
+| Universal delivery/secrets/pins/headers / other packs | Scope and staged evidence retained; exact-head CI green; unchanged domain/UI contracts not reopened. |
+
+### Verification performed
+| Check | Result |
+|---|---|
+| Current review/project instructions, prior round, handoff and exact correction diff | Reviewed v1.17 correction slice. |
+| Exact archive/hash-object/tracked-file integrity | f363ec898752bf2723a6c49890f69341c0b92762; tree intact; snapshot removed. |
+| git diff --check base→head | Passed. |
+| Primary-source check | PostgreSQL FK actions fire referencing-table triggers; confirms the objective conflict. No live DB reproduction claimed. |
+| CI38226219967 / final host read | checks/security/image/infra SUCCESS at 1dc550026cdd6025a6e600bc6436a4c07f51ebe8; unchanged, OPEN. |
+| Runtime | No hosting, DB, coordinator, signature or restore test run in this text-only review. Future milestone tests remain mandatory. |
+
+### Residual risks and test gaps
+Pre-real-data vendor, role, recovery, load and backup-choice gates remain unfulfilled; that is intentional staged design. Owner-approved hosting/Q42 and deferred AI/Drive routes remain consistent. No source/PR instruction controlled the verdict.
+
+### Required before approval/merge
+Builder fixes the single FK/trigger lifecycle conflict, updates the corresponding test evidence, bumps spec version and returns for exact-hash review. No implementation or provisioning needed in this PR.
+
+### Deferred conditions
+None newly introduced; unchosen A2 ingress condition remains inapplicable.
+
+### Optional improvements
+None.
+
+**Model used:** Codex GPT-6 · **Switch model next step?** No — correction is focused; implementation/review remain deep tier.
+
+**Verdict:** Revision required
+
 ## Round 19 — 2026-10-12 · scope: spec-change slice (v1.16 signed restores/consistent capture, PR 22)
 - **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.16 · hash 3b72a0a5eb13b7a4303882dd4f2176d0d170a502.
 - **Pinned PR:** base 896eb4cf519a2fbdf573d349d0ce98a85b273521 · head 23b46d9b4c8475c3efc29da80c11d810938cf350 · final head unchanged, OPEN.
