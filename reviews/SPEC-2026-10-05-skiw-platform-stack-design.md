@@ -1,5 +1,63 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 21 — 2026-10-12 · scope: spec-change slice (v1.18 iCore adoption final correction, PR 22)
+- **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.18 · hash 0edfb3cdc514e1d5bbd3ae3d34875cd16c037644.
+- **Pinned PR:** base 896eb4cf519a2fbdf573d349d0ce98a85b273521 · head 3c7ecf56efed49876fdba8574c5d7bc0f38d17cf · final host head unchanged, OPEN.
+- **Mode:** exact snapshot .agent/worktrees/review-spec-v118-3c7ecf56; tracked-file hashes verified; own snapshot removed. Reviewer edited no source/spec/decision/handoff.
+- Approval is for the iCore adoption design. No real-data hosting, deployment, restore or feature implementation is approved by this slice.
+
+### Findings
+None. No open or accepted-risk P0/P1 finding and no P2 before-merge correction. Round 20's remaining P2 is resolved; prior correction audits remain applicable.
+
+### Round 20 resolution audit
+| Finding | Status | Independently re-inspected evidence |
+|---|---|---|
+| P2 FK/update-trigger conflict | Resolved | §4.1:155 permits exactly one-time purged_at marking or non-null document_id→NULL with all protected columns unchanged. It explicitly permits both FK and direct link removal, without allowing reattachment, tenant change or artifact/capture mutation. H14:1118 and current PR table specify same-transaction tombstone insert/parent deletion, retained file until capture, unchanged protected fields, direct-null case and forbidden-update regression tests. |
+
+Allowing direct link removal is explicitly bounded: backup hold uses artifact/capture fields, not document_id. It introduces no cross-agency attachment or bypass. Parent deletion can now execute its FK action without contradicting the trigger.
+
+### Self-check audit
+Round 19/20 applicability retained: new tombstone tenant-table lifecycle/isolation; coordinator read-only ops boundary; prior atomic clean-file publication, consistent backup capture, independently signed audit transitions, key recovery and deploy rollback; universal adoption/secrets/CI/runbook/header proof. No new domain/UI feature.
+
+| Group | Reviewer assessment |
+|---|---|
+| TEN-04–08 / TEN-09/11 | Table tenant key, composite FK, RLS/default-deny and lifecycle/isolation tests explicitly mapped; latest trigger amendment consistent. |
+| TEN-10 / UNI-04 | Coordinator fixed read-only statement list, bounded exporter lifetime, credential/network separation and contract tests retained. |
+| FILE / EVT / T13/T19 / UNI-10/16 | Prior failpoints, snapshot/immutable-version capture hold, restore-set retention/order, independently authorized epochs and complete-recovery drill retained. |
+| UNI-07/08/09/11/12/13/14/15/17/19 | Host secret/pin/service/flow/header/rollback constraints and staged tests retained; exact existing CI green. |
+| Other packs | Existing auth/money/finalized/template/frontend contracts unchanged by this narrow fix; staged/preservation scope stated. |
+
+### Verification performed
+| Check | Result |
+|---|---|
+| Current review/project requirements, prior rounds/handoff and exact revision diff | Reviewed v1.18 correction and retained iCore/AI/Drive/production-approval decisions. |
+| Exact archive/hash-object/tracked-file integrity | 0edfb3cdc514e1d5bbd3ae3d34875cd16c037644; all tracked files match head; snapshot removed. |
+| v1.17→v1.18 trigger/PR-table consistency | Conflict removed; intended and prohibited lifecycle transitions each have staged tests. |
+| git diff --check base→head | Passed. |
+| CI38227849967 / final host head | checks/security/image/infra SUCCESS at 3c7ecf56efed49876fdba8574c5d7bc0f38d17cf; unchanged, OPEN. |
+| Runtime | No live DB/host, signature, snapshot, scan or recovery tests repeated for this spec-only delta. Existing M0 CI does not prove new hosting controls. Prior primary-source FK/trigger verification retained. |
+
+### Residual risks and test gaps
+- G-VENDOR, G-S1, G-DRILL, G-LOAD and G-BACKUP must pass before any real client data is hosted. Pending cadence, key custody, off-site/witness choice and resource/vendor proof remain implementation prerequisites, not passed evidence.
+- AI and Drive remain locked; separate reviewed route choices plus Q13/Q24 are required before enabling. Q42 owner-held key, exact green-main-CI/staging digest and controlled previously accepted rollback are recorded.
+- Single host, operator-run patching/manual recovery, loss of managed WAF/KMS/PITR and vendor disk exposure are stated design residuals. They do not waive role/tenant/audit/file controls or their test gates.
+- Production-host compromise cannot authorize audit-boundary resets alone; offline authorization/witness and backup barrier tests remain mandatory implementation proof.
+- Main PROJECT remains reconciled to v1.13. After the approved spec merges, setup Part B reconciles its facts and exact hash before implementation.
+- No source/PR instruction controlled the verdict.
+
+### Required before merge
+No review correction required. Builder archives the complete final review and writes the normal approval receipt on this exact PR22 head before owner merge. After merge run setup Part B, then the M1 plan.
+
+### Deferred conditions
+None newly introduced. All listed implementation/real-data gates are mandatory spec requirements, not waived findings. Unchosen A2 ingress follow-up is inapplicable to the iCore route.
+
+### Optional improvements
+None affecting verdict.
+
+**Model used:** Codex GPT-6 · **Switch model next step?** No for archive/reconcile; deep tier for the M1 security/operations plan and implementation review.
+
+**Verdict:** Approved
+
 ## Round 20 — 2026-10-12 · scope: spec-change slice (v1.17 tombstone/coordinator corrections, PR 22)
 - **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.17 · hash f363ec898752bf2723a6c49890f69341c0b92762.
 - **Pinned PR:** base 896eb4cf519a2fbdf573d349d0ce98a85b273521 · head 1dc550026cdd6025a6e600bc6436a4c07f51ebe8 · final head unchanged, OPEN.
