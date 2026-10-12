@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 24
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 432aa836fd4a371de4ef94a2e08f27ff04898e56
+review-file: reviews/PR-24.md
+review-file-hash: 5559857e01e716aa499023dfdbd258212b92b4ee
+review-log-branch-commit: e8c5d732139dbef77a7f29decf5c7b1cab8d4dbb
+verdict: Approved (round 2)
+ci: checks, image, infra, security all success on the reviewed head (run 38270365021)
+note: PR 24 is the M1 plan. Approval does not answer owner gate G1 to G17; no M1 code starts before G1 is answered.
+written-at: 2026-10-12T15:39:43Z
+pr-state-at-write: OPEN, unmerged
