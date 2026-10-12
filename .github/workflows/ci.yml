@@ -80,6 +80,8 @@ jobs:
           node-version-file: .node-version
       - name: Secret scan (full history)
         run: make secrets
+      - name: Secret rule test (each key name is flagged)
+        run: make secrets-test
       - name: Python dependency audit
         run: make audit-python
       - name: Web dependency audit
@@ -88,7 +90,7 @@ jobs:
         # Anonymous: no login, no metrics (UNI-11). The custom rules in semgrep/ run in `make lint`.
         run: >-
           uvx semgrep==1.179.0 --config p/python --config p/django --config p/typescript
-          --config p/react --metrics=off --error app infra web/src
+          --config p/react --metrics=off --error app infra/host web/src
 
   image:
     runs-on: ubuntu-24.04
@@ -107,7 +109,7 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
 
-  infra:
+  host:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -118,9 +120,6 @@ jobs:
         with:
           version: "0.11.24"
           enable-cache: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-      - name: CDK synth test
-        # No AWS credentials or account: the stack is empty and synth makes no AWS calls.
-        run: make infra-test
+      - name: Host tooling tests
+        # infra/host unit tests (spec section 8.4); no Docker daemon, no host, no secrets.
+        run: make host-test

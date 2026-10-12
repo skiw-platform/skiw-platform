@@ -22,7 +22,8 @@ Applies from M0a. Other runbooks: [README](README.md); deployment, rollback and 
 | `make web-build` / `make web-dev` | production build of the shell into `web/dist` / Vite dev server with `/healthz` and `/api` proxied to `:8000` |
 | `make e2e` | builds the shell, starts the database and migrates, starts the app (not the worker), runs Playwright on desktop and mobile widths (axe, keyboard, overflow, no-JS, console errors) |
 | `make test-live` | starts the database, migrates as `skiw_migrator`, then runs the `live` tests as `skiw_app`: role checks, `jobs.enqueue_in_tx` commit/rollback/visibility and refusals, the queue-grant audit and the worker lifecycle |
-| `make infra-test` | CDK synth test of the empty `infra/` stack (installs the locked `infra` group; no AWS calls) |
+| `make host-test` | host tooling unit tests in `infra/host/tests` (no Docker daemon needed) |
+| `make secrets-test` | proves `.gitleaks.toml` flags each secret key name (generated values; skips without gitleaks locally, fails in CI) |
 | `make audit` | `make secrets` (gitleaks, needs `brew install gitleaks`), `make audit-python` (pip-audit), `make audit-web` (pnpm audit) |
 | `make image-scan` | builds the image and scans it with Trivy (needs `brew install trivy`) |
 | `make hooks` | enables `.githooks/pre-push` (secret scan of pushed commits) |
@@ -52,4 +53,4 @@ All come from `.env` (copied from `.env.example`; never committed). The app fail
 Roles are created only on the first start of an empty volume (`docker/postgres/10-roles.sh`). After changing it, run `make clean` and `make dev`.
 
 ## CI
-`.github/workflows/ci.yml` runs the `checks`, `security`, `image` and `infra` jobs on every pull request and on pushes to `main`. See [ci.md](ci.md) for the jobs, how to run each gate locally and the GitHub Free plan limits. The production image builds the web shell in a Node stage and fails if `web/dist/.vite/manifest.json` is missing, malformed, or names a missing file (`python -m shell.verify_dist`); `docker compose` still bind-mounts `./web/dist` over it for local runs.
+`.github/workflows/ci.yml` runs the `checks`, `security`, `image` and `host` jobs on every pull request and on pushes to `main`. See [ci.md](ci.md) for the jobs, how to run each gate locally and the GitHub Free plan limits. The production image builds the web shell in a Node stage and fails if `web/dist/.vite/manifest.json` is missing, malformed, or names a missing file (`python -m shell.verify_dist`); `docker compose` still bind-mounts `./web/dist` over it for local runs.
