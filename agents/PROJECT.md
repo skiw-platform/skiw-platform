@@ -43,7 +43,7 @@ Spec wins for *what we should build*. If two of these disagree, stop and ask Yin
 
 - **Project root:** /Users/charlie/Documents/Projects/Personal/SKIW
 - **Repo root:** /Users/charlie/Documents/Projects/Personal/SKIW <!-- same as project root -->
-- **Code must live under:** `app/`, `web/`, `infra/`, `extension/` (spec §9 M0), plus repo-root tooling files the scaffold creates (lockfiles, CI config, Docker Compose, `Makefile`, `.env.example`)
+- **Code must live under:** `app/`, `web/`, `infra/`, `extension/` (spec §9 M0), the one owner-run production wrapper `scripts/deploy-prod` (spec §8.4 H3; no other file under `scripts/`), plus repo-root tooling files the scaffold creates (lockfiles, CI config, Docker Compose, `Makefile`, `.env.example`)
 - **Layout:** (spec §9 M0)
   - `app/` — Django 5.2 modular monolith on Python 3.12, ASGI (D1); apps `accounts`, `tenancy`, `clients`, `planner`, `portfolio`, `reviews`, `cases`, `forms`, `connectors` (crm, fame, epartner), `bridge`, `outbox`, `ai`, `documents`, `audit`, `settings`, plus `jobs` (D5)
   - `web/` — React 19 + TypeScript (strict) + Vite SPA served same-origin by Django; typed API client generated from the `django-ninja` OpenAPI schema (D2)
