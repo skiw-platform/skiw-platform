@@ -57,17 +57,35 @@ HARDENING: dict[str, Callable[[Config], bool]] = {
     "restart": lambda s: s.get("restart") == "unless-stopped",
     "journald": lambda s: s.get("logging", {}).get("driver") == "journald",
 }
-EXCEPTIONS = {
-    ("caddy", "cap_add"): "H1 says NET_BIND_SERVICE; the daemon's no-new-privileges blocks the "
-    "file capability for a non-root user (G13 open, plan §0)",
-    ("clamav", "user"): "the image entrypoint starts as root, then runs clamd/freshclam as clamav",
-    ("clamav", "read_only"): "the entrypoint edits /etc/clamav from CLAMD_CONF_* (H1 [A], M1i)",
-    (
-        "clamav",
-        "cap_add",
-    ): "CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID: the minimum it starts with",
-    ("migrate", "restart"): "one-off, started only by skiw-deploy; a restart policy re-runs it",
-    ("backup", "restart"): "one-off pre-migration dump in M1; M6 makes it the ops worker",
+CLAMAV_CAPS = {"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"}
+# A named exception is bounded: the check may fail only with the documented value, so a wider
+# capability set or an automatic restart of a one-off job is still a violation.
+EXCEPTIONS: dict[tuple[str, str], tuple[str, Callable[[Config], bool]]] = {
+    ("caddy", "cap_add"): (
+        "H1 says NET_BIND_SERVICE; the daemon's no-new-privileges blocks the file capability for "
+        "a non-root user (G13 open, plan §0)",
+        lambda s: set(s.get("cap_add") or []) == {"NET_BIND_SERVICE"},
+    ),
+    ("clamav", "user"): (
+        "the image entrypoint starts as root, then runs clamd/freshclam as clamav",
+        lambda s: True,
+    ),
+    ("clamav", "read_only"): (
+        "the entrypoint edits /etc/clamav from CLAMD_CONF_* (H1 [A], M1i)",
+        lambda s: True,
+    ),
+    ("clamav", "cap_add"): (
+        "CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID: the minimum it starts with",
+        lambda s: set(s.get("cap_add") or []) <= CLAMAV_CAPS,
+    ),
+    ("migrate", "restart"): (
+        "one-off, started only by skiw-deploy; a restart policy re-runs it",
+        lambda s: s.get("restart") == "no",
+    ),
+    ("backup", "restart"): (
+        "one-off pre-migration dump in M1; M6 makes it the ops worker",
+        lambda s: s.get("restart") == "no",
+    ),
 }
 
 
@@ -140,12 +158,17 @@ def unpinned(config: Config) -> list[str]:
 
 
 def unhardened(config: Config) -> list[str]:
-    return [
-        f"{n}: {check}"
-        for n, s in services(config)
-        for check, ok in HARDENING.items()
-        if not ok(s) and (n, check) not in EXCEPTIONS
-    ]
+    problems = []
+    for n, s in services(config):
+        for check, ok in HARDENING.items():
+            if ok(s):
+                continue
+            exception = EXCEPTIONS.get((n, check))
+            if exception is None:
+                problems.append(f"{n}: {check}")
+            elif not exception[1](s):
+                problems.append(f"{n}: {check} is outside its named exception")
+    return problems
 
 
 def mounts(config: Config) -> list[str]:
@@ -204,6 +227,10 @@ PLANTS: list[tuple[Callable[[Config], list[str]], Callable[[Config], None]]] = [
     (unpinned, lambda c: c["services"]["clamav"].update(image="clamav/clamav:1.5.4")),
     (unhardened, lambda c: c["services"]["web"].update(read_only=False)),
     (unhardened, lambda c: c["services"]["db"].update(user="0")),
+    (unhardened, lambda c: c["services"]["caddy"]["cap_add"].append("SYS_ADMIN")),
+    (unhardened, lambda c: c["services"]["clamav"]["cap_add"].append("SYS_ADMIN")),
+    (unhardened, lambda c: c["services"]["migrate"].update(restart="always")),
+    (unhardened, lambda c: c["services"]["backup"].update(restart="always")),
     (mounts, lambda c: c["services"]["web"]["volumes"].append({"source": BACKUPS})),
     (mounts, lambda c: c["services"]["migrate"].update(volumes=[{"source": "skiw-files"}])),
     (
