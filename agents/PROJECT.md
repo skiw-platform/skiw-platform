@@ -1,6 +1,6 @@
 # PROJECT.md — the only file you fill in per project
 
-- **Kit version used:** 1.7.3 <!-- from agents/README.md; tells you which master changes this project hasn't picked up -->
+- **Kit version used:** 1.7.4 <!-- from agents/README.md; tells you which master changes this project hasn't picked up -->
 
 Every project fact lives here and nowhere else. The role files (`roles/`) and the
 guardrail packs (`guardrails/`) never change between projects; they read this file.

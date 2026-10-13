@@ -1,6 +1,6 @@
 # Agent kit — builder + reviewer setup for any app
 
-**Kit version: 1.7.3** · record it in each project's `PROJECT.md` when you copy the kit in.
+**Kit version: 1.7.4** · record it in each project's `PROJECT.md` when you copy the kit in.
 
 A two-agent workflow: a **builder** that writes code and a **reviewer** that checks every spec and PR
 before you merge. It works with any AI coding tool and any model.
@@ -149,6 +149,8 @@ Version rule: patch (1.3.x) = wording; minor (1.x.0) = new rule, pack or command
 change that breaks existing `PROJECT.md` files.
 
 ### Changelog
+- **1.7.4** — After `merged`, the builder cleans up the PR's local branch and worktree without asking when it can
+  prove they are fully merged and clean; otherwise it reports which check failed.
 - **1.7.3** — Reviewer works in tools whose sandbox makes `.git` read-only: if `git worktree add` fails, it reviews a
   `git archive` snapshot of the exact head SHA (no clone, pin kept) and reports the checks it couldn't run.
 - **1.7.2** — `setup` applies listed defaults and reports them instead of asking: durable notes `none`, agent
