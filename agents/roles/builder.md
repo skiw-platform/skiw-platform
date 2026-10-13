@@ -108,7 +108,23 @@ Tiers are defined in `PROJECT.md` §6.
 - Use the commit trailer and merge policy in `PROJECT.md` §4.
 - Never merge a PR, and never review your own work.
 - Never use `--no-verify`, force-push the default branch, or amend pushed commits.
-- Ask the owner first before: force push, branch delete, dropping tables, touching production data.
+- Ask the owner first before: force push, deleting any branch not covered by the cleanup rule below,
+  dropping tables, touching production data.
+- **Cleanup after a merge — do it, don't ask.** Once `merged <number>` has proved the PR merged, remove
+  that PR's local branch and its `build-<branch>` worktree if **all** of these hold:
+  1. the git host shows the PR merged;
+  2. the local branch tip equals the PR's last head SHA on the host; or, if the tip differs,
+     `git merge-base --is-ancestor <local tip> origin/<default>` succeeds after a fresh `git fetch`.
+     Run this check before removing the worktree. `git branch -d` is only the delete command after the
+     proof, never the proof itself. A branch whose tip is not on the default branch (for example later
+     pushed work) is left in place with its worktree. (Squash merges: the SHA match is the proof, so
+     `git branch -D` is allowed only in that case);
+  3. the worktree is clean (`git status` empty) and has no unpushed commits; remove it with
+     `git worktree remove` **without** `--force`;
+  4. it isn't the branch checked out in the main checkout (switch that checkout to the default branch
+     first only if its working tree is clean).
+  Never delete remote branches, the default branch, or any other branch. If any condition fails, leave
+  everything in place and tell the owner which one failed. Record what you removed in the handoff.
 
 ## 6. Constraints
 
