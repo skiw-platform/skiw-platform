@@ -106,8 +106,7 @@ make db-up         # docker compose up -d --wait db
 make migrate       # migrate with MIGRATION_DATABASE_URL (skiw_migrator), then makemigrations --check, then `lintmigrations --warnings-as-errors` (django-migration-linter; required gate, same command in CI)
 pending M4         # make db-test: RLS isolation, schema check, forged-tenant tests under skiw_app
 # host configuration (replaced the CDK synth test `make infra-test`, removed in M1a with the CDK skeleton)
-make host-test     # infra/host unit tests (pytest infra/host/tests), no Docker daemon needed; CI job `host` runs it on every PR (spec §8.3, §8.4 H3, H14 UNI-13)
-pending M1b        # `docker compose config` tests are added to `make host-test` (spec §8.4 H1, H14)
+make host-test     # infra/host unit tests and the `infra/host/compose.yml` config tests (`docker compose config --format json`); the Compose tests need the `docker compose` CLI, skip locally without it and fail when `CI=true`; CI job `host` runs it on every PR (spec §8.3, §8.4 H1, H3, H14 UNI-13)
 make host-test-live # live host stack tests (Caddy, roles, file store); a stub until M1c, M1e and M1i add them, then run in the CI `host` job
 make secrets-test  # proves .gitleaks.toml flags each secret key name; needs gitleaks, skips locally without it, fails when CI=true; CI job `security` runs it
 # end-to-end
