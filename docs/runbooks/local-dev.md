@@ -11,7 +11,7 @@ Applies from M0a. Other runbooks: [README](README.md); deployment, rollback and 
 ## First run
 1. `make install` — creates `.venv` from `uv.lock` and installs the web packages from `pnpm-lock.yaml`.
 2. `make dev` — builds the web shell, copies `.env.example` to `.env` if missing, starts Postgres 17, runs `make migrate` (the worker needs the queue tables), then builds the image and starts the app and the Procrastinate worker.
-3. `curl http://127.0.0.1:8000/healthz` returns `ok` (HTTP 200); `http://127.0.0.1:8000/` shows the shell.
+3. `curl http://127.0.0.1:8000/healthz` returns `ok` (HTTP 200); `curl http://127.0.0.1:8000/readyz` returns `ok` (200) only when the database answers as `skiw_app` and no migration is unapplied, else `not ready` (503); `http://127.0.0.1:8000/` shows the shell.
 
 ## Everyday commands
 | Command | What it does |
@@ -32,12 +32,14 @@ Applies from M0a. Other runbooks: [README](README.md); deployment, rollback and 
 | `make clean` | stops the stack and deletes the local database volume |
 
 ## Environment variables
-All come from `.env` (copied from `.env.example`; never committed). The app fails to start if
-`DJANGO_SECRET_KEY` or `DATABASE_URL` is missing.
+Locally and in CI these come from `.env` (copied from `.env.example`; never committed). On the iCore hosts
+they come from the host secret files and the Compose environment instead (below). The app fails to start if
+its secret key source (`DJANGO_SECRET_KEY`, or `DJANGO_SECRET_KEY_FILE` on hosts) or `DATABASE_URL` is missing.
 - `DATABASE_URL` is the runtime URL and uses `skiw_app`. The `app` container and any host-run app or test use it (TEN-02).
 - `MIGRATION_DATABASE_URL` uses `skiw_migrator`. Only `make migrate` reads it, and it injects it as `DATABASE_URL` for that one process (TEN-01).
 - The `worker` container (`python app/manage.py runworker`, which checks migrations and then runs `procrastinate worker`) also connects as `skiw_app`, with only the queue grants of spec §4.1 (migration `jobs.0001`). It keeps finished jobs (`delete_jobs = "never"`); there is no cleanup yet.
-- TLS: `DATABASE_URL` may carry `sslmode`, `sslrootcert`, `sslcert`, `sslkey`, `sslcrl`; other options are rejected. Non-local deployments set `DJANGO_REQUIRE_DB_TLS=1`, which refuses any `sslmode` other than `verify-full` or `verify-ca`. Local values are placeholders, not secrets.
+- Hosts read secrets from files, not the environment (spec §8.4 H4): `DJANGO_SECRET_KEY_FILE` (`v<n>:<base64>` lines; the newest version is `SECRET_KEY`, older ones `SECRET_KEY_FALLBACKS`) replaces `DJANGO_SECRET_KEY`, and `DATABASE_PASSWORD_FILE` (one line) supplies the password that `DATABASE_URL` then must not carry. Setting both forms, or a malformed file, stops startup. Local `.env` values keep working.
+- TLS: `DATABASE_URL` may carry `sslmode`, `sslrootcert`, `sslcert`, `sslkey`, `sslcrl`; other options are rejected. `DJANGO_REQUIRE_DB_TLS=1` is an opt-in check that refuses any `sslmode` other than `verify-full` or `verify-ca`; use it for any database reached over a network you do not control. The planned iCore hosts do not set it: the database is only on host-internal Docker networks and spec §8.4 H6 drops TLS there. Local values are placeholders, not secrets.
 
 ## Known local conflicts
 - The database is published on host port **5433** (`SKIW_DB_PORT`), because 5432 is often taken by another local Postgres.
