@@ -2,10 +2,8 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
 from pathlib import Path
 
-import psycopg
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
@@ -33,23 +31,6 @@ def run(argv: list[str]) -> subprocess.Popen[str]:
         "DJANGO_SETTINGS_MODULE": "config.settings",
     }
     return subprocess.Popen(argv, env=env, stderr=subprocess.PIPE, text=True)
-
-
-@pytest.fixture
-def unapplied_jobs_migration() -> Iterator[None]:
-    """Make the migration record say jobs.0001 was never applied, then put the row back.
-    The grants stay in place; only the record changes, through the owner role."""
-    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"], autocommit=True) as conn:
-        row = conn.execute(
-            "DELETE FROM django_migrations WHERE app = 'jobs' RETURNING app, name, applied"
-        ).fetchone()
-        assert row is not None
-        try:
-            yield
-        finally:
-            conn.execute(
-                "INSERT INTO django_migrations (app, name, applied) VALUES (%s, %s, %s)", row
-            )
 
 
 @pytest.mark.usefixtures("live_db")
