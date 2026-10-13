@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 33
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 05b190b2f4f0be988a16e64ac8becb8328c1093e
+review-file: reviews/PR-33.md
+review-file-hash: eb68ae40b0dfb3f814a6492c2251070e83aafe7a
+review-log-branch-commit: 5472c1b0a80024a158edd7480d8a533119439286
+verdict: Approved (round 2)
+ci: checks, host, image, security all success on the reviewed head (run 38406280580)
+note: M1b-2 (host Compose stack and config tests). Real stack not run; secret mounts, Caddy volume and TLS are proven in M1c, M1d and on the VPS.
+written-at: 2026-10-13T13:51:40Z
+pr-state-at-write: OPEN, unmerged
