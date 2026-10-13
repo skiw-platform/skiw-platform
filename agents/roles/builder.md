@@ -113,8 +113,12 @@ Tiers are defined in `PROJECT.md` §6.
 - **Cleanup after a merge — do it, don't ask.** Once `merged <number>` has proved the PR merged, remove
   that PR's local branch and its `build-<branch>` worktree if **all** of these hold:
   1. the git host shows the PR merged;
-  2. the local branch tip equals the PR's last head SHA on the host, or `git branch -d` accepts it
-     (squash merges: the SHA match is the proof, so `git branch -D` is allowed only in that case);
+  2. the local branch tip equals the PR's last head SHA on the host; or, if the tip differs,
+     `git merge-base --is-ancestor <local tip> origin/<default>` succeeds after a fresh `git fetch`.
+     Run this check before removing the worktree. `git branch -d` is only the delete command after the
+     proof, never the proof itself. A branch whose tip is not on the default branch (for example later
+     pushed work) is left in place with its worktree. (Squash merges: the SHA match is the proof, so
+     `git branch -D` is allowed only in that case);
   3. the worktree is clean (`git status` empty) and has no unpushed commits; remove it with
      `git worktree remove` **without** `--force`;
   4. it isn't the branch checked out in the main checkout (switch that checkout to the default branch
