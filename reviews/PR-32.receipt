@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 32
+repo: charliekhc/skiw-platform
+reviewed-head-sha: fd1a2495276d997a9b8079c88ba23e35882c844c
+review-file: reviews/PR-32.md
+review-file-hash: 1303a19c46adcb934e0c36e7a35519eef3863ba9
+review-log-branch-commit: 3824601bbc167711b1f0adc446296a1a8cd2d2b3
+verdict: Approved (round 2)
+ci: checks, host, image, security all success on the reviewed head (run 38390001345)
+note: M1b-1 (app part of plan M1b). M1b-2 (Compose stack) follows.
+written-at: 2026-10-13T12:13:23Z
+pr-state-at-write: OPEN, unmerged
