@@ -34,7 +34,8 @@ test-live: .env
 	$(MAKE) migrate
 	set -a; . ./.env; set +a; uv run pytest -m live
 
-# Host tooling unit tests (spec section 8.4); no Docker daemon needed. M1b adds the Compose config tests.
+# Host tooling tests (spec section 8.4) and the infra/host/compose.yml config tests. No Docker daemon
+# needed; the Compose tests need the docker compose CLI (skip locally without it, fail when CI=true).
 host-test:
 	$(TOOL_ENV) uv run --locked pytest infra/host/tests
 

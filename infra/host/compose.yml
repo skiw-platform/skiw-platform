@@ -1,0 +1,173 @@
+# Production and staging stack on the VPS (spec §8.4 H1, H2, H4, H6). Not used by `make dev`.
+# Values come from env/<environment>.env; every secret is a file under /etc/skiw/secrets/.
+# Images pinned by digest (UNI-14), resolved from the registry on 2026-10-13:
+#   caddy:2.11.7-alpine  index sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+#   postgres:17.11       index sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
+#                        (same digest as ../../docker-compose.yml)
+#   clamav/clamav:1.5.4  index sha256:638d90201ee7ee6a82d249a2fc23b132e578673b5f1f2766852b127676ca1ef6
+#   app                  ${SKIW_IMAGE}: ghcr.io/...@sha256:<digest>, written by skiw-deploy (M1g)
+name: skiw
+
+x-hardened: &hardened
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  logging: {driver: journald}
+
+x-app: &app
+  <<: *hardened
+  image: ${SKIW_IMAGE:?SKIW_IMAGE must be the app image by digest}
+  user: "10001"
+  networks: [app]
+  depends_on: {db: {condition: service_healthy}}
+
+x-app-env: &app-env
+  DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+  DATABASE_URL: postgres://skiw_app@db:5432/${SKIW_POSTGRES_DB:?}
+  DATABASE_PASSWORD_FILE: /run/secrets/skiw_app_password
+  DJANGO_ALLOWED_HOSTS: ${SKIW_HOSTNAME:?SKIW_HOSTNAME is empty until the owner names it (G9)}
+
+x-app-secrets: &app-secrets
+  - django_secret_key
+  - skiw_app_password
+  - tenant_token_key
+  - approval_mac_key
+  - tenant_source_key
+  - login_blob_key
+  - audit_mac_key
+  - field_kek
+  - blind_index_key
+  - crm_jar_kek
+
+services:
+  caddy:
+    <<: *hardened
+    image: caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    user: "10002:10002"
+    cap_add: [NET_BIND_SERVICE]
+    ports: ["80:80", "443:443"]
+    environment:
+      SKIW_HOSTNAME: ${SKIW_HOSTNAME:?SKIW_HOSTNAME is empty until the owner names it (G9)}
+    volumes: [caddy-data:/data, caddy-config:/config]
+    networks: [edge]
+    mem_limit: ${SKIW_MEM_CADDY:?}
+    pids_limit: 128
+
+  web:
+    <<: *app
+    environment:
+      <<: *app-env
+      WEB_CONCURRENCY: ${SKIW_WEB_WORKERS:?}
+    secrets: *app-secrets
+    volumes: [skiw-files:/srv/files]
+    networks: [edge, app, egress]
+    mem_limit: ${SKIW_MEM_WEB:?}
+    pids_limit: 256
+
+  worker:
+    <<: *app
+    command: [python, app/manage.py, runworker]
+    stop_grace_period: ${SKIW_WORKER_STOP_GRACE_S:?empty until the M4 plan sets the D5 values}s
+    environment: *app-env
+    secrets: *app-secrets
+    volumes: [skiw-files:/srv/files]
+    networks: [app, egress]
+    healthcheck: {disable: true}
+    mem_limit: ${SKIW_MEM_WORKER:?}
+    pids_limit: 256
+
+  migrate:
+    <<: *app
+    profiles: [deploy]
+    restart: "no"
+    command: [python, app/manage.py, migrate]
+    environment:
+      DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+      DATABASE_URL: postgres://skiw_migrator@db:5432/${SKIW_POSTGRES_DB:?}
+      DATABASE_PASSWORD_FILE: /run/secrets/skiw_migrator_password
+    secrets:
+      [django_secret_key, skiw_migrator_password, tenant_token_key, approval_mac_key, lookup_decoy_key]
+    healthcheck: {disable: true}
+    mem_limit: ${SKIW_MEM_MIGRATE:?}
+    pids_limit: 128
+
+  db:
+    <<: *hardened
+    image: postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
+    user: "999:999"
+    tmpfs: [/tmp, "/var/run/postgresql:uid=999,gid=999"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: ${SKIW_POSTGRES_DB:?}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: [skiw-db:/var/lib/postgresql/data]
+    networks: [app, ops]
+    shm_size: 256m
+    healthcheck:
+      test: [CMD, pg_isready, -U, postgres]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: ${SKIW_MEM_DB:?}
+    pids_limit: 256
+
+  clamav:
+    <<: *hardened
+    image: clamav/clamav:1.5.4@sha256:638d90201ee7ee6a82d249a2fc23b132e578673b5f1f2766852b127676ca1ef6
+    # The image entrypoint starts as root, chowns its directories and edits /etc/clamav, then
+    # clamd and freshclam run as `clamav`; these five capabilities are the minimum it starts with.
+    read_only: false
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    environment:
+      CLAMD_CONF_ConcurrentDatabaseReload: "no"
+    networks: [app, egress]
+    mem_limit: ${SKIW_MEM_CLAMAV:?}
+    pids_limit: 256
+
+  backup:
+    <<: *hardened
+    # pg_dump base until M1g builds infra/host/backup/predeploy FROM this digest; the dump command
+    # is wired there. Only the version check runs until then.
+    image: postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
+    profiles: [ops]
+    restart: "no"
+    user: "10003:10003"
+    entrypoint: [pg_dump]
+    command: [--version]
+    secrets: [skiw_backup_password]
+    volumes: ["skiw-files:/srv/files:ro", "/srv/skiw/backups:/srv/skiw/backups"]
+    networks: [ops]
+    mem_limit: ${SKIW_MEM_BACKUP:?}
+    pids_limit: 64
+
+networks:
+  edge: {ipam: {config: [{subnet: "${SKIW_NET_EDGE:?}"}]}}
+  app: {internal: true, ipam: {config: [{subnet: "${SKIW_NET_APP:?}"}]}}
+  ops: {internal: true, ipam: {config: [{subnet: "${SKIW_NET_OPS:?}"}]}}
+  egress: {ipam: {config: [{subnet: "${SKIW_NET_EGRESS:?}"}]}}
+
+volumes:
+  skiw-db:
+  skiw-files:
+  caddy-data:
+  caddy-config:
+
+# One file per secret (H4): root-owned directory, file owned by the reading service's uid, 0400.
+secrets:
+  django_secret_key: {file: /etc/skiw/secrets/django_secret_key}
+  tenant_token_key: {file: /etc/skiw/secrets/tenant_token_key}
+  approval_mac_key: {file: /etc/skiw/secrets/approval_mac_key}
+  lookup_decoy_key: {file: /etc/skiw/secrets/lookup_decoy_key}
+  tenant_source_key: {file: /etc/skiw/secrets/tenant_source_key}
+  login_blob_key: {file: /etc/skiw/secrets/login_blob_key}
+  audit_mac_key: {file: /etc/skiw/secrets/audit_mac_key}
+  field_kek: {file: /etc/skiw/secrets/field_kek}
+  blind_index_key: {file: /etc/skiw/secrets/blind_index_key}
+  crm_jar_kek: {file: /etc/skiw/secrets/crm_jar_kek}
+  skiw_app_password: {file: /etc/skiw/secrets/skiw_app_password}
+  skiw_migrator_password: {file: /etc/skiw/secrets/skiw_migrator_password}
+  skiw_backup_password: {file: /etc/skiw/secrets/skiw_backup_password}
+  postgres_password: {file: /etc/skiw/secrets/postgres_password}
