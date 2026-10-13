@@ -145,9 +145,17 @@ Record the spec's version and `git hash-object <spec path>` at the top of the ro
      commit instead: create the empty folder `<path>`, then
      `git archive <head SHA> | tar -x -C <path>`. This only reads from `.git`, so it works in a read-only
      sandbox, and it keeps the pin to the exact SHA. If the commit isn't local and can't be fetched, take
-     the host's archive of that exact SHA, never the branch tip. A snapshot has no git metadata: run only
-     checks that don't need it, list the checks you couldn't run, and use **Blocked** when they're
-     essential. Record "snapshot" in the round. Don't edit any file inside it.
+     the host's archive of that exact SHA, never the branch tip, and record where you got it.
+     A snapshot has no git metadata: run only checks that don't need it, list the checks you couldn't run,
+     and use **Blocked** when they're essential. Record "snapshot" in the round. Don't edit any file inside it.
+     **Integrity check.** Right after extracting, (a) compare the extracted file list with
+     `git ls-tree -r --name-only <head SHA>` (or the host archive's file list) and list any difference,
+     for example files `.gitattributes` marks `export-ignore`, as known exceptions; then (b) save a
+     fingerprint (`sha256sum`) of every extracted file. Don't compare against the commit's blob SHAs:
+     `git archive` applies `eol`, `ident` and `export-subst` attributes, so those hashes legitimately differ.
+     Run the same fingerprint check again after your checks. Checks that can write to source files
+     (formatters, generators, build scripts) are not allowed in the snapshot; run them on a copy.
+     New build output is expected and doesn't count; a changed or missing fingerprinted file does.
 6. Review the three-dot diff, merge base → head:
    ```bash
    git diff --stat <merge-base>...<head>
@@ -157,7 +165,8 @@ Record the spec's version and `git hash-object <spec path>` at the top of the ro
    Review the effective diff, not commit-list noise from pre-squash history.
 7. **At the end:** re-read the PR head SHA from the host and confirm it still equals the recorded SHA;
    confirm no tracked or staged file in your checkout changed (`git status --untracked-files=no` is
-   clean; a snapshot has no git status, so skip this check for it). Build and test output your checks created is expected and doesn't count. If the head moved or
+   clean). For a snapshot, repeat the fingerprint check instead. If any fingerprinted file changed or is
+   missing, discard the round and recreate the snapshot. Record the check in the round. Build and test output your checks created is expected and doesn't count. If the head moved or
    a tracked file changed, discard the round and start again.
 
 **Passes:**
@@ -172,7 +181,8 @@ Record the spec's version and `git hash-object <spec path>` at the top of the ro
 When you're done, delete only build and test output you can identify as created by your own checks, then
 run `git worktree remove <path>` **without** `--force`. If anything else untracked or modified remains,
 leave the checkout in place and report its path to the owner. A snapshot is removed by deleting its
-folder; if deletion isn't permitted, leave it and report its path.
+folder, but only after the end-of-round fingerprint check has passed; if deletion isn't permitted, leave
+it and report its path.
 
 ## 5. Severity
 
