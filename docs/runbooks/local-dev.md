@@ -22,7 +22,7 @@ Applies from M0a. Other runbooks: [README](README.md); deployment, rollback and 
 | `make web-build` / `make web-dev` | production build of the shell into `web/dist` / Vite dev server with `/healthz` and `/api` proxied to `:8000` |
 | `make e2e` | builds the shell, starts the database and migrates, starts the app (not the worker), runs Playwright on desktop and mobile widths (axe, keyboard, overflow, no-JS, console errors) |
 | `make test-live` | starts the database, migrates as `skiw_migrator`, then runs the `live` tests as `skiw_app`: role checks, `jobs.enqueue_in_tx` commit/rollback/visibility and refusals, the queue-grant audit and the worker lifecycle |
-| `make host-test` | host tooling unit tests in `infra/host/tests` (no Docker daemon needed) |
+| `make host-test` | host tooling unit tests and the `infra/host/compose.yml` config tests in `infra/host/tests` (no Docker daemon; the Compose tests need the `docker compose` CLI, skip without it locally and fail in CI) |
 | `make secrets-test` | proves `.gitleaks.toml` flags each secret key name (generated values; skips without gitleaks locally, fails in CI) |
 | `make audit` | `make secrets` (gitleaks, needs `brew install gitleaks`), `make audit-python` (pip-audit), `make audit-web` (pnpm audit) |
 | `make image-scan` | builds the image and scans it with Trivy (needs `brew install trivy`) |
