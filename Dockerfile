@@ -24,7 +24,7 @@ WORKDIR /srv
 COPY pyproject.toml uv.lock .python-version ./
 # uv is mounted for this step only, so the image ships without it.
 RUN --mount=from=uv,source=/uv,target=/bin/uv \
-    uv sync --locked --no-dev --no-group infra --no-install-project
+    uv sync --locked --no-dev --no-install-project
 
 COPY app ./app
 COPY --from=web /build/web/dist ./web/dist

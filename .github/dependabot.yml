@@ -37,3 +37,12 @@ updates:
     groups:
       docker-minor-patch:
         update-types: [minor, patch]
+  - package-ecosystem: docker-compose
+    directories: [/, /infra/host]
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      compose-minor-patch:
+        update-types: [minor, patch]

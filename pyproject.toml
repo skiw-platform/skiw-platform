@@ -23,9 +23,6 @@ dev = [
     "pytest-django==4.14.0",
     "django-migration-linter==6.0.0",
 ]
-infra = [
-    "aws-cdk-lib==2.272.0",
-]
 
 [tool.uv]
 default-groups = ["dev"]
@@ -34,7 +31,7 @@ package = false
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["app", "infra"]
+src = ["app", "infra/host"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "DJ", "C4", "SIM", "RUF"]
@@ -42,13 +39,13 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "DJ", "C4", "SIM", "RUF"]
 [tool.ruff.lint.per-file-ignores]
 "app/**/tests/**" = ["S101", "S105", "S603"]
 "app/tests/**" = ["S101", "S105", "S603"]
-"infra/tests/**" = ["S101", "S603"]
+"infra/host/tests/**" = ["S101", "S603"]
 "app/*/migrations/**" = ["RUF012"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
-mypy_path = "app:infra"
+mypy_path = "app:infra/host"
 explicit_package_bases = true
 plugins = ["mypy_django_plugin.main"]
 
@@ -58,12 +55,15 @@ django_settings_module = "config.settings"
 [tool.pytest.ini_options]
 pythonpath = ["app"]
 DJANGO_SETTINGS_MODULE = "config.settings"
-testpaths = ["app"]
-addopts = "-ra --strict-markers -m 'not live'"
-markers = ["live: needs the Compose database (make test-live)"]
+testpaths = ["app", "infra/host/tests"]
+addopts = "-ra --strict-markers -m 'not live and not secrets'"
+markers = [
+    "live: needs the Compose database (make test-live)",
+    "secrets: needs the gitleaks binary (make secrets-test)",
+]
 
 [tool.importlinter]
-root_packages = ["config", "health", "shell", "jobs"]
+root_packages = ["config", "health", "shell", "jobs", "skiw_host"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
@@ -93,3 +93,15 @@ layers = ["config", "health | shell | jobs"]
 name = "App modules are independent of each other"
 type = "independence"
 modules = ["health", "shell", "jobs"]
+
+[[tool.importlinter.contracts]]
+name = "Host tooling imports no app package or app dependency (UNI-04; stdlib only)"
+type = "forbidden"
+source_modules = ["skiw_host"]
+forbidden_modules = ["config", "health", "shell", "jobs", "django", "psycopg", "procrastinate"]
+
+[[tool.importlinter.contracts]]
+name = "App packages do not import host tooling (UNI-04)"
+type = "forbidden"
+source_modules = ["config", "health", "shell", "jobs"]
+forbidden_modules = ["skiw_host"]

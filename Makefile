@@ -1,6 +1,6 @@
-.PHONY: install lint typecheck test test-live infra-test build web-build web-dev e2e dev db-up migrate clean check-node audit secrets audit-python audit-web image-scan hooks
+.PHONY: install lint typecheck test test-live host-test host-test-live secrets-test build web-build web-dev e2e dev db-up migrate clean check-node audit secrets audit-python audit-web image-scan hooks
 
-export PYTHONPATH := app
+export PYTHONPATH := app:infra/host
 NODE_MAJOR := $(shell node -p "process.versions.node.split('.')[0]" 2>/dev/null)
 SEMGREP_VERSION := 1.179.0
 PIP_AUDIT_VERSION := 2.10.1
@@ -22,7 +22,7 @@ lint: check-node
 	pnpm -C web lint
 
 typecheck: check-node
-	$(TOOL_ENV) uv run --locked --group infra mypy app infra
+	$(TOOL_ENV) uv run --locked mypy app infra/host
 	pnpm -C web typecheck
 
 test: check-node
@@ -34,8 +34,18 @@ test-live: .env
 	$(MAKE) migrate
 	set -a; . ./.env; set +a; uv run pytest -m live
 
-infra-test: check-node
-	$(TOOL_ENV) uv run --locked --group infra pytest infra
+# Host tooling unit tests (spec section 8.4); no Docker daemon needed. M1b adds the Compose config tests.
+host-test:
+	$(TOOL_ENV) uv run --locked pytest infra/host/tests
+
+# Live host stack tests run here once they exist; until then this target only says so.
+host-test-live:
+	@echo "host-test-live: stub; no live host stack tests exist yet (M1b/M1c add them), nothing was run"
+
+# Proves .gitleaks.toml flags each secret key name (generated values, temp dir). Needs gitleaks;
+# skips locally without it, fails in CI (CI=true). CI runs it in the `security` job.
+secrets-test:
+	$(TOOL_ENV) uv run --locked pytest -m secrets infra/host/tests/test_gitleaks_config.py
 
 # Security gates (UNI-13). CI runs the same targets in the `security` job; docs/runbooks/ci.md.
 audit: secrets audit-python audit-web
