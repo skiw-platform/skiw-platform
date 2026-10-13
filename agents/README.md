@@ -151,7 +151,9 @@ change that breaks existing `PROJECT.md` files.
 ### Changelog
 - **1.7.5** — Reviewer snapshots get an integrity check: file list compared with the commit, every extracted file
   fingerprinted at creation and re-checked at the end; a changed file voids the round. (Blob-SHA comparison was
-  rejected: `git archive` applies eol/ident attributes, so those hashes differ.)
+  rejected: `git archive` applies eol/ident attributes, so those hashes differ.) Post-merge cleanup proof tightened: a
+  branch is removed only if its tip equals the PR's last head SHA or is an ancestor of the freshly fetched default
+  branch (`git merge-base --is-ancestor`), checked before the worktree is removed; `git branch -d` is not proof.
 - **1.7.4** — After `merged`, the builder cleans up the PR's local branch and worktree without asking when it can
   prove they are fully merged and clean; otherwise it reports which check failed.
 - **1.7.3** — Reviewer works in tools whose sandbox makes `.git` read-only: if `git worktree add` fails, it reviews a
