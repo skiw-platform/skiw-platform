@@ -30,6 +30,9 @@ def gitleaks_binary() -> str:
     pytest.skip("gitleaks is not installed locally (brew install gitleaks); CI runs this test")
 
 
+# UNI-01 escape hatch: `Any` only types the findings that gitleaks writes to its JSON report. The
+# fields are mixed (strings, numbers, nested lists) and belong to an external tool, so they are
+# not modelled here; the tests read only `RuleID` and `Match` and assert on those two keys.
 def scan(tmp_path: Path, content: str) -> tuple[int, list[dict[str, Any]]]:
     scanned = tmp_path / "scanned"
     scanned.mkdir()
