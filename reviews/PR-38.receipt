@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 38
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 8222e733e134add913029b27127f6982f6e7019c
+review-file: reviews/PR-38.md
+review-file-hash: 61022d085f52866a84e65fdaccfe58c8954b1ed6
+review-log-branch-commit: a342d0b4ba5b11b2f03af0ddc8178cfbcdcc797a
+verdict: Approved (round 2)
+ci: checks, host, image, security all success on the reviewed head (run 38527759793)
+note: M1d-1 (bootstrap-secrets init, inventory, escrow bundle). restore and the override are M1d-2. Owner values G5 (public age keys), G10, G11 remain open; real host, journal and off-host recovery are proven in M1k.
+written-at: 2026-10-14T13:31:52Z
+pr-state-at-write: OPEN, unmerged
