@@ -35,6 +35,7 @@ class Refused(Exception):
 
 class Host:
     def __init__(self, root: Path, chown: Chown) -> None:
+        self.root = root
         self.secrets = root / "etc/skiw/secrets"
         self.escrow = root / "srv/skiw/escrow"
         self.deploy_log = root / "var/log/skiw/deploy.log"  # [A] path shared with skiw-deploy (M1g)
@@ -44,6 +45,23 @@ class Host:
 def to_journal(message: str) -> None:
     syslog.openlog("bootstrap-secrets")
     syslog.syslog(syslog.LOG_NOTICE, message)
+
+
+def sync_dir(directory: Path) -> None:
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def sync_chain(host: Host, directory: Path) -> None:
+    """Make the directory entries durable: the directory itself and every ancestor up to the root,
+    because `mkdir -p` may have just created them."""
+    for path in (directory, *directory.parents):
+        sync_dir(path)
+        if path == host.root:
+            break
 
 
 def mint(version: int) -> str:
@@ -92,12 +110,11 @@ def install(host: Host, keys: dict[str, list[str]], to: list[str], age: Path) ->
     escrow.encrypt(path, bundle(keys, created), to, age)
     written = [path]
     try:
+        sync_chain(host, host.escrow)  # the bundle's name is on disk before any key is installed
         for name, lines in keys.items():
             text = "".join(f"{line}\n" for line in lines)
             written.append(write(host, host.secrets / name, text, OWNER[name]))
-        fd = os.open(host.secrets, os.O_RDONLY)
-        os.fsync(fd)
-        os.close(fd)
+        sync_chain(host, host.secrets)
     except BaseException:
         for done in written:
             done.unlink(missing_ok=True)
@@ -141,5 +158,14 @@ def main(
             file=sys.stderr,
         )
         return 1
-    record(host, journal, f"{args.mode}: {len(keys)} key files installed, escrow bundle {path}")
+    try:
+        record(host, journal, f"{args.mode}: {len(keys)} key files installed, escrow bundle {path}")
+    except OSError as exc:
+        print(  # the keys and the bundle are committed here: report it, never roll back or retry
+            "bootstrap-secrets: the key files and the escrow bundle are installed, but writing "
+            f"the log failed: {exc.strerror} {exc.filename}. "
+            "Do not run init again; see the runbook.",
+            file=sys.stderr,
+        )
+        return 3
     return 0

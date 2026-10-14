@@ -34,9 +34,16 @@ staging-check secret (G11) is not in the inventory until its mechanism is decide
 sudo bootstrap-secrets init --env-file <path to env/<environment>.env>
 ```
 It mints every app key as `v1`, writes `/srv/skiw/escrow/<UTC time>.bundle.age` (encrypted to the
-recipients; the age header is checked), then installs the key files. If `age` or any write fails,
-it removes everything it wrote and exits non-zero; fix the cause and run it again. Exit codes:
-0 done, 2 refused (nothing written), 1 failed (nothing left). No key value is ever printed.
+recipients; the age header is checked), makes the bundle's directory entry durable, then installs
+the key files. If `age` or any write before that point fails, it removes everything it wrote and
+exits non-zero; fix the cause and run it again. Exit codes: 0 done, 2 refused (nothing written),
+1 failed (nothing left), 3 installed but the final log step failed. No key value is ever printed.
+
+**Exit 3** means the keys and the bundle are installed and committed; only the line to the journal or
+`/var/log/skiw/deploy.log` was not written. Do not run `init` again (it would refuse: the store is
+not empty). Check the keys with `ls -l /etc/skiw/secrets`, fix the log problem (disk full, a file
+where `/var/log/skiw` should be, permissions), note the install in the recovery record by hand,
+and carry on with the off-host copy of the bundle.
 
 Then copy the new bundle off the host, apart from the dumps (H6; the automated pull is M6), and
 check the owner can decrypt it on the owner's own machine.
