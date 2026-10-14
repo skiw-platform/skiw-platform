@@ -1,12 +1,10 @@
-"""`bootstrap-secrets init|restore` (spec §8.4 H4; plan §3 M1d).
+"""`bootstrap-secrets init` (spec §8.4 H4; plan §3 M1d).
 
 Each test runs on a temporary root with a fake `age` (header + base64 of its stdin) and a recording
 chown, so no root and no real key are needed. Every key value is generated at run time.
 """
 
 import base64
-import hashlib
-import io
 import json
 import re
 import secrets as token
@@ -53,9 +51,7 @@ class Rig:
         assert gid == 0
         self.chowns[Path(path).name.removeprefix(".").removesuffix(".tmp")] = uid
 
-    def run(
-        self, *argv: str, stdin: bytes = b"", chown: Callable[[str, int, int], None] | None = None
-    ) -> int:
+    def run(self, *argv: str, chown: Callable[[str, int, int], None] | None = None) -> int:
         args = [
             *argv,
             "--env-file",
@@ -65,7 +61,7 @@ class Rig:
             "--age",
             str(self.age),
         ]
-        return main(args, chown or self.chown, self.journal.append, io.BytesIO(stdin))
+        return main(args, chown or self.chown, self.journal.append)
 
     def files(self) -> dict[str, str]:
         return (
@@ -85,11 +81,6 @@ class Rig:
 @pytest.fixture
 def rig(tmp_path: Path) -> Rig:
     return Rig(tmp_path, "a")
-
-
-def restored(tmp_path: Path, bundle: object, *argv: str) -> tuple[Rig, int]:
-    other = Rig(tmp_path, "b")
-    return other, other.run("restore", *argv, stdin=json.dumps(bundle).encode())
 
 
 def doc(rig: Rig) -> dict[str, dict[str, list[dict[str, str]]]]:
@@ -119,18 +110,14 @@ def test_init_installs_each_app_key_with_owner_mode_and_escrow(rig: Rig) -> None
 
 
 def test_values_never_reach_stdout_stderr_journal_or_deploy_log(
-    rig: Rig, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    rig: Rig, capfd: pytest.CaptureFixture[str]
 ) -> None:
     assert rig.run("init") == 0
-    bundle = doc(rig)
-    del bundle["keys"]["field_kek"]
-    other, code = restored(tmp_path, bundle, "--allow-new-key-version", "field_kek")
-    assert code == 0
     out, err = capfd.readouterr()
-    log = (other.root / "var/log/skiw/deploy.log").read_text()
-    seen = "\n".join([out, err, log, *rig.journal, *other.journal])
-    values = [line for r in (rig, other) for k in APP_KEYS for line in r.files()[k].split()]
-    assert values and "field_kek v1" in log and "field_kek v1" in err
+    log = (rig.root / "var/log/skiw/deploy.log").read_text()
+    seen = "\n".join([out, err, log, *rig.journal])
+    values = [line for k in APP_KEYS for line in rig.files()[k].split()]
+    assert values and "init: 10 key files installed" in log
     assert not [v for v in values if v in seen or v.partition(":")[2] in seen]
 
 
@@ -146,69 +133,6 @@ def test_init_twice_refuses_and_changes_nothing(rig: Rig) -> None:
     before = rig.files(), rig.bundles()
     assert rig.run("init") == 2
     assert (rig.files(), rig.bundles()) == before
-
-
-def test_restore_installs_versions_verbatim_then_init_refuses(rig: Rig, tmp_path: Path) -> None:
-    assert rig.run("init") == 0
-    bundle = doc(rig)
-    v2 = f"v2:{base64.b64encode(token.token_bytes(32)).decode()}"  # newest listed first
-    bundle["keys"]["audit_mac_key"].insert(
-        0, {"line": v2, "sha256": hashlib.sha256(v2.encode()).hexdigest()}
-    )
-    other, code = restored(tmp_path, bundle)
-    assert code == 0
-    files = other.files()
-    assert files.pop(".restored")
-    assert files["audit_mac_key"] == rig.files()["audit_mac_key"] + f"{v2}\n"  # oldest first
-    assert {k: v for k, v in files.items() if k != "audit_mac_key"} == {
-        k: v for k, v in rig.files().items() if k != "audit_mac_key"
-    }
-    assert other.run("init") == 2
-    assert other.run("restore", stdin=json.dumps(bundle).encode()) == 2
-
-
-@pytest.mark.parametrize(
-    "spoil",
-    [
-        lambda b: b["keys"].pop("crm_jar_kek"),
-        lambda b: b["keys"]["login_blob_key"][0].update(sha256="0" * 64),
-        lambda b: b["keys"].update(skiw_app_password=[{"line": "x", "sha256": "y"}]),
-        lambda b: b["keys"]["tenant_token_key"][0].update(line="v1:c2hvcnQ="),
-        lambda b: b.update(format="other"),
-    ],
-    ids=["missing-key", "wrong-sha256", "extra-db-password", "short-key", "not-a-bundle"],
-)
-def test_restore_refuses_a_bad_bundle_and_writes_nothing(
-    rig: Rig, tmp_path: Path, spoil: Callable[[dict[str, object]], object]
-) -> None:
-    assert rig.run("init") == 0
-    bundle: dict[str, object] = json.loads(rig.plaintext())
-    spoil(bundle)
-    other, code = restored(tmp_path, bundle)
-    assert code == 2
-    assert other.files() == {} and other.bundles() == [] and not other.root.exists()
-
-
-def test_override_mints_only_the_named_key_and_records_it(rig: Rig, tmp_path: Path) -> None:
-    assert rig.run("init") == 0
-    bundle = doc(rig)
-    del bundle["keys"]["crm_jar_kek"]
-    other, code = restored(tmp_path, bundle, "--allow-new-key-version", "crm_jar_kek")
-    assert code == 0
-    old, new = rig.files(), other.files()
-    assert [k for k in APP_KEYS if new[k] != old[k]] == ["crm_jar_kek"]
-    assert new["crm_jar_kek"].startswith("v1:")
-    assert [line for line in other.journal if "minted" in line] == [
-        "restore minted crm_jar_kek v1 (--allow-new-key-version)"
-    ]
-    assert "crm_jar_kek" in (other.root / "var/log/skiw/deploy.log").read_text()
-    assert set(json.loads(other.plaintext())["keys"]) == set(APP_KEYS)  # re-escrowed
-
-
-def test_override_is_refused_for_init_or_a_name_outside_the_app_keys(rig: Rig) -> None:
-    assert rig.run("init", "--allow-new-key-version", "field_kek") == 2
-    assert rig.run("restore", "--allow-new-key-version", "skiw_app_password") == 2
-    assert not rig.root.exists()
 
 
 @pytest.mark.parametrize("kind", ["private", "not-age"])
@@ -271,4 +195,4 @@ def test_executable_runs_the_module() -> None:
         text=True,
         check=False,
     )
-    assert result.returncode == 0 and "--allow-new-key-version" in result.stdout
+    assert result.returncode == 0 and "--env-file" in result.stdout

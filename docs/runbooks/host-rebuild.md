@@ -12,7 +12,7 @@ service that reads it, mode 0400. The inventory, with readers and owners, is
 
 | Kind | Names | Created by | Escrowed |
 |---|---|---|---|
-| App keys (`v<n>:<base64>` lines, 32 random bytes each) | `django_secret_key`, `tenant_token_key`, `approval_mac_key`, `lookup_decoy_key`, `tenant_source_key`, `login_blob_key`, `audit_mac_key`, `field_kek`, `blind_index_key`, `crm_jar_kek` | `bootstrap-secrets init`, or `restore` from the escrow bundle | yes |
+| App keys (`v<n>:<base64>` lines, 32 random bytes each) | `django_secret_key`, `tenant_token_key`, `approval_mac_key`, `lookup_decoy_key`, `tenant_source_key`, `login_blob_key`, `audit_mac_key`, `field_kek`, `blind_index_key`, `crm_jar_kek` | `bootstrap-secrets init` (`restore` from the escrow bundle: M1d-2) | yes |
 | DB passwords | `skiw_app_password`, `skiw_migrator_password`, `skiw_backup_password`, `postgres_password`, `skiw_readonly_password` | `bootstrap-db` (M1e), newly set on every rebuild | no |
 | Owner-supplied | `ghcr_read_token` (G10) | the owner, by hand (below) | no |
 
@@ -27,8 +27,7 @@ staging-check secret (G11) is not in the inventory until its mechanism is decide
   recipient(s) (`age1…`, space-separated; G5). Staging uses its own staging-only identity. Never
   put a private identity (`AGE-SECRET-KEY-…`) on a host: the script refuses it without printing
   it; if that happens, treat the identity as exposed and make a new one.
-- The secret store must be empty. Both modes refuse when any file, or the `.restored` marker,
-  is already there. Run `bootstrap-secrets` first, then place the GHCR token, then `bootstrap-db`.
+- The secret store must be empty. `init` refuses when any file is already there. Run `bootstrap-secrets` first, then place the GHCR token, then `bootstrap-db`.
 
 ### New environment: `init`
 ```
@@ -40,27 +39,13 @@ it removes everything it wrote and exits non-zero; fix the cause and run it agai
 0 done, 2 refused (nothing written), 1 failed (nothing left). No key value is ever printed.
 
 Then copy the new bundle off the host, apart from the dumps (H6; the automated pull is M6), and
-check the owner can decrypt it on his own machine.
+check the owner can decrypt it on the owner's own machine.
 
 ### Recovery: `restore`
-On the owner's machine, decrypt the newest bundle and stream it over SSH; the plaintext never
-touches the host's disk except as the 0400 key files, and the private key never reaches the host:
-```
-age --decrypt -i <offline escrow identity> <bundle>.bundle.age \
-  | ssh <operator>@<host> sudo bootstrap-secrets restore --env-file <path to env/<environment>.env>
-```
-It checks the bundle first (every app key of the inventory present, nothing else, each version's
-SHA-256, 32 bytes per version), writes nothing if anything is wrong, then writes a fresh escrow
-bundle, installs every version verbatim and writes `/etc/skiw/secrets/.restored`.
-
-It never mints a key. If a key is truly lost, the owner may add
-`--allow-new-key-version <name>` (repeatable): it adds a new newest version of that key only
-(`v1` if the bundle lacks it). Data encrypted under a lost version stays unreadable. The override
-is written to stderr, the journal (`journalctl -t bootstrap-secrets`) and the deploy log
-`/var/log/skiw/deploy.log`, with the key name and version only; record it in the recovery record.
+`bootstrap-secrets restore` (reading a decrypted bundle, verifying it, installing every version verbatim, with an owner-only override for a lost key) is added in M1d-2. Until then the escrow bundle is written and checked at `init` but there is no automated way to install it.
 
 ### Placing `ghcr_read_token` (owner)
-The owner issues the token (G10) and types it into the host; it is never in a file on his
+The owner issues the token (G10) and types it into the host; it is never in a file on the owner's
 machine, in shell history or in the repository:
 ```
 sudo bash -c 'umask 077; t=/etc/skiw/secrets/.ghcr_read_token.tmp; \
