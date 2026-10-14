@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 36
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 1462c6add30eb2e910a656c06e6ad4ba32de0a19
+review-file: reviews/PR-36.md
+review-file-hash: f1fd4c4319498db0b8a9cf9358b844656a766a06
+review-log-branch-commit: b21feadae882e41f4ce27b34f1ef9494f81b4d06
+verdict: Approved (round 2)
+ci: checks, host, image, security all success on the reviewed head (run 38499645520)
+note: M1c Caddy edge. Real certificates, DNS (G9) and valid-certificate /readyz are proven in M1k. Owner questions (G13, UDP 443/HTTP3, Retry-After, HSTS scope) remain open.
+written-at: 2026-10-14T03:03:25Z
+pr-state-at-write: OPEN, unmerged
