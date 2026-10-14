@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 39
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 6270bced52aef3c3dcad9435be57a0ab30373948
+review-file: reviews/PR-39.md
+review-file-hash: 40d1310618c4a37945c50148c1f4abbdb3ac2a17
+review-log-branch-commit: 1141abad478de93706a6788a20cb1bd78ecccd71
+verdict: Approved (round 2)
+ci: checks, host, image, security all success on the reviewed head (run 38580321782)
+note: M1d-2 (bootstrap-secrets restore, .restored marker, owner-only key-version override). The streamed restore needs a narrow noninteractive sudo rule: provisioned in M1f, proven in M1k. Owner values G5, G10, G11 stay open.
+written-at: 2026-10-14T14:35:42Z
+pr-state-at-write: OPEN, unmerged
