@@ -95,7 +95,7 @@ Leave a command out if the project doesn't have it yet; the scaffold milestone f
 # install
 make install       # check-node, uv sync --locked && pnpm install --frozen-lockfile
 # fast checks (run before every push)
-make typecheck     # mypy app infra && pnpm -C web typecheck
+make typecheck     # mypy app infra/host && pnpm -C web typecheck
 make lint          # ruff check/format --check, lint-imports, semgrep --config semgrep/ + --test, pnpm -C web lint
 make test          # pytest (no DB, `-m 'not live'`) && vitest
 make test-live     # Compose Postgres, migrate as skiw_migrator, pytest -m live as skiw_app (roles, jobs, queue grants)
@@ -107,7 +107,7 @@ make migrate       # migrate with MIGRATION_DATABASE_URL (skiw_migrator), then m
 pending M4         # make db-test: RLS isolation, schema check, forged-tenant tests under skiw_app
 # host configuration (replaced the CDK synth test `make infra-test`, removed in M1a with the CDK skeleton)
 make host-test     # infra/host unit tests and the `infra/host/compose.yml` config tests (`docker compose config --format json`); the Compose tests need the `docker compose` CLI, skip locally without it and fail when `CI=true`; CI job `host` runs it on every PR (spec §8.3, §8.4 H1, H3, H14 UNI-13)
-make host-test-live # live host stack tests (Caddy, roles, file store); a stub until M1c, M1e and M1i add them, then run in the CI `host` job
+make host-test-live # live host stack tests, needs Docker: the Caddy edge tests today (HSTS, redirect, forwarded headers, body cap, timeouts, maintenance page); roles (M1e) and the file store (M1i) are added later; skips locally without Docker, fails when `CI=true`; CI job `host` runs it (spec §8.4 H1, §9 M1, H14 UNI-17)
 make secrets-test  # proves .gitleaks.toml flags each secret key name; needs gitleaks, skips locally without it, fails when CI=true; CI job `security` runs it
 # end-to-end
 make e2e           # web build, compose up --wait, playwright test
