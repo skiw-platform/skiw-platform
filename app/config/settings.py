@@ -8,6 +8,11 @@ SECRET_KEY, SECRET_KEY_FALLBACKS = env.secret_key()
 DEBUG = env.flag("DJANGO_DEBUG")
 ALLOWED_HOSTS = env.csv("DJANGO_ALLOWED_HOSTS")
 
+# Hosts only (spec §8.4 H1, UNI-17): Caddy overwrites X-Forwarded-Proto on every request, so
+# Django may trust it there. Unset elsewhere, so a client-sent header never makes a request secure.
+if env.flag("DJANGO_BEHIND_CADDY"):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 INSTALLED_APPS = ["procrastinate.contrib.django", "health", "shell", "jobs"]
 MIDDLEWARE: list[str] = []
 

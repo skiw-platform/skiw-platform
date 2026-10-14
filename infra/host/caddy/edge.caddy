@@ -1,0 +1,36 @@
+# Shared edge rules (spec §8.4 H1, UNI-17, FILE-02), imported by Caddyfile (hosts) and by
+# ci.Caddyfile (CI only). The hostname comes from SKIW_HOSTNAME (G9); there is no
+# trusted_proxies, so Caddy drops client-sent X-Forwarded-* and sets its own.
+
+(hsts) {
+	header >Strict-Transport-Security "max-age=31536000"
+}
+
+# Plain HTTP: HSTS and a 308 to a fixed target; nothing here reaches web.
+http://{$SKIW_HOSTNAME} {
+	import hsts
+	redir https://{$SKIW_HOSTNAME}{uri} 308
+}
+
+(app) {
+	import hsts
+	request_body {
+		max_size 25MB
+	}
+	reverse_proxy web:8000 {
+		transport http {
+			read_timeout 60s
+			write_timeout 60s
+		}
+	}
+	handle_errors 502 503 504 {
+		import hsts
+		header Retry-After 30
+		header Cache-Control no-store
+		root * /srv/maintenance
+		rewrite * /maintenance.html
+		file_server {
+			status 503
+		}
+	}
+}

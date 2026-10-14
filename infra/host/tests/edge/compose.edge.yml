@@ -1,0 +1,38 @@
+# TEST ONLY (make host-test-live, infra/host/tests/test_edge_live.py): layered on compose.yml with
+# env/ci.env. Never used on a host. Paths are relative to infra/host (the project directory).
+# Secrets are pointed at a temp dir of values generated per run by a second, generated override.
+x-log: &log {driver: local}  # journald is a host setting; Docker Desktop has none
+
+services:
+  caddy:
+    logging: *log
+    # Loopback ports picked by Docker: no root, no clash with other local services.
+    ports: !override ["127.0.0.1::80", "127.0.0.1::443"]
+    command: [caddy, run, --config, /etc/caddy/ci.Caddyfile, --adapter, caddyfile]
+    volumes: ["./caddy/ci.Caddyfile:/etc/caddy/ci.Caddyfile:ro"]
+
+  web:
+    logging: *log
+    environment:
+      DJANGO_SETTINGS_MODULE: edge_probe.settings
+    volumes: ["./tests/edge/edge_probe:/srv/app/edge_probe:ro"]
+
+  migrate: {logging: *log}
+
+  db:
+    logging: *log
+    # Local/CI role bootstrap until M1e's bootstrap-db; passwords are generated per run.
+    environment:
+      SKIW_MIGRATOR_PASSWORD: ${EDGE_MIGRATOR_PASSWORD:?}
+      SKIW_APP_PASSWORD: ${EDGE_APP_PASSWORD:?}
+    volumes: ["../../docker/postgres/10-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro"]
+
+  stub:
+    image: ${SKIW_IMAGE:?}
+    profiles: [stub]
+    user: "10001"
+    read_only: true
+    cap_drop: [ALL]
+    command: [python, /stub/stub.py]
+    volumes: ["./tests/edge/stub.py:/stub/stub.py:ro"]
+    networks: {edge: {aliases: [web]}}
