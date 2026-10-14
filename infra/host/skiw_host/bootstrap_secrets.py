@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import os
+import stat
 import sys
 import syslog
 from collections.abc import Callable, Sequence
@@ -23,6 +24,7 @@ from skiw_host.secrets import APP_KEYS, OWNER
 
 KEY_BYTES = 32  # app/config/env.py MIN_KEY_BYTES
 FORMAT = "skiw-escrow-1"
+DIR_MODE = stat.S_IRWXU  # 0700: only root enters the secret and escrow directories
 Chown = Callable[[str, int, int], None]
 Journal = Callable[[str], None]
 
@@ -83,8 +85,8 @@ def write(host: Host, path: Path, text: str, uid: int) -> Path:
 def install(host: Host, keys: dict[str, list[str]], to: list[str], age: Path) -> Path:
     created = datetime.now(UTC)
     for directory in (host.secrets, host.escrow):
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(directory, 0o700)
+        directory.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
+        os.chmod(directory, DIR_MODE)
         host.chown(str(directory), 0, 0)
     path = host.escrow / f"{created:%Y%m%dT%H%M%SZ}.bundle.age"
     escrow.encrypt(path, bundle(keys, created), to, age)
