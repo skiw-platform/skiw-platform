@@ -21,7 +21,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from email.message import Message
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -68,8 +67,26 @@ class Stack:
     def port(self, target: int) -> int:
         return int(self.run("port", "caddy", str(target)).strip().rsplit(":", 1)[1])
 
-    def fetch(self, path: str, *, https: bool = True, **kwargs: Any) -> Reply:
-        return fetch(self.port(443 if https else 80), path, self.tls if https else None, **kwargs)
+    def fetch(
+        self,
+        path: str,
+        *,
+        https: bool = True,
+        method: str = "GET",
+        headers: dict[str, str] | None = None,
+        body: bytes | None = None,
+        timeout: float = 10.0,
+    ) -> Reply:
+        tls = self.tls if https else None
+        return fetch(
+            self.port(443 if https else 80),
+            path,
+            tls,
+            method=method,
+            headers=headers,
+            body=body,
+            timeout=timeout,
+        )
 
     def serving(self, upstream: str | None) -> None:
         """Make `web`, the stub (network alias `web`) or nothing answer behind Caddy."""
