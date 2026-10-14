@@ -1,0 +1,10 @@
+# Production and staging edge (spec §8.4 H1). Certificates from Caddy's default ACME issuers (G9).
+{
+	admin off
+}
+
+import edge.caddy
+
+{$SKIW_HOSTNAME} {
+	import app
+}

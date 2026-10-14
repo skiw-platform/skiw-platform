@@ -111,7 +111,7 @@ jobs:
 
   host:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -123,3 +123,7 @@ jobs:
       - name: Host tooling tests
         # infra/host unit tests (spec section 8.4); no Docker daemon, no host, no secrets.
         run: make host-test
+      - name: Live host stack tests
+        # Builds the app image, runs caddy + web + db from infra/host/compose.yml with a CI-only
+        # Caddyfile (internal CA), loopback ports and secrets generated per run; nothing is pushed.
+        run: make host-test-live

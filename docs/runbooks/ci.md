@@ -10,7 +10,7 @@ credentials, no OIDC, no secrets.
 | `checks` | install, `make lint`, `make typecheck`, `make test`, `make test-live`, Playwright (`make e2e`) | the same `make` targets |
 | `security` | gitleaks over full history, the gitleaks rule test, `pip-audit --strict`, `pnpm audit --audit-level high`, Semgrep registry rulesets | `make audit` and `make secrets-test` (need gitleaks); Semgrep below |
 | `image` | `docker build` (web stage + manifest check), Trivy HIGH/CRITICAL, no push | `make image-scan` (needs trivy) |
-| `host` | host tooling unit tests (`infra/host/tests`, spec §8.4); no Docker daemon, no host | `make host-test` |
+| `host` | host tooling unit tests and Compose config tests (`infra/host/tests`, spec §8.4), then the live edge tests through Caddy (builds the app image, Docker on the runner, no host, secrets generated per run) | `make host-test`, `make host-test-live` |
 
 Gate details:
 - **gitleaks** v8.30.1: the workflow downloads the release binary and verifies its SHA-256 before use. Config `.gitleaks.toml` = defaults plus the key names of `agents/PROJECT.md` section 7 (a literal value assigned to one is a finding in every path, including `docs/specs/`; there are no path exemptions, and bare names pass). To bump: new version and the checksum from the release's `*_checksums.txt` in the workflow.

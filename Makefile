@@ -39,9 +39,10 @@ test-live: .env
 host-test:
 	$(TOOL_ENV) uv run --locked pytest infra/host/tests
 
-# Live host stack tests run here once they exist; until then this target only says so.
+# Live host stack tests (needs a Docker daemon; skips locally without one, fails when CI=true):
+# the edge through Caddy (M1c). Builds the app image; a throwaway Compose project per run.
 host-test-live:
-	@echo "host-test-live: stub; no live host stack tests exist yet (M1b/M1c add them), nothing was run"
+	$(TOOL_ENV) uv run --locked pytest -m host_live infra/host/tests
 
 # Proves .gitleaks.toml flags each secret key name (generated values, temp dir). Needs gitleaks;
 # skips locally without it, fails in CI (CI=true). CI runs it in the `security` job.

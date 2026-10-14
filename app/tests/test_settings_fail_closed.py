@@ -37,3 +37,13 @@ def test_settings_fail_closed_when_required_value_missing(missing: str) -> None:
 def test_settings_reject_non_postgres_database_url() -> None:
     result = import_settings({**GOOD, "DATABASE_URL": "sqlite:///x.db"})
     assert result.returncode != 0
+
+
+@pytest.mark.parametrize(("value", "trusted"), [(None, False), ("0", False), ("1", True)])
+def test_proxy_ssl_header_only_behind_caddy(value: str | None, trusted: bool) -> None:
+    behind = {} if value is None else {"DJANGO_BEHIND_CADDY": value}
+    env = {"PATH": os.environ["PATH"], "PYTHONPATH": str(APP_DIR), **GOOD, **behind}
+    code = "import config.settings as s; print(getattr(s, 'SECURE_PROXY_SSL_HEADER', None))"
+    result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    expected = "('HTTP_X_FORWARDED_PROTO', 'https')" if trusted else "None"
+    assert result.stdout.strip() == expected, result.stderr

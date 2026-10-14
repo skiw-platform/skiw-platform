@@ -28,6 +28,7 @@ x-app-env: &app-env
   DATABASE_URL: postgres://skiw_app@db:5432/${SKIW_POSTGRES_DB:?}
   DATABASE_PASSWORD_FILE: /run/secrets/skiw_app_password
   DJANGO_ALLOWED_HOSTS: ${SKIW_HOSTNAME:?SKIW_HOSTNAME is empty until the owner names it (G9)}
+  DJANGO_BEHIND_CADDY: "1"  # trust X-Forwarded-Proto: clients reach web only via Caddy, which sets it
 
 x-app-secrets: &app-secrets
   - django_secret_key
@@ -50,7 +51,12 @@ services:
     ports: ["80:80", "443:443"]
     environment:
       SKIW_HOSTNAME: ${SKIW_HOSTNAME:?SKIW_HOSTNAME is empty until the owner names it (G9)}
-    volumes: [caddy-data:/data, caddy-config:/config]
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/edge.caddy:/etc/caddy/edge.caddy:ro
+      - ./caddy/maintenance.html:/srv/maintenance/maintenance.html:ro
     networks: [edge]
     mem_limit: ${SKIW_MEM_CADDY:?}
     pids_limit: 128

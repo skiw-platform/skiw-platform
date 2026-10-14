@@ -1,0 +1,13 @@
+# CI ONLY (make host-test-live): the production rules with a certificate from Caddy's internal CA.
+# Never mounted on a host; infra/host/compose.yml mounts Caddyfile.
+{
+	admin off
+	skip_install_trust
+}
+
+import edge.caddy
+
+{$SKIW_HOSTNAME} {
+	tls internal
+	import app
+}
