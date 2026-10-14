@@ -18,6 +18,8 @@ from typing import Any
 
 import pytest
 
+from skiw_host.secrets import INVENTORY, OWNER
+
 HOST = Path(__file__).resolve().parents[1]
 COMPOSE = HOST / "compose.yml"
 ENV = HOST / "env"
@@ -28,18 +30,12 @@ BACKUPS = "/srv/skiw/backups"
 PLANTED = token.token_urlsafe(24)  # generated per run; no fake secret is committed
 FILES_READ_ONLY = {"web": False, "worker": False, "backup": True}  # FILE-03 M1 part, UNI-04
 
-# H4 inventory: the only services that may hold each secret (TEN-02: skiw_backup only in backup).
-APP_KEYS = {"tenant_token_key", "approval_mac_key", "tenant_source_key", "login_blob_key"}
-APP_KEYS |= {"audit_mac_key", "field_kek", "blind_index_key", "crm_jar_kek"}
-APP_SECRETS = APP_KEYS | {"django_secret_key", "skiw_app_password"}
-SECRETS = {
-    "web": APP_SECRETS,
-    "worker": APP_SECRETS,
-    "migrate": {"django_secret_key", "skiw_migrator_password", "tenant_token_key"}
-    | {"approval_mac_key", "lookup_decoy_key"},
-    "db": {"postgres_password"},
-    "backup": {"skiw_backup_password"},
-}
+# H4 inventory (skiw_host.secrets, used by bootstrap-secrets): the only services that may hold
+# each secret (TEN-02: skiw_backup only in backup) and the uid that owns each file.
+SECRETS: dict[str, set[str]] = {}
+for item in INVENTORY:
+    for reader in item.readers:
+        SECRETS.setdefault(reader, set()).add(item.name)
 
 # UNI-01 escape hatch: `Any` types the JSON that docker compose prints; its values are mixed
 # (strings, numbers, lists, nested maps) and belong to an external tool.
@@ -191,6 +187,16 @@ def secrets(config: Config) -> list[str]:
     ]
 
 
+def owners(config: Config) -> list[str]:
+    """Each secret file's inventory owner is the uid of every service that mounts it (H4)."""
+    return [
+        f"{n} runs as {s.get('user')}, {x['source']} is owned by {OWNER.get(x['source'])}"
+        for n, s in services(config)
+        for x in s.get("secrets", [])
+        if str(s.get("user", "")).split(":")[0] != str(OWNER.get(x["source"]))
+    ]
+
+
 def environment(config: Config) -> list[str]:
     problems = []
     for n, s in services(config):
@@ -207,7 +213,7 @@ def services(config: Config) -> list[tuple[str, Config]]:
     return sorted(config["services"].items())
 
 
-CHECKS = [ports, egress, unpinned, unhardened, mounts, secrets, environment]
+CHECKS = [ports, egress, unpinned, unhardened, mounts, secrets, owners, environment]
 
 
 @pytest.mark.parametrize("check", CHECKS)
@@ -237,6 +243,7 @@ PLANTS: list[tuple[Callable[[Config], list[str]], Callable[[Config], None]]] = [
         secrets,
         lambda c: c["services"]["worker"]["secrets"].append({"source": "skiw_backup_password"}),
     ),
+    (owners, lambda c: c["services"]["backup"].update(user="10001:10001")),
     (
         environment,
         lambda c: c["services"]["web"]["environment"].update(
