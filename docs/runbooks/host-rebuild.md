@@ -53,11 +53,30 @@ check the owner can decrypt it on the owner's own machine.
 ### Recovery: `restore`
 On the owner's machine, decrypt the newest bundle and stream it over SSH; the plaintext never
 touches the host's disk except as the 0400 key files, and the private identity never reaches the
-host:
+host.
+
+**Prerequisite: not provisioned yet, so the command below is conditional and cannot be run today.**
+The pipeline has no terminal and its stdin is the plaintext bundle, so `sudo` cannot ask for a
+password (and `sudo -S` would read the bundle as the password). The operator account therefore
+needs a narrow, noninteractive rule that allows this one command and nothing else: a `sudoers`
+entry for the installed `bootstrap-secrets` only, not global passwordless `sudo`, not SSH root
+login, and never a password sent in the bundle stream. M1f (host hardening) provisions that rule
+and M1k proves it on both hosts, including that a missing rule refuses and changes nothing.
+
+**Preflight, before you decrypt anything.** It must succeed and print nothing secret:
+```
+ssh -T <operator>@<host> sudo -n -l bootstrap-secrets
+```
+If it fails (a password would be needed, or the rule is absent), stop: fix the rule on the host
+through the console or the normal operator login, then try again. Do not decrypt the bundle first.
+
 ```
 age --decrypt -i <offline escrow identity> <bundle>.bundle.age \
-  | ssh <operator>@<host> sudo bootstrap-secrets restore --env-file <path to env/<environment>.env>
+  | ssh -T <operator>@<host> sudo -n bootstrap-secrets restore --env-file <path to env/<environment>.env>
 ```
+`sudo -n` fails closed: with no authorization it exits at once before `restore` starts, so nothing
+is written on the host.
+
 It checks the whole bundle in memory first: the `skiw-escrow-1` format, every app key of the
 inventory present and nothing else (a DB password in the bundle is refused), each version a
 well-formed `v<n>:<base64>` line, not repeated, matching its SHA-256 and at least 32 bytes. If
