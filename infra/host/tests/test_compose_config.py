@@ -27,6 +27,7 @@ PINNED = re.compile(r"[^@\s]+@sha256:[0-9a-f]{64}")
 SECRET_NAME = re.compile(r"SECRET|PASSWORD|TOKEN|KEY|KEK", re.IGNORECASE)
 URL_PASSWORD = re.compile(r"://[^/@:]*:[^/@]*@")
 BACKUPS = "/srv/skiw/backups"
+HBA_TARGET = "/etc/skiw/pg_hba.conf"
 PLANTED = token.token_urlsafe(24)  # generated per run; no fake secret is committed
 FILES_READ_ONLY = {"web": False, "worker": False, "backup": True}  # FILE-03 M1 part, UNI-04
 
@@ -209,11 +210,26 @@ def environment(config: Config) -> list[str]:
     return problems
 
 
+def hba(config: Config) -> list[str]:
+    """`db` reads the pg_hba.conf that `bootstrap-db prepare` renders (H6), as a Compose config."""
+    expected = {"db": [{"source": "pg_hba", "target": HBA_TARGET}]}
+    problems = [
+        f"{n} has configs {s.get('configs')}"
+        for n, s in services(config)
+        if s.get("configs") != expected.get(n)
+    ]
+    if f"hba_file={HBA_TARGET}" not in config["services"]["db"].get("command", []):
+        problems.append("db does not start with the mounted hba_file")
+    if config.get("configs", {}).get("pg_hba", {}).get("file") != "/etc/skiw/db/pg_hba.conf":
+        problems.append("pg_hba is not read from /etc/skiw/db/pg_hba.conf")
+    return problems
+
+
 def services(config: Config) -> list[tuple[str, Config]]:
     return sorted(config["services"].items())
 
 
-CHECKS = [ports, egress, unpinned, unhardened, mounts, secrets, owners, environment]
+CHECKS = [ports, egress, unpinned, unhardened, mounts, secrets, owners, environment, hba]
 
 
 @pytest.mark.parametrize("check", CHECKS)
@@ -254,6 +270,8 @@ PLANTS: list[tuple[Callable[[Config], list[str]], Callable[[Config], None]]] = [
         environment,
         lambda c: c["services"]["worker"]["environment"].update(DJANGO_SECRET_KEY=PLANTED),
     ),
+    (hba, lambda c: c["services"]["db"].update(command=["postgres"])),
+    (hba, lambda c: c["configs"]["pg_hba"].update(file="./db/pg_hba.conf")),
 ]
 
 

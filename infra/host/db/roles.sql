@@ -15,9 +15,9 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = name)
 ALTER ROLE skiw_migrator LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
 -- The only role of web and worker: no bypass, no CREATE, member of no role (TEN-02).
 ALTER ROLE skiw_app LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
--- Reporting and break-glass, socket-only once pg_hba.conf lands (M1e-2); its grants arrive with its first use.
+-- Reporting and break-glass, socket only (pg_hba.conf); its grants arrive with its first use.
 ALTER ROLE skiw_readonly LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
--- Only the `backup` ops service (H6); the network limit is pg_hba.conf (M1e-2).
+-- Only the `backup` ops service (H6); the network limit is pg_hba.conf.
 ALTER ROLE skiw_backup LOGIN NOSUPERUSER BYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION
     CONNECTION LIMIT 2;
 ALTER ROLE skiw_backup SET default_transaction_read_only = on;

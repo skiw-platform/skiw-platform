@@ -1,7 +1,7 @@
 """`bootstrap-db prepare|apply` (spec §8.4 H4, H6; runbook docs/runbooks/host-rebuild.md).
 
 `prepare` (before `docker compose up db`) mints each missing DB password file, never replacing
-one (the per-role pg_hba.conf is M1e-2). `apply` (db running) runs db/roles.sql,
+one, and renders db/pg_hba.conf with this host's subnets. `apply` (db running) runs db/roles.sql,
 then sets every DB role's password from its file, through the unix socket as `postgres` with
 `docker compose exec db`. Passwords reach psql only on stdin, as SCRAM verifiers computed here;
 no value is ever in argv, output or a message (UNI-09).
@@ -11,14 +11,17 @@ import argparse
 import base64
 import hashlib
 import hmac
+import ipaddress
 import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from string import Template
 
 from skiw_host.bootstrap_secrets import Chown, Host, Refused, write
 from skiw_host.secrets import INVENTORY, OWNER, Kind
@@ -26,8 +29,11 @@ from skiw_host.secrets import INVENTORY, OWNER, Kind
 DB = Path(__file__).resolve().parents[1] / "db"
 PASSWORDS = tuple(secret.name for secret in INVENTORY if secret.kind is Kind.DB_PASSWORD)
 PASSWORD_BYTES = 32
+HBA = "etc/skiw/db/pg_hba.conf"
+HBA_MODE = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH  # read by the db container's uid; no secret
 SCRAM_ITERATIONS = 4096  # PostgreSQL's default scram_iterations
 SALT_BYTES = 16
+DB_NAME = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 ONE_LINE = re.compile(r"[\x21-\x7e]+")  # printable ASCII: SASLprep leaves it unchanged
 SUPERUSER_FILE = "/run/secrets/postgres_password"
 
@@ -57,7 +63,26 @@ def run_command(argv: list[str], stdin: bytes) -> subprocess.CompletedProcess[by
     return subprocess.run(argv, input=stdin, capture_output=True, check=False)  # noqa: S603 - argv built here, no shell
 
 
-def prepare(host: Host) -> list[str]:
+def settings(env_file: Path) -> dict[str, str]:
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    pairs = (line.partition("=") for line in lines if line and not line.startswith("#"))
+    return {key.strip(): value.strip() for key, _, value in pairs}
+
+
+def render_hba(env_file: Path) -> str:
+    values = settings(env_file)
+    if not DB_NAME.fullmatch(values.get("SKIW_POSTGRES_DB", "")):
+        raise Refused(f"SKIW_POSTGRES_DB in {env_file} is empty or not a plain name")
+    for name in ("SKIW_NET_APP", "SKIW_NET_OPS"):
+        try:
+            ipaddress.ip_network(values.get(name, ""))
+        except ValueError:
+            raise Refused(f"{name} in {env_file} is empty or not a subnet") from None
+    return Template((DB / "pg_hba.conf").read_text(encoding="utf-8")).substitute(values)
+
+
+def prepare(host: Host, env_file: Path) -> list[str]:
+    text = render_hba(env_file)
     if not host.secrets.is_dir():
         raise Refused(f"{host.secrets} does not exist: run bootstrap-secrets init first")
     minted = []
@@ -66,6 +91,13 @@ def prepare(host: Host) -> list[str]:
             value = secrets.token_urlsafe(PASSWORD_BYTES)
             write(host, host.secrets / name, f"{value}\n", OWNER[name])
             minted.append(name)
+    hba = host.root / HBA
+    hba.parent.mkdir(parents=True, exist_ok=True)
+    tmp = hba.with_name(f".{hba.name}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.chmod(tmp, HBA_MODE)
+    host.chown(str(tmp), 0, 0)
+    os.replace(tmp, hba)
     return minted
 
 
@@ -114,7 +146,7 @@ def main(
 ) -> int:
     parser = argparse.ArgumentParser(prog="bootstrap-db", description=__doc__)
     parser.add_argument("mode", choices=["prepare", "apply"])
-    parser.add_argument("--env-file", type=Path, help="apply: host env/<env>.env")
+    parser.add_argument("--env-file", type=Path, required=True, help="host env/<env>.env")
     parser.add_argument("--compose-file", type=Path, help="apply: the host's compose.yml")
     parser.add_argument("--root", type=Path, default=Path("/"), help=argparse.SUPPRESS)  # tests
     parser.add_argument("--compose-arg", action="append", default=[], help=argparse.SUPPRESS)
@@ -122,11 +154,11 @@ def main(
     host = Host(args.root, chown)
     try:
         if args.mode == "prepare":
-            minted = prepare(host)
-            done = f"minted {', '.join(minted) or 'no password file'}"
+            minted = prepare(host, args.env_file)
+            done = f"{HBA} rendered; minted {', '.join(minted) or 'no password file'}"
         else:
-            if args.compose_file is None or args.env_file is None:
-                raise Refused("apply needs --compose-file and --env-file")
+            if args.compose_file is None:
+                raise Refused("apply needs --compose-file")
             docker = shutil.which("docker") or "docker"
             compose = [docker, "compose", "-f", str(args.compose_file), *args.compose_arg]
             count = apply([*compose, "--env-file", str(args.env_file)], run, host)

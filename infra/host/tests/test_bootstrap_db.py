@@ -63,7 +63,7 @@ def matches(password: str, stored: str) -> bool:
     return hmac.compare_digest(verifier(password, base64.b64decode(salt)), stored)
 
 
-def test_prepare_mints_only_missing_password_files(rig: Rig) -> None:
+def test_prepare_mints_only_missing_password_files_and_renders_pg_hba(rig: Rig) -> None:
     (rig.store / "postgres_password").write_text("kept\n")
     assert rig.run("prepare") == 0
     minted = {name: (rig.store / name).read_text() for name in PASSWORDS}
@@ -75,6 +75,34 @@ def test_prepare_mints_only_missing_password_files(rig: Rig) -> None:
     assert {n: rig.chowns[n] for n in minted} == {n: OWNER[n] for n in minted}
     assert rig.run("prepare") == 0  # a second run replaces nothing
     assert {name: (rig.store / name).read_text() for name in minted} == minted
+    hba = rig.root / bootstrap_db.HBA
+    assert hba.stat().st_mode & 0o777 == 0o444 and rig.chowns["pg_hba.conf"] == 0  # root, read-only
+    rules = [
+        line.split()
+        for line in (rig.root / bootstrap_db.HBA).read_text().splitlines()
+        if line and not line.startswith("#")
+    ]
+    assert rules == [
+        ["local", "all", "postgres", "scram-sha-256"],
+        ["local", "skiw", "skiw_readonly", "scram-sha-256"],
+        ["host", "skiw", "skiw_app", "172.31.21.0/24", "scram-sha-256"],
+        ["host", "skiw", "skiw_migrator", "172.31.21.0/24", "scram-sha-256"],
+        ["host", "skiw", "skiw_backup", "172.31.22.0/24", "scram-sha-256"],
+        ["local", "all", "all", "reject"],
+        ["host", "all", "all", "all", "reject"],
+    ]
+
+
+@pytest.mark.parametrize(
+    "line", ["SKIW_NET_OPS=", "SKIW_NET_OPS=db.internal", "SKIW_POSTGRES_DB=skiw; drop"]
+)
+def test_prepare_refuses_a_bad_env_value_and_writes_nothing(
+    rig: Rig, tmp_path: Path, line: str
+) -> None:
+    env = tmp_path / "bad.env"
+    env.write_text(f"{CI_ENV.read_text()}{line}\n")
+    assert rig.run("prepare", env) == 2
+    assert not any(rig.store.iterdir()) and not (rig.root / bootstrap_db.HBA).exists()
 
 
 def test_apply_runs_roles_sql_then_sets_every_password_on_stdin_only(

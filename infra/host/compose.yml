@@ -109,6 +109,9 @@ services:
       POSTGRES_DB: ${SKIW_POSTGRES_DB:?}
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     secrets: [postgres_password]
+    # Per role and subnet (H6); rendered from db/pg_hba.conf by `bootstrap-db prepare`.
+    command: [postgres, -c, hba_file=/etc/skiw/pg_hba.conf]
+    configs: [{source: pg_hba, target: /etc/skiw/pg_hba.conf}]
     volumes: [skiw-db:/var/lib/postgresql/data]
     networks: [app, ops]
     shm_size: 256m
@@ -160,6 +163,9 @@ volumes:
   skiw-files:
   caddy-data:
   caddy-config:
+
+configs:
+  pg_hba: {file: /etc/skiw/db/pg_hba.conf}
 
 # One file per secret (H4): root-owned directory, file owned by the reading service's uid, 0400.
 secrets:

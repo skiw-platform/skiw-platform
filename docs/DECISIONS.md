@@ -193,3 +193,12 @@
 - **Versions:** none
 - **Exception to a rule?** no
 - **Decided by:** owner (split); builder (role file, verifiers)
+
+## 2026-10-15 — M1e-2: per-role pg_hba.conf rendered from the host's subnets
+- **Decision:** `infra/host/db/pg_hba.conf` is a template; `bootstrap-db prepare` fills the database name and the `app` and `ops` subnets from `env/<environment>.env` and writes `/etc/skiw/db/pg_hba.conf` (root, mode 0444, no secret). Compose mounts it read-only through a `configs` entry and starts `db` with `-c hba_file=`. `skiw_app` and `skiw_migrator` connect only from `app`, `skiw_backup` only from `ops`, `skiw_readonly` and `postgres` only over the socket; all else is rejected (`scram-sha-256`).
+- **Why:** The role limits (TEN-02, TEN-10) must hold at the database, not only in Compose. The same subnets feed Compose and the file, so they cannot drift apart.
+- **Alternatives rejected:** A fixed file with literal subnets (drifts from env files). `trust` for the socket (the review of PR 40 wants real authentication).
+- **Scope / affects:** `infra/host/compose.yml`, `infra/host/db/`, `bootstrap-db prepare` (now needs `--env-file`), live tests with probe containers on each network. Local and CI dev databases keep the image's default `pg_hba.conf`.
+- **Versions:** none
+- **Exception to a rule?** no
+- **Decided by:** builder (within the approved plan)

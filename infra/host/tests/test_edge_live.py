@@ -12,7 +12,6 @@ import ipaddress
 import json
 import os
 import secrets
-import shutil
 import socket
 import ssl
 import subprocess
@@ -24,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from skiw_host.bootstrap_db import render_hba
+
 HOST = Path(__file__).resolve().parents[1]
 REPO = HOST.parents[1]
 COMPOSE = HOST / "compose.yml"
@@ -33,15 +34,6 @@ HSTS = "max-age=31536000"
 SPOOFED_IP = "203.0.113.9"  # TEST-NET-3
 ROOT_CA = "/data/caddy/pki/authorities/local/root.crt"
 live = pytest.mark.host_live
-
-
-def docker() -> str:
-    path = shutil.which("docker")
-    if path and subprocess.run([path, "info"], capture_output=True, check=False).returncode == 0:
-        return path
-    if os.environ.get("CI") == "true":
-        pytest.fail("no Docker daemon in CI: the edge tests must run, not skip")
-    pytest.skip("no Docker daemon locally; CI runs the edge tests")
 
 
 @dataclass
@@ -138,8 +130,8 @@ def write_secrets(command: list[str], env: dict[str, str], directory: Path) -> d
 
 
 @pytest.fixture(scope="module")
-def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
-    path = docker()
+def stack(tmp_path_factory: pytest.TempPathFactory, docker_cli: str) -> Iterator[Stack]:
+    path = docker_cli
     built = subprocess.run([path, "build", "-q", str(REPO)], capture_output=True, text=True)
     assert built.returncode == 0, built.stderr[-3000:]
     # The local image ID is the sha256 digest of the image config: content-addressed like the
@@ -152,8 +144,17 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
     for role in ("app", "migrator"):
         password = Path(files[f"skiw_{role}_password"]).read_text().strip()
         env[f"EDGE_{role.upper()}_PASSWORD"] = password
+    hba = tmp / "pg_hba.conf"
+    hba.write_text(render_hba(HOST / "env" / "ci.env"))
     override = tmp / "secrets.json"
-    override.write_text(json.dumps({"secrets": {n: {"file": f} for n, f in files.items()}}))
+    override.write_text(
+        json.dumps(
+            {
+                "secrets": {n: {"file": f} for n, f in files.items()},
+                "configs": {"pg_hba": {"file": str(hba)}},
+            }
+        )
+    )
     files_args = ["-f", str(COMPOSE), "-f", str(EDGE), "-f", str(override), *env_file]
     project = ["-p", f"skiw-edge-{secrets.token_hex(4)}", "--profile", "deploy"]
     stack = Stack([path, "compose", *files_args, *project, "--profile", "stub"], env)

@@ -1,7 +1,7 @@
 # Host rebuild
 
 Building a staging or production VPS from nothing, or rebuilding one after loss (spec §8.4).
-Sections are added as M1 lands: secrets (M1d, below), database roles (M1e-1, below; pg_hba M1e-2), host hardening (M1f);
+Sections are added as M1 lands: secrets (M1d, below), database roles (M1e, below), host hardening (M1f);
 measured values in M1k. The operator is the owner (UNI-12); no agent holds a host credential.
 
 ## Secrets (`bootstrap-secrets`, spec §8.4 H4)
@@ -119,16 +119,26 @@ Rotate yearly and on suspicion (H3 step 11).
 
 ## Database roles (`bootstrap-db`, spec §8.4 H4, H6)
 
-Run after `bootstrap-secrets init` (or `restore`) and after `docker compose up -d db`. It needs
-root, for the same reason as `bootstrap-secrets`: it reads `/etc/skiw/secrets/`.
+Run it in this order on a new or rebuilt host. It needs root, for the same reason as
+`bootstrap-secrets`: it reads `/etc/skiw/secrets/`.
+
+1. `bootstrap-secrets init` (or `restore`) has run.
+2. `prepare` makes the DB password files and `/etc/skiw/db/pg_hba.conf`. Compose needs that file,
+   so `db` cannot start before this step.
+3. Start `db` with the same Compose file and environment file, and wait until it is healthy.
+   Compose checks the whole file, so it refuses this step until `SKIW_HOSTNAME` (owner value G9)
+   and `SKIW_IMAGE` (written by `skiw-deploy`, M1g) have values. On a real host this step is
+   staged to M1g and M1k. CI runs it with `env/ci.env`, which sets both.
+4. `apply` sets the roles and the passwords.
 
 ```
-sudo infra/host/bootstrap-db prepare
+sudo infra/host/bootstrap-db prepare --env-file <env file>
+sudo docker compose -f <compose.yml> --env-file <env file> up -d --wait db
 sudo infra/host/bootstrap-db apply --env-file <env file> --compose-file <compose.yml>
 ```
 
 - `prepare` makes each missing DB password file (32 random bytes, mode 0400, owner from the
-  inventory). It never replaces a file that exists. Run it before the first `up db`.
+  inventory). It never replaces a file that exists.
 - `apply` runs `infra/host/db/roles.sql` in the db container as `postgres` over the socket. Then it
   sets each password. The SCRAM-SHA-256 verifier is computed in Python and sent on stdin: no
   password is in argv, in a file in the repo or in output. A second run changes no role.
@@ -143,7 +153,14 @@ sudo infra/host/bootstrap-db apply --env-file <env file> --compose-file <compose
   (only `skiw_backup` in `pg_read_all_data` is allowed), it stops, changes nothing and names the
   role. Exit 1. A person reads the membership and revokes it by hand, then runs `apply` again.
 - DB passwords are not escrowed. After a rebuild, run `prepare` then `apply` again: new passwords.
-- The per-role network rules (`pg_hba.conf`) arrive in M1e-2.
+- `prepare` also renders `/etc/skiw/db/pg_hba.conf` (root, mode 0444, no secret) from
+  `infra/host/db/pg_hba.conf` and the host's `env/<environment>.env`; it needs `--env-file`. Compose
+  mounts that file read-only into `db` and starts Postgres with it. After a subnet change, run
+  `prepare` again and restart `db`.
+- Who may connect, from where (`scram-sha-256`; first match wins; all else is rejected):
+  `skiw_app` and `skiw_migrator` only from the `app` network, `skiw_backup` only from `ops`,
+  `skiw_readonly` and `postgres` only over the socket inside `db`. `skiw_backup` is refused from `app`,
+  and `skiw_app` is refused from `ops` (TEN-02, TEN-10).
 
 ### Not verified yet
 On a real VPS (M1k): the owner's recipients, the off-host copy of the bundle, a restore on a fresh
