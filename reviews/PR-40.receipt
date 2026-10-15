@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 40
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 0cad66855e460cc77e3120b7282656f2b5a0796d
+review-file: reviews/PR-40.md
+review-file-hash: 1d91cae5ed9d4387896457b192eb93afb3f09cea
+review-log-branch-commit: f1172e40305380887ef730ed2d95da9699e879c8
+verdict: Approved (round 2)
+ci: checks, host, image, security all success on the reviewed head (run 38676989354)
+note: M1e-1 (bootstrap-db, closed role set in roles.sql, drift refusal, password-file sign-in). pg_hba is M1e-2. Owner runs make clean once after merge. Server-log exposure of a password verifier stays a recorded limit.
+written-at: 2026-10-15T03:46:17Z
+pr-state-at-write: OPEN, unmerged
