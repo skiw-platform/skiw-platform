@@ -75,6 +75,8 @@ def test_prepare_mints_only_missing_password_files_and_renders_pg_hba(rig: Rig) 
     assert {n: rig.chowns[n] for n in minted} == {n: OWNER[n] for n in minted}
     assert rig.run("prepare") == 0  # a second run replaces nothing
     assert {name: (rig.store / name).read_text() for name in minted} == minted
+    hba = rig.root / bootstrap_db.HBA
+    assert hba.stat().st_mode & 0o777 == 0o444 and rig.chowns["pg_hba.conf"] == 0  # root, read-only
     rules = [
         line.split()
         for line in (rig.root / bootstrap_db.HBA).read_text().splitlines()
