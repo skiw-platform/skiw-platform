@@ -1,15 +1,14 @@
 #!/bin/sh
-# Local/CI bootstrap only: creates the two application roles (spec D4, TEN-01/02).
-# Grants and RLS arrive with M4; the app role is NOSUPERUSER NOBYPASSRLS from the start.
+# Local/CI bootstrap only: the closed role set from infra/host/db/roles.sql, the same file that
+# bootstrap-db applies on the hosts (spec D4, §8.4 H6), then the two local login passwords from
+# .env. psql reads them with \getenv, so they are not in its argv. skiw_readonly and skiw_backup
+# get no password locally, so they cannot log in. Grants and RLS arrive with M4.
 set -eu
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-    -v migrator_password="$SKIW_MIGRATOR_PASSWORD" \
-    -v app_password="$SKIW_APP_PASSWORD" \
-    -v db="$POSTGRES_DB" <<'SQL'
-CREATE ROLE skiw_migrator LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD :'migrator_password';
-CREATE ROLE skiw_app LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD :'app_password';
-ALTER DATABASE :"db" OWNER TO skiw_migrator;
-ALTER SCHEMA public OWNER TO skiw_migrator;
-REVOKE ALL ON DATABASE :"db" FROM PUBLIC;
-GRANT CONNECT ON DATABASE :"db" TO skiw_app;
+psql -X -q -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+    -v db="$POSTGRES_DB" -f /skiw/roles.sql
+psql -X -q -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
+\getenv migrator_password SKIW_MIGRATOR_PASSWORD
+\getenv app_password SKIW_APP_PASSWORD
+ALTER ROLE skiw_migrator PASSWORD :'migrator_password';
+ALTER ROLE skiw_app PASSWORD :'app_password';
 SQL
