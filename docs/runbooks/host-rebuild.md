@@ -1,7 +1,7 @@
 # Host rebuild
 
 Building a staging or production VPS from nothing, or rebuilding one after loss (spec §8.4).
-Sections are added as M1 lands: secrets (M1d, below), database roles (M1e-1, below; pg_hba M1e-2), host hardening (M1f);
+Sections are added as M1 lands: secrets (M1d, below), database roles (M1e, below), host hardening (M1f);
 measured values in M1k. The operator is the owner (UNI-12); no agent holds a host credential.
 
 ## Secrets (`bootstrap-secrets`, spec §8.4 H4)
@@ -123,7 +123,7 @@ Run after `bootstrap-secrets init` (or `restore`) and after `docker compose up -
 root, for the same reason as `bootstrap-secrets`: it reads `/etc/skiw/secrets/`.
 
 ```
-sudo infra/host/bootstrap-db prepare
+sudo infra/host/bootstrap-db prepare --env-file <env file>
 sudo infra/host/bootstrap-db apply --env-file <env file> --compose-file <compose.yml>
 ```
 
@@ -143,7 +143,14 @@ sudo infra/host/bootstrap-db apply --env-file <env file> --compose-file <compose
   (only `skiw_backup` in `pg_read_all_data` is allowed), it stops, changes nothing and names the
   role. Exit 1. A person reads the membership and revokes it by hand, then runs `apply` again.
 - DB passwords are not escrowed. After a rebuild, run `prepare` then `apply` again: new passwords.
-- The per-role network rules (`pg_hba.conf`) arrive in M1e-2.
+- `prepare` also renders `/etc/skiw/db/pg_hba.conf` (root, 0644, no secret) from
+  `infra/host/db/pg_hba.conf` and the host's `env/<environment>.env`; it needs `--env-file`. Compose
+  mounts that file read-only into `db` and starts Postgres with it. Run `prepare` before the first
+  `docker compose up -d db`; run it again and restart `db` after a subnet change.
+- Who may connect, from where (`scram-sha-256`; first match wins; all else is rejected):
+  `skiw_app` and `skiw_migrator` only from the `app` network, `skiw_backup` only from `ops`,
+  `skiw_readonly` and `postgres` only over the socket inside `db`. `skiw_backup` is refused from `app`,
+  and `skiw_app` is refused from `ops` (TEN-02, TEN-10).
 
 ### Not verified yet
 On a real VPS (M1k): the owner's recipients, the off-host copy of the bundle, a restore on a fresh
