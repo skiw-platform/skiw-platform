@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 41
+repo: charliekhc/skiw-platform
+reviewed-head-sha: ba1d971132c65d11f9b70a3b23c4582212f9805d
+review-file: reviews/PR-41.md
+review-file-hash: 9a56b7c8b624d3cf24e8eedb6247cfbc2865125b
+review-log-branch-commit: 867c988efa243651002b89fb13d88ea1dd7c06ed
+verdict: Approved (round 2)
+ci: checks, host, image, security all success on the reviewed head (run 38713582758)
+note: M1e-2 (per-role pg_hba.conf rendered by bootstrap-db prepare, live connection matrix, ordered db bootstrap runbook). M1f must check that apply compares the HBA file with the env file. Real-host db start waits for SKIW_HOSTNAME (G9) and SKIW_IMAGE (M1g).
+written-at: 2026-10-15T10:24:31Z
+pr-state-at-write: OPEN, unmerged
