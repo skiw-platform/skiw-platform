@@ -1,0 +1,11 @@
+#!/usr/bin/python3 -I
+"""apply --env-file <env> (spec §8.4 H1, H2, H4, H7). Run as root from the repository checkout."""
+
+import sys
+from pathlib import Path
+
+sys.path[:0] = [str(Path(__file__).resolve().parent)]  # the repository's skiw_host and templates
+
+from skiw_host.apply import main  # noqa: E402
+
+sys.exit(main())
