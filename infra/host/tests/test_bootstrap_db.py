@@ -96,6 +96,43 @@ def test_apply_runs_roles_sql_then_sets_every_password_on_stdin_only(
     assert all(matches(values[f"{role}_password"], v) for role, v in statements.items())
 
 
+def test_the_psql_wrapper_keeps_the_superuser_password_out_of_env_argv_and_output(
+    tmp_path: Path,
+) -> None:
+    """Runs the real wrapper with a probe in place of psql and reads what the child sees (H4)."""
+    password = "a:b\\c" + token.token_urlsafe(24)  # a colon and a backslash must be escaped
+    secret = tmp_path / "postgres_password"
+    secret.write_text(f"{password}\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    probe = bin_dir / "psql"
+    probe.write_text(
+        "#!/bin/sh\n"
+        f'env > "{tmp_path}/env"; echo "$@" > "{tmp_path}/argv"; cat > "{tmp_path}/stdin"\n'
+        f'cp "$PGPASSFILE" "{tmp_path}/passfile"; stat -f %Lp "$PGPASSFILE" > "{tmp_path}/mode" '
+        f'2>/dev/null || stat -c %a "$PGPASSFILE" > "{tmp_path}/mode"; echo "$PGPASSFILE" '
+        f'> "{tmp_path}/path"; exit 7\n'
+    )
+    probe.chmod(0o755)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "POSTGRES_DB": "skiw", "TMPDIR": str(tmp_path)}
+    result = subprocess.run(
+        ["/bin/sh", "-c", bootstrap_db.psql_script(str(secret))],
+        input=b"SELECT 1;\n",
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 7  # psql's own status comes through
+    for name in ("env", "argv", "stdin"):
+        assert password not in (tmp_path / name).read_text()
+    assert password.encode() not in result.stdout + result.stderr
+    assert (tmp_path / "passfile").read_text() == "*:*:*:postgres:" + (
+        password.replace("\\", "\\\\").replace(":", "\\:") + "\n"
+    )
+    assert (tmp_path / "mode").read_text().strip() == "600"
+    assert not Path((tmp_path / "path").read_text().strip()).exists()  # removed on exit
+
+
 def test_apply_again_sends_the_same_roles_and_only_new_salts(rig: Rig) -> None:
     rig.passwords()
     assert rig.run("apply") == 0 and rig.run("apply") == 0
@@ -125,7 +162,7 @@ def test_a_failed_step_stops_and_withholds_the_password_statements(
     rig.passwords()
     rig.fail_call = 0
     assert rig.run("apply") == 1 and len(rig.calls) == 1  # roles.sql failed: no password step
-    assert "CREATE ROLE" in capsys.readouterr().err  # its output holds no secret: shown
+    assert "roles.sql failed (exit 1)" in capsys.readouterr().err  # no secret in it: shown
     rig.calls.clear()
     rig.fail_call = 1
     assert rig.run("apply") == 1

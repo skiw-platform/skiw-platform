@@ -29,11 +29,23 @@ PASSWORD_BYTES = 32
 SCRAM_ITERATIONS = 4096  # PostgreSQL's default scram_iterations
 SALT_BYTES = 16
 ONE_LINE = re.compile(r"[\x21-\x7e]+")  # printable ASCII: SASLprep leaves it unchanged
-# Inside `db`: the superuser over the socket, its password read there from its own secret file.
-PSQL = (
-    'PGPASSWORD="$(cat /run/secrets/postgres_password)" exec psql -X -q -v ON_ERROR_STOP=1 '
-    '-U postgres -d "$POSTGRES_DB" -v db="$POSTGRES_DB"'
-)
+SUPERUSER_FILE = "/run/secrets/postgres_password"
+
+
+def psql_script(secret: str = SUPERUSER_FILE) -> str:
+    """Shell run inside `db`: psql as the superuser over the socket (spec H4).
+
+    The password goes from its secret file into a libpq password file (mode 0600, removed on exit),
+    written by shell builtins, so it is never in an environment variable or in any argv.
+    """
+    return (
+        "set -eu; umask 077; f=$(mktemp); trap 'rm -f \"$f\"' EXIT; "
+        f"printf '*:*:*:postgres:%s\\n' \"$(sed -e 's/[\\\\:]/\\\\&/g' {secret})\" > \"$f\"; "
+        'PGPASSFILE="$f" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" '
+        '-v db="$POSTGRES_DB"'
+    )
+
+
 Runner = Callable[[list[str], bytes], subprocess.CompletedProcess[bytes]]
 
 
@@ -82,7 +94,7 @@ def verifier(password: str, salt: bytes) -> str:
 
 def apply(compose: list[str], run: Runner, host: Host) -> int:
     found = passwords(host)
-    psql = [*compose, "exec", "-T", "db", "sh", "-c", PSQL]
+    psql = [*compose, "exec", "-T", "db", "sh", "-c", psql_script()]
     roles = run(psql, (DB / "roles.sql").read_bytes())
     if roles.returncode != 0:
         detail = roles.stderr.decode("utf-8", "replace")[-2000:]

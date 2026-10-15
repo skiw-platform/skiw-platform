@@ -31,4 +31,25 @@ ALTER SCHEMA public OWNER TO skiw_migrator;
 REVOKE ALL ON DATABASE :"db" FROM PUBLIC;
 GRANT CONNECT ON DATABASE :"db" TO skiw_app, skiw_readonly, skiw_backup;
 
+-- Fails closed on drift (TEN-02): ALTER ROLE never removes a membership, so a role that already
+-- belongs to another role would keep its reach. The only membership allowed is skiw_backup in
+-- pg_read_all_data. Anything else aborts the whole run, rolled back; a person decides what to revoke.
+DO $$
+DECLARE
+    extra text;
+BEGIN
+    SELECT string_agg(format('%s in %s', m.member::regrole, m.roleid::regrole), ', '
+                      ORDER BY m.member::regrole::text, m.roleid::regrole::text)
+    INTO extra
+    FROM pg_auth_members m
+    WHERE m.member IN (SELECT oid FROM pg_roles WHERE rolname IN
+              ('skiw_migrator', 'skiw_app', 'skiw_readonly', 'skiw_backup',
+               'skiw_tenant_guard', 'skiw_auth_lookup'))
+      AND NOT (m.member = 'skiw_backup'::regrole AND m.roleid = 'pg_read_all_data'::regrole);
+    IF extra IS NOT NULL THEN
+        RAISE EXCEPTION 'unexpected role membership, nothing changed: %', extra;
+    END IF;
+END
+$$;
+
 COMMIT;

@@ -136,6 +136,12 @@ sudo infra/host/bootstrap-db apply --env-file <env file> --compose-file <compose
   reached the db).
 - Roles: `skiw_migrator` (owns the schema; `migrate` only), `skiw_app` (web and worker), `skiw_readonly`,
   `skiw_backup` (read only, 2 connections), and the NOLOGIN `skiw_tenant_guard`, `skiw_auth_lookup`.
+- `apply` signs in as `postgres` with a libpq password file: made inside the db container from
+  `/run/secrets/postgres_password`, mode 0600, removed when psql ends. The password is never in an
+  environment variable or in argv (H4).
+- `roles.sql` refuses to run on drift: if any of the six roles belongs to a role it should not
+  (only `skiw_backup` in `pg_read_all_data` is allowed), it stops, changes nothing and names the
+  role. Exit 1. A person reads the membership and revokes it by hand, then runs `apply` again.
 - DB passwords are not escrowed. After a rebuild, run `prepare` then `apply` again: new passwords.
 - The per-role network rules (`pg_hba.conf`) arrive in M1e-2.
 
