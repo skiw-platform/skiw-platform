@@ -21,11 +21,13 @@ services:
 
   db:
     logging: *log
-    # Local/CI role bootstrap until M1e's bootstrap-db; passwords are generated per run.
+    # The local/CI role bootstrap (same db/roles.sql as bootstrap-db); passwords generated per run.
     environment:
       SKIW_MIGRATOR_PASSWORD: ${EDGE_MIGRATOR_PASSWORD:?}
       SKIW_APP_PASSWORD: ${EDGE_APP_PASSWORD:?}
-    volumes: ["../../docker/postgres/10-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro"]
+    volumes:
+      - ../../docker/postgres/10-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+      - ./db/roles.sql:/skiw/roles.sql:ro
 
   stub:
     image: ${SKIW_IMAGE:?}

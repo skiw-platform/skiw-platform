@@ -184,3 +184,12 @@
 - **Exception to a rule?** no
 - **Decided by:** owner
 
+
+## 2026-10-15 — M1e split in two PRs; one role file for local, CI and hosts
+- **Decision:** (1) M1e is two PRs: M1e-1 (`bootstrap-db`, the closed role set, local and CI roles) and M1e-2 (per-role `pg_hba.conf`). (2) `infra/host/db/roles.sql` is the one source of roles for hosts, local dev and CI; it holds no password. Passwords come from `/etc/skiw/secrets` (hosts) or `.env` (local). (3) `bootstrap-db` sends SCRAM-SHA-256 verifiers, never plaintext, on stdin, and signs in with a temporary 0600 libpq password file, not `PGPASSWORD` (H4). (4) `roles.sql` refuses, atomically, any membership of the six roles except `skiw_backup` in `pg_read_all_data` (TEN-02); it never revokes on its own.
+- **Why:** The full change was 700 added lines. One role file stops local and host roles from drifting apart.
+- **Alternatives rejected:** One 700-line PR. Separate role lists for local and hosts.
+- **Scope / affects:** `infra/host/`, `docker/postgres/10-roles.sh`, `docker-compose.yml`, `.env.example` (`POSTGRES_USER=postgres`). Local databases need `make clean` once.
+- **Versions:** none
+- **Exception to a rule?** no
+- **Decided by:** owner (split); builder (role file, verifiers)

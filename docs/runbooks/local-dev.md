@@ -54,7 +54,7 @@ its secret key source (`DJANGO_SECRET_KEY`, or `DJANGO_SECRET_KEY_FILE` on hosts
 - Worker logs: `docker compose logs -f worker`. A permission error there means a queue grant is missing: rerun `make migrate`, and see spec §4.1 before adding any grant.
 
 ## Rebuilding the database roles
-Roles are created only on the first start of an empty volume (`docker/postgres/10-roles.sh`). After changing it, run `make clean` and `make dev`.
+Roles are created only on the first start of an empty volume (`docker/postgres/10-roles.sh`, which runs `infra/host/db/roles.sql`, the same file the hosts use). After changing either, run `make clean` and `make dev`. The M1e change added `skiw_readonly`, `skiw_backup`, `skiw_tenant_guard` and `skiw_auth_lookup` and made `skiw_migrator` own the schema: run `make clean` once.
 
 ## CI
 `.github/workflows/ci.yml` runs the `checks`, `security`, `image` and `host` jobs on every pull request and on pushes to `main`. See [ci.md](ci.md) for the jobs, how to run each gate locally and the GitHub Free plan limits. The production image builds the web shell in a Node stage and fails if `web/dist/.vite/manifest.json` is missing, malformed, or names a missing file (`python -m shell.verify_dist`); `docker compose` still bind-mounts `./web/dist` over it for local runs.

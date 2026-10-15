@@ -1,0 +1,12 @@
+#!/usr/bin/python3 -I
+"""bootstrap-db prepare|apply (spec §8.4 H4, H6). Run as root; docs/runbooks/host-rebuild.md."""
+
+import sys
+from pathlib import Path
+
+# Installed: /usr/local/sbin + /usr/local/lib/skiw/skiw_host (plan §1); in the repo: next to this file.
+sys.path[:0] = ["/usr/local/lib/skiw", str(Path(__file__).resolve().parent)]
+
+from skiw_host.bootstrap_db import main  # noqa: E402
+
+sys.exit(main())

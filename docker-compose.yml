@@ -9,6 +9,7 @@ services:
       SKIW_APP_PASSWORD: ${SKIW_APP_PASSWORD:?set in .env}
     volumes:
       - ./docker/postgres/10-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+      - ./infra/host/db/roles.sql:/skiw/roles.sql:ro
       - db-data:/var/lib/postgresql/data
     ports:
       - "127.0.0.1:${SKIW_DB_PORT:-5433}:5432"

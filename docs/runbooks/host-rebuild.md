@@ -1,7 +1,7 @@
 # Host rebuild
 
 Building a staging or production VPS from nothing, or rebuilding one after loss (spec §8.4).
-Sections are added as M1 lands: secrets (M1d, below), database roles (M1e), host hardening (M1f);
+Sections are added as M1 lands: secrets (M1d, below), database roles (M1e-1, below; pg_hba M1e-2), host hardening (M1f);
 measured values in M1k. The operator is the owner (UNI-12); no agent holds a host credential.
 
 ## Secrets (`bootstrap-secrets`, spec §8.4 H4)
@@ -116,6 +116,34 @@ sudo bash -c 'umask 077; t=/etc/skiw/secrets/.ghcr_read_token.tmp; \
 ```
 Paste the token, press Enter. Owner and group stay root (only `skiw-deploy`, as root, reads it).
 Rotate yearly and on suspicion (H3 step 11).
+
+## Database roles (`bootstrap-db`, spec §8.4 H4, H6)
+
+Run after `bootstrap-secrets init` (or `restore`) and after `docker compose up -d db`. It needs
+root, for the same reason as `bootstrap-secrets`: it reads `/etc/skiw/secrets/`.
+
+```
+sudo infra/host/bootstrap-db prepare
+sudo infra/host/bootstrap-db apply --env-file <env file> --compose-file <compose.yml>
+```
+
+- `prepare` makes each missing DB password file (32 random bytes, mode 0400, owner from the
+  inventory). It never replaces a file that exists. Run it before the first `up db`.
+- `apply` runs `infra/host/db/roles.sql` in the db container as `postgres` over the socket. Then it
+  sets each password. The SCRAM-SHA-256 verifier is computed in Python and sent on stdin: no
+  password is in argv, in a file in the repo or in output. A second run changes no role.
+- Exit codes: 0 done, 1 a step failed, 2 refused (a password file is missing or malformed; nothing
+  reached the db).
+- Roles: `skiw_migrator` (owns the schema; `migrate` only), `skiw_app` (web and worker), `skiw_readonly`,
+  `skiw_backup` (read only, 2 connections), and the NOLOGIN `skiw_tenant_guard`, `skiw_auth_lookup`.
+- `apply` signs in as `postgres` with a libpq password file: made inside the db container from
+  `/run/secrets/postgres_password`, mode 0600, removed when psql ends. The password is never in an
+  environment variable or in argv (H4).
+- `roles.sql` refuses to run on drift: if any of the six roles belongs to a role it should not
+  (only `skiw_backup` in `pg_read_all_data` is allowed), it stops, changes nothing and names the
+  role. Exit 1. A person reads the membership and revokes it by hand, then runs `apply` again.
+- DB passwords are not escrowed. After a rebuild, run `prepare` then `apply` again: new passwords.
+- The per-role network rules (`pg_hba.conf`) arrive in M1e-2.
 
 ### Not verified yet
 On a real VPS (M1k): the owner's recipients, the off-host copy of the bundle, a restore on a fresh
