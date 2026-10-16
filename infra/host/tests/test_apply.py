@@ -27,6 +27,7 @@ class Rig:
         self.root.mkdir()
         self.calls: list[list[str]] = []
         self.chowns: dict[str, tuple[int, int]] = {}
+        self.owners: dict[str, tuple[int, int]] = {}  # destination -> uid, gid; absent is root
         self.fail = ""  # argv[0] of the checker that fails
         self.modes: dict[str, int] = {}  # checker -> mode of the candidate it was given
 
@@ -36,14 +37,22 @@ class Rig:
         return subprocess.CompletedProcess(argv, int(argv[0] == self.fail), b"", b"bad line 1")
 
     def chown(self, path: str, uid: int, gid: int) -> None:
-        self.chowns[Path(path).name.removeprefix(".").removesuffix(".skiw-new")] = (uid, gid)
+        name = Path(path).name.removeprefix(".").removesuffix(".skiw-new")
+        self.chowns[name] = (uid, gid)
+        if Path(path).is_relative_to(self.root):  # not the scratch copies the checkers read
+            self.owners[str(Path(path).with_name(name).relative_to(self.root))] = (uid, gid)
+
+    def owner(self, path: Path) -> tuple[int, int]:
+        return self.owners.get(str(path.relative_to(self.root)), (0, 0))
 
     def run(self, env: Path = CI_ENV, /, **values: str) -> int:
         if values:  # appended lines win: settings() keeps the last value of a key
             text = env.read_text() + "".join(f"{k}={v}\n" for k, v in values.items())
             env = self.tmp / "host.env"
             env.write_text(text)
-        return main(["--env-file", str(env), "--root", str(self.root)], self.runner, self.chown)
+        return main(
+            ["--env-file", str(env), "--root", str(self.root)], self.runner, self.chown, self.owner
+        )
 
     def read(self, dest: str) -> str:
         return (self.root / dest).read_text()
@@ -195,3 +204,41 @@ def test_installed_bootstrap_db_finds_its_db_directory(rig: Rig) -> None:
         text=True,
     ).stdout
     assert out == f"{lib / 'db'} True\n"
+
+
+def test_a_matching_file_with_the_wrong_owner_or_group_is_repaired(rig: Rig) -> None:
+    assert rig.run() == 0
+    module = "usr/local/lib/skiw/skiw_host/escrow.py"  # imported by the root bootstrap-secrets
+    for drift in ((1000, 0), (0, 1000)):
+        rig.owners[module] = drift  # bytes and mode still match
+        assert rig.run() == 0
+        assert rig.owners[module] == (0, 0)
+    before = rig.tree()
+    assert rig.run() == 0 and rig.tree() == before  # a compliant run changes nothing
+    assert all(owner == (0, 0) for owner in rig.owners.values())
+
+
+def test_a_link_at_a_destination_is_replaced_not_followed(rig: Rig) -> None:
+    assert rig.run() == 0
+    target = rig.tmp / "elsewhere"
+    target.write_bytes(rig.read("etc/nftables.conf").encode())
+    (rig.root / "etc/nftables.conf").unlink()
+    (rig.root / "etc/nftables.conf").symlink_to(target)
+    assert rig.run() == 0
+    assert not (rig.root / "etc/nftables.conf").is_symlink()
+    assert target.read_text() == rig.read("etc/nftables.conf")  # the target is left as it was
+
+
+@pytest.mark.parametrize("kind", ["owner", "link"])
+def test_a_directory_not_owned_by_root_or_a_link_refuses_before_any_install(
+    rig: Rig, kind: str
+) -> None:
+    lib = rig.root / "usr/local/lib"
+    lib.mkdir(parents=True)
+    if kind == "owner":
+        (lib / "skiw").mkdir()
+        rig.owners["usr/local/lib/skiw"] = (1000, 0)
+    else:
+        (lib / "skiw").symlink_to(rig.tmp)
+    assert rig.run() == 2
+    assert not any(p.is_file() for p in rig.root.rglob("*")) and rig.calls == []

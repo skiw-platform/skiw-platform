@@ -14,7 +14,7 @@ import re
 import stat
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from string import Template
 
@@ -51,6 +51,13 @@ CHECKS = {
     "SKIW_JOURNAL_MAX_USE": re.compile(r"[1-9][0-9]*[MG]"),
 }
 Item = tuple[str, bytes, int]  # destination under the root, content, mode
+Owner = Callable[[Path], tuple[int, int]]
+ROOT = (0, 0)  # uid, gid every installed file and directory must have
+
+
+def lstat_owner(path: Path) -> tuple[int, int]:
+    info = path.lstat()  # a link is judged itself, never through its target
+    return info.st_uid, info.st_gid
 
 
 def host_values(env_file: Path) -> tuple[dict[str, str], bool]:
@@ -96,6 +103,17 @@ def mode(dest: str) -> int:
     return SUDOERS if dest.startswith("etc/sudoers.d/") else CONFIG
 
 
+def untrusted(root: Path, items: list[Item], owner: Owner) -> None:
+    """Refuse a link or a directory not owned by root:root on the way to any destination: its
+    owner could swap root-executed files later."""
+    for dest, _, _ in items:
+        path = root
+        for part in Path(dest).parent.parts:
+            path /= part
+            if path.is_symlink() or (path.exists() and owner(path) != ROOT):
+                raise Refused(f"/{path.relative_to(root)} is a link or not owned by root:root")
+
+
 def precheck(items: list[Item], run: Runner, chown: Chown) -> None:
     with tempfile.TemporaryDirectory() as scratch:
         for dest, data, file_mode in items:
@@ -103,31 +121,34 @@ def precheck(items: list[Item], run: Runner, chown: Chown) -> None:
                 candidate = Path(scratch) / Path(dest).name
                 candidate.write_bytes(data)
                 os.chmod(candidate, file_mode)
-                chown(str(candidate), 0, 0)  # visudo refuses a file root does not own
+                chown(str(candidate), *ROOT)  # visudo refuses a file root does not own
                 if (done := run([*check, str(candidate)], b"")).returncode != 0:
                     detail = done.stderr.decode("utf-8", "replace")[-500:]
                     raise Refused(f"/{dest} fails `{check[0]}`: {detail}")
 
 
-def install(root: Path, items: list[Item], chown: Chown) -> list[str]:
+def install(root: Path, items: list[Item], chown: Chown, owner: Owner) -> list[str]:
     changed = []
     for dest_name, data, file_mode in items:
         dest = root / dest_name
-        same = dest.is_file() and dest.read_bytes() == data
-        if same and stat.S_IMODE(dest.stat().st_mode) == file_mode:
+        same = dest.is_file() and not dest.is_symlink() and dest.read_bytes() == data
+        if same and stat.S_IMODE(dest.stat().st_mode) == file_mode and owner(dest) == ROOT:
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_name(f".{dest.name}.skiw-new")  # a dot: sudo ignores it in sudoers.d
         tmp.write_bytes(data)
         os.chmod(tmp, file_mode)
-        chown(str(tmp), 0, 0)
+        chown(str(tmp), *ROOT)
         os.replace(tmp, dest)
         changed.append(dest_name)
     return changed
 
 
 def main(
-    argv: Sequence[str] | None = None, run: Runner = run_command, chown: Chown = os.chown
+    argv: Sequence[str] | None = None,
+    run: Runner = run_command,
+    chown: Chown = os.chown,
+    owner: Owner = lstat_owner,
 ) -> int:
     parser = argparse.ArgumentParser(prog="apply", description=__doc__)
     parser.add_argument("--env-file", type=Path, required=True, help="host env/<env>.env")
@@ -136,8 +157,9 @@ def main(
     try:
         values, ban = host_values(args.env_file)
         items = plan(args.env_file, values, ban)
+        untrusted(args.root, items, owner)
         precheck(items, run, chown)
-        changed = install(args.root, items, chown)
+        changed = install(args.root, items, chown, owner)
     except Refused as exc:
         print(f"apply: refused, nothing installed: {exc}", file=sys.stderr)
         return 2
