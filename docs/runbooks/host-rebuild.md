@@ -20,7 +20,8 @@ files that differ: configs under `/etc` (0644), `/etc/sudoers.d/skiw-ops` (0440)
 `skiw_host/`, `db/` and the templates in `/usr/local/lib/skiw/`. It prints what it changed; a
 second run changes nothing. A file counts as unchanged only when its content, mode, owner and group
 all match and it is not a link; otherwise `apply` puts it back root-owned. It refuses (nothing
-installed) when a directory on the way to a destination is a link or is not owned by `root:root`.
+installed) when a directory on the way to a destination is a link, is not owned by `root:root`,
+or can be written by group or others. Directories it creates are `root:root` 0755, whatever the umask.
 Exit 0 done, 1 failed (fix, run again), 2 refused.
 
 **age** for `bootstrap-secrets` is a manual step for now: check `age-v1.3.2-linux-amd64.tar.gz`

@@ -25,6 +25,8 @@ HOST = Path(__file__).resolve().parents[1]
 LIB = "usr/local/lib/skiw"  # skiw_host, db/ and the templates; the executables put it on sys.path
 ENV = "etc/skiw/host.env"  # the env file the sudoers rule names
 CONFIG = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH  # 0644
+DIRECTORY = stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH  # 0755
+OTHERS_WRITE = stat.S_IWGRP | stat.S_IWOTH
 PROGRAM = CONFIG | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH  # 0755
 SUDOERS = stat.S_IRUSR | stat.S_IRGRP  # 0440, as visudo requires
 TEMPLATES = {  # rendered from host config: source under infra/host -> destination
@@ -104,14 +106,19 @@ def mode(dest: str) -> int:
 
 
 def untrusted(root: Path, items: list[Item], owner: Owner) -> None:
-    """Refuse a link or a directory not owned by root:root on the way to any destination: its
-    owner could swap root-executed files later."""
+    """Refuse a link, a directory not owned by root:root or one that group or others can write, on
+    the way to any destination: they could swap root-executed files later."""
     for dest, _, _ in items:
         path = root
         for part in Path(dest).parent.parts:
             path /= part
-            if path.is_symlink() or (path.exists() and owner(path) != ROOT):
-                raise Refused(f"/{path.relative_to(root)} is a link or not owned by root:root")
+            if path.is_symlink() or (
+                path.exists() and (owner(path) != ROOT or path.stat().st_mode & OTHERS_WRITE)
+            ):
+                raise Refused(
+                    f"/{path.relative_to(root)} is a link, not owned by root:root or writable "
+                    "by group or others"
+                )
 
 
 def precheck(items: list[Item], run: Runner, chown: Chown) -> None:
@@ -127,6 +134,17 @@ def precheck(items: list[Item], run: Runner, chown: Chown) -> None:
                     raise Refused(f"/{dest} fails `{check[0]}`: {detail}")
 
 
+def make_directories(root: Path, relative: Path, chown: Chown) -> None:
+    """Create each missing directory with a fixed mode, whatever the umask."""
+    path = root
+    for part in relative.parts:
+        path /= part
+        if not path.exists():
+            path.mkdir()
+            os.chmod(path, DIRECTORY)
+            chown(str(path), *ROOT)
+
+
 def install(root: Path, items: list[Item], chown: Chown, owner: Owner) -> list[str]:
     changed = []
     for dest_name, data, file_mode in items:
@@ -134,7 +152,7 @@ def install(root: Path, items: list[Item], chown: Chown, owner: Owner) -> list[s
         same = dest.is_file() and not dest.is_symlink() and dest.read_bytes() == data
         if same and stat.S_IMODE(dest.stat().st_mode) == file_mode and owner(dest) == ROOT:
             continue
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        make_directories(root, Path(dest_name).parent, chown)
         tmp = dest.with_name(f".{dest.name}.skiw-new")  # a dot: sudo ignores it in sudoers.d
         tmp.write_bytes(data)
         os.chmod(tmp, file_mode)

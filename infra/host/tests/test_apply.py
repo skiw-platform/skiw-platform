@@ -5,6 +5,7 @@ a recording chown stand in for the host.
 """
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -242,3 +243,25 @@ def test_a_directory_not_owned_by_root_or_a_link_refuses_before_any_install(
         (lib / "skiw").symlink_to(rig.tmp)
     assert rig.run() == 2
     assert not any(p.is_file() for p in rig.root.rglob("*")) and rig.calls == []
+
+
+@pytest.mark.parametrize("unsafe", [0o777, 0o775, 0o757])
+def test_a_directory_others_can_write_refuses_before_any_install(rig: Rig, unsafe: int) -> None:
+    module_dir = rig.root / "usr/local/lib/skiw/skiw_host"
+    module_dir.mkdir(parents=True)
+    module_dir.chmod(unsafe)  # root-owned (the rig says so) but replaceable by another user
+    assert rig.run() == 2
+    assert not any(p.is_file() for p in rig.root.rglob("*")) and rig.calls == []
+
+
+@pytest.mark.parametrize("umask", [0o000, 0o077])
+def test_new_directories_get_a_fixed_mode_whatever_the_umask(rig: Rig, umask: int) -> None:
+    old = os.umask(umask)
+    try:
+        assert rig.run() == 0
+        directories = [p for p in rig.root.rglob("*") if p.is_dir()]
+        assert directories and all(p.stat().st_mode & 0o777 == 0o755 for p in directories)
+        before = rig.tree()
+        assert rig.run() == 0 and rig.tree() == before  # the safe tree it made is accepted again
+    finally:
+        os.umask(old)
