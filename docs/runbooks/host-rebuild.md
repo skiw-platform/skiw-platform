@@ -21,7 +21,8 @@ files that differ: configs under `/etc` (0644), `/etc/sudoers.d/skiw-ops` (0440)
 second run changes nothing. A file counts as unchanged only when its content, mode, owner and group
 all match and it is not a link; otherwise `apply` puts it back root-owned. It refuses (nothing
 installed) when a directory on the way to a destination is a link, is not owned by `root:root`,
-or can be written by group or others. Directories it creates are `root:root` 0755, whatever the umask.
+or can be written by group or others. Directories it creates are made 0755 in the `mkdir` call itself (never writable by others, not even
+for an instant) and are `root:root`, whatever the umask. It refuses a link planted at a path it is about to create.
 Exit 0 done, 1 failed (fix, run again), 2 refused.
 
 **age** for `bootstrap-secrets` is a manual step for now: check `age-v1.3.2-linux-amd64.tar.gz`

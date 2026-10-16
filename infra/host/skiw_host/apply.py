@@ -135,14 +135,19 @@ def precheck(items: list[Item], run: Runner, chown: Chown) -> None:
 
 
 def make_directories(root: Path, relative: Path, chown: Chown) -> None:
-    """Create each missing directory with a fixed mode, whatever the umask."""
+    """Create each missing directory 0755 from the start (a umask can only remove bits, so it is
+    never writable by others, not even for an instant), then fix the final mode and owner."""
     path = root
     for part in relative.parts:
         path /= part
-        if not path.exists():
-            path.mkdir()
-            os.chmod(path, DIRECTORY)
-            chown(str(path), *ROOT)
+        try:
+            path.mkdir(mode=DIRECTORY)
+        except FileExistsError:
+            if path.is_symlink():  # planted after the check: never write through it
+                raise Refused(f"/{path.relative_to(root)} is a link") from None
+            continue
+        os.chmod(path, DIRECTORY)  # exact 0755 under a restrictive umask
+        chown(str(path), *ROOT)
 
 
 def install(root: Path, items: list[Item], chown: Chown, owner: Owner) -> list[str]:

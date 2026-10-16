@@ -6,6 +6,7 @@ a recording chown stand in for the host.
 
 import json
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,7 @@ import pytest
 
 from skiw_host import apply
 from skiw_host.apply import main
+from skiw_host.bootstrap_secrets import Refused
 
 HOST = Path(__file__).resolve().parents[1]
 CI_ENV = HOST / "env" / "ci.env"
@@ -265,3 +267,30 @@ def test_new_directories_get_a_fixed_mode_whatever_the_umask(rig: Rig, umask: in
         assert rig.run() == 0 and rig.tree() == before  # the safe tree it made is accepted again
     finally:
         os.umask(old)
+
+
+def test_a_new_directory_is_never_writable_by_others_even_before_its_chmod(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    initial: dict[str, int] = {}
+    real_chmod = os.chmod
+
+    def spy(path: str | os.PathLike[str], mode: int) -> None:
+        if os.path.isdir(path):  # the mode the directory had when mkdir returned
+            initial[str(path)] = stat.S_IMODE(os.stat(path).st_mode)
+        real_chmod(path, mode)
+
+    monkeypatch.setattr(os, "chmod", spy)
+    old = os.umask(0o000)
+    try:
+        assert rig.run() == 0
+    finally:
+        os.umask(old)
+    assert initial and all(mode & 0o022 == 0 for mode in initial.values())
+
+
+def test_a_link_planted_where_a_directory_was_to_be_created_is_refused(rig: Rig) -> None:
+    (rig.root / "etc").symlink_to(rig.tmp)  # appears after the earlier check in a real race
+    with pytest.raises(Refused):
+        apply.make_directories(rig.root, Path("etc/ssh"), rig.chown)
+    assert not (rig.tmp / "ssh").exists()
