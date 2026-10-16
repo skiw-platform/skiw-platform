@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 42
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 6892a4dba299e29ebe16303f93ecc9ee5bb99f86
+review-file: reviews/PR-42.md
+review-file-hash: 764418611c447bc9cda966eba6a9d2cb3e25790f
+review-log-branch-commit: aadde938ecff764454dd06d1808817ec6a325fb1
+verdict: Approved (round 5)
+ci: checks, host, image, security all success on the reviewed head (run 38914167913)
+note: M1f-1a (host config templates, apply for files, narrow restore sudoers rule). apply repairs ownership drift, replaces links, refuses non-root, linked or group/other-writable destination directories, creates directories 0755 in the mkdir call. M1f-1b adds users, packages, units, restarts and the bootstrap-db log line; M1f-2 adds check-hardening and the HBA-vs-env check. G4 assumed Ubuntu 24.04; G7 and G15 values still empty, apply refuses on staging and production until set.
+written-at: 2026-10-16T14:27:36Z
+pr-state-at-write: OPEN, unmerged
