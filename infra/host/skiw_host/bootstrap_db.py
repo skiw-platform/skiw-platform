@@ -20,10 +20,11 @@ import stat
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
+from functools import partial
 from pathlib import Path
 from string import Template
 
-from skiw_host.bootstrap_secrets import Chown, Host, Refused, write
+from skiw_host.bootstrap_secrets import Chown, Host, Journal, Refused, record, to_journal, write
 from skiw_host.secrets import INVENTORY, OWNER, Kind
 
 DB = Path(__file__).resolve().parents[1] / "db"
@@ -36,6 +37,7 @@ SALT_BYTES = 16
 DB_NAME = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 ONE_LINE = re.compile(r"[\x21-\x7e]+")  # printable ASCII: SASLprep leaves it unchanged
 SUPERUSER_FILE = "/run/secrets/postgres_password"
+JOURNAL: Journal = partial(to_journal, ident="bootstrap-db")
 
 
 def psql_script(secret: str = SUPERUSER_FILE) -> str:
@@ -142,7 +144,10 @@ def apply(compose: list[str], run: Runner, host: Host) -> int:
 
 
 def main(
-    argv: Sequence[str] | None = None, run: Runner = run_command, chown: Chown = os.chown
+    argv: Sequence[str] | None = None,
+    run: Runner = run_command,
+    chown: Chown = os.chown,
+    journal: Journal = JOURNAL,
 ) -> int:
     parser = argparse.ArgumentParser(prog="bootstrap-db", description=__doc__)
     parser.add_argument("mode", choices=["prepare", "apply"])
@@ -172,5 +177,13 @@ def main(
     except OSError as exc:
         print(f"bootstrap-db: failed: {exc.strerror} {exc.filename}", file=sys.stderr)
         return 1
-    print(f"bootstrap-db: {args.mode}: {done}", file=sys.stderr)
+    try:
+        record(host, journal, f"{args.mode}: {done}", "bootstrap-db")
+    except OSError as exc:  # the run is committed here: report it, never roll back
+        print(
+            f"bootstrap-db: {args.mode} is done ({done}), but writing the log failed: "
+            f"{exc.strerror} {exc.filename}. Record the run by hand; see the runbook.",
+            file=sys.stderr,
+        )
+        return 3
     return 0

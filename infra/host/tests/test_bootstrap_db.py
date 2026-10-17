@@ -30,6 +30,7 @@ class Rig:
         self.calls: list[tuple[list[str], bytes]] = []
         self.chowns: dict[str, int] = {}
         self.fail_call = -1  # index of the runner call that fails
+        self.journal: list[str] = []
 
     def runner(self, argv: list[str], stdin: bytes) -> subprocess.CompletedProcess[bytes]:
         self.calls.append((argv, stdin))
@@ -43,7 +44,7 @@ class Rig:
     def run(self, mode: str, env: Path = CI_ENV) -> int:
         argv = [mode, "--env-file", str(env), "--root", str(self.root)]
         argv += ["--compose-file", "/srv/skiw/compose.yml"]
-        return main(argv, run=self.runner, chown=self.chown)
+        return main(argv, run=self.runner, chown=self.chown, journal=self.journal.append)
 
     def passwords(self) -> dict[str, str]:
         values = {name: token.token_urlsafe(24) for name in PASSWORDS}
@@ -212,3 +213,43 @@ def test_roles_sql_holds_no_password_and_the_closed_role_set() -> None:
         "skiw_auth_lookup",
     }
     assert {f"{role}_password" for role in created} >= set(PASSWORDS) - {"postgres_password"}
+
+
+def test_each_run_logs_one_value_free_line_and_a_log_failure_exits_3(rig: Rig) -> None:
+    values = rig.passwords()
+    (rig.store / "postgres_password").unlink()
+    assert rig.run("prepare") == 0 and rig.run("apply") == 0
+    log = (rig.root / "var/log/skiw/deploy.log").read_text()
+    assert rig.journal == [
+        f"prepare: {bootstrap_db.HBA} rendered; minted postgres_password",
+        f"apply: role set applied; {len(PASSWORDS)} role passwords set from their files",
+    ]
+    assert [line.split(" ", 1)[1] for line in log.splitlines()] == [
+        f"bootstrap-db: {line}" for line in rig.journal
+    ]
+    assert not any(value in log for value in values.values())
+    (rig.root / "var/log/skiw/deploy.log").unlink()
+    (rig.root / "var/log/skiw/deploy.log").mkdir()  # the log line cannot be written
+    assert rig.run("apply") == 3  # committed: the roles and passwords were set
+
+
+@pytest.mark.parametrize("unsafe", ["dir-link", "file-link", "dir-writable", "file-writable"])
+def test_an_unsafe_deploy_log_is_never_written_through_and_exits_3(rig: Rig, unsafe: str) -> None:
+    rig.passwords()
+    elsewhere = rig.root.parent / "elsewhere"
+    elsewhere.mkdir()
+    log_dir = rig.root / "var/log/skiw"
+    log_dir.parent.mkdir(parents=True)
+    if unsafe == "dir-link":
+        log_dir.symlink_to(elsewhere)
+    else:
+        log_dir.mkdir()
+        if unsafe == "dir-writable":
+            log_dir.chmod(0o777)
+        elif unsafe == "file-link":
+            (log_dir / "deploy.log").symlink_to(elsewhere / "target")
+        else:
+            (log_dir / "deploy.log").write_text("")
+            (log_dir / "deploy.log").chmod(0o666)
+    assert rig.run("apply") == 3  # the roles were set; only the log step is refused
+    assert list(elsewhere.iterdir()) == []  # nothing was created or written through a link

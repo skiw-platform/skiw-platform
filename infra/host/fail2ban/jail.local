@@ -1,4 +1,4 @@
-# Rendered by infra/host/apply only when SKIW_SSH_ALLOW is empty (G7 (b), spec §8.4 H2).
+# Rendered by infra/host/apply only when SKIW_SSH_POLICY=fail2ban (G7 (b), spec §8.4 H2).
 [sshd]
 enabled = true
 port = $ssh_port

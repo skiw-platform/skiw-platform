@@ -1,0 +1,9 @@
+# Installed by infra/host/apply (spec §8.4 H1, UNI-14): the pinned Docker Engine and Compose plugin.
+# Read from download.docker.com on 2026-10-15; apply installs exactly these versions.
+Package: docker-ce docker-ce-cli
+Pin: version 5:29.9.1-1~ubuntu.24.04~noble
+Pin-Priority: 1001
+
+Package: docker-compose-plugin
+Pin: version 5.6.0-1~ubuntu.24.04~noble
+Pin-Priority: 1001
