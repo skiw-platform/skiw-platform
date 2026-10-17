@@ -1,8 +1,38 @@
 # Host rebuild
 
 Building a staging or production VPS from nothing, or rebuilding one after loss (spec §8.4).
-Sections are added as M1 lands: secrets (M1d, below), database roles (M1e, below), host hardening (M1f);
+Sections are added as M1 lands: host files (M1f-1a, below; users, packages and units M1f-1b), secrets (M1d),
+database roles (M1e), the hardening check (M1f-2);
 measured values in M1k. The operator is the owner (UNI-12); no agent holds a host credential.
+
+## Host (`apply`, spec §8.4 H1, H2, H7)
+
+Assumes Ubuntu 24.04 LTS (G4 (a)). First step on a new host, from the repository checkout:
+`sudo infra/host/apply --env-file infra/host/env/<environment>.env`. It refuses (exit 2, nothing
+installed) until these values are set: `SKIW_SSH_PORT` (not 22, 80, 443), `SKIW_SSH_POLICY` (G7:
+`allowlist` with the operator's and the off-site host's CIDRs in `SKIW_SSH_ALLOW`, or `fail2ban`
+with it empty) and `SKIW_AUTO_REBOOT` (G15). Rates and journal cap are [A] values, measured in M1k.
+
+It renders the templates from the env file, checks the nftables, sshd and sudoers candidates with
+`nft -c`, `sshd -t`, `visudo -c` (install `nftables` first), then installs, root-owned, only the
+files that differ: configs under `/etc` (0644), `/etc/sudoers.d/skiw-ops` (0440), the env file as
+`/etc/skiw/host.env`, `bootstrap-secrets` and `bootstrap-db` in `/usr/local/sbin` (0755), and
+`skiw_host/`, `db/` and the templates in `/usr/local/lib/skiw/`. It prints what it changed; a
+second run changes nothing. A file counts as unchanged only when its content, mode, owner and group
+all match and it is not a link; otherwise `apply` puts it back root-owned. It refuses (nothing
+installed) when a directory on the way to a destination is a link, is not owned by `root:root`,
+or can be written by group or others. Directories it creates are made 0755 in the `mkdir` call itself (never writable by others, not even
+for an instant) and are `root:root`, whatever the umask. It refuses a link planted at a path it is about to create.
+Exit 0 done, 1 failed (fix, run again), 2 refused.
+
+**age** for `bootstrap-secrets` is a manual step for now: check `age-v1.3.2-linux-amd64.tar.gz`
+with `sha256sum` against `docs/DECISIONS.md` (2026-10-14, M1d-1); install as `/usr/local/bin/age`
+(root, 0755).
+
+**Staged to M1f-1b and M1k:** users `skiw-deploy` and `skiw-ops` (not in group `docker`), Docker
+from its signed apt repository at the pinned versions, units and reloads; until then nothing is
+reloaded. Never `systemctl reload nftables` while Docker runs (it flushes Docker's rules too). On
+an SSH port change keep one session open and test the new port from a second terminal first.
 
 ## Secrets (`bootstrap-secrets`, spec §8.4 H4)
 
@@ -55,24 +85,26 @@ On the owner's machine, decrypt the newest bundle and stream it over SSH; the pl
 touches the host's disk except as the 0400 key files, and the private identity never reaches the
 host.
 
-**Prerequisite: not provisioned yet, so the command below is conditional and cannot be run today.**
+**Prerequisite: not on any host yet, so the command below is conditional and cannot be run today.**
 The pipeline has no terminal and its stdin is the plaintext bundle, so `sudo` cannot ask for a
 password (and `sudo -S` would read the bundle as the password). The operator account therefore
 needs a narrow, noninteractive rule that allows this one command and nothing else: a `sudoers`
 entry for the installed `bootstrap-secrets` only, not global passwordless `sudo`, not SSH root
-login, and never a password sent in the bundle stream. M1f (host hardening) provisions that rule
-and M1k proves it on both hosts, including that a missing rule refuses and changes nothing.
+login, and never a password sent in the bundle stream. `apply` installs that rule (M1f-1a, "Host"
+below), M1f-1b creates the `skiw-ops` account, and M1k proves it on both hosts, including that a
+missing rule refuses and changes nothing.
 
-**Preflight, before you decrypt anything.** It must succeed and print nothing secret:
+**Preflight, before you decrypt anything.** It must print exactly this rule line (the exit code
+alone proves nothing: the operator's password `sudo` also lists the command):
 ```
-ssh -T <operator>@<host> sudo -n -l bootstrap-secrets
+ssh -T skiw-ops@<host> sudo -n -l | grep -Fx '    (root) NOPASSWD: /usr/local/sbin/bootstrap-secrets restore --env-file /etc/skiw/host.env'
 ```
-If it fails (a password would be needed, or the rule is absent), stop: fix the rule on the host
+If it prints nothing (a password would be needed, or the rule is absent or different), stop: fix the rule on the host
 through the console or the normal operator login, then try again. Do not decrypt the bundle first.
 
 ```
 age --decrypt -i <offline escrow identity> <bundle>.bundle.age \
-  | ssh -T <operator>@<host> sudo -n bootstrap-secrets restore --env-file <path to env/<environment>.env>
+  | ssh -T skiw-ops@<host> sudo -n /usr/local/sbin/bootstrap-secrets restore --env-file /etc/skiw/host.env
 ```
 `sudo -n` fails closed: with no authorization it exits at once before `restore` starts, so nothing
 is written on the host.

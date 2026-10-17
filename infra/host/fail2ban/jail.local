@@ -1,0 +1,9 @@
+# Rendered by infra/host/apply only when SKIW_SSH_ALLOW is empty (G7 (b), spec §8.4 H2).
+[sshd]
+enabled = true
+port = $ssh_port
+backend = systemd
+banaction = nftables-multiport
+maxretry = 3
+findtime = 10m
+bantime = 1h

@@ -1,0 +1,5 @@
+# Installed by infra/host/apply (spec §8.4 H4; runbook host-rebuild.md "Recovery: restore").
+# The streamed restore has no terminal, so this one command needs no password. The argument list
+# is pinned: any other or extra argument (the test-only --root and --age, the owner-only
+# --allow-new-key-version) does not match this rule. Everything else asks for the password.
+skiw-ops ALL=(root) NOPASSWD: /usr/local/sbin/bootstrap-secrets restore --env-file /etc/skiw/host.env
