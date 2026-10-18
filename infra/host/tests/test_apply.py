@@ -40,7 +40,8 @@ class Rig:
         (self.root / apply.DOCKER_KEY).write_text("Docker's public key\n")
         self.gpg = KEY
         self.users: dict[str, list[str]] = {}
-        self.packages: set[str] = set()
+        self.packages: set[str] = set()  # "name=version", as dpkg-query reports them
+        self.active: set[str] = set()  # services systemd would report as active
         self.calls: list[list[str]] = []
         self.chowns: dict[str, tuple[int, int]] = {}
         self.owners: dict[str, tuple[int, int]] = {}  # destination -> uid, gid; absent is root
@@ -60,6 +61,8 @@ class Rig:
             out = " ".join([argv[2], *self.users[argv[2]]])
         elif code:
             pass
+        elif argv[0] == "systemctl":
+            self.systemctl(argv[1:])
         elif argv[0] == "useradd":
             self.users[argv[-1]] = []
         elif argv[0] == "usermod":
@@ -69,8 +72,31 @@ class Rig:
         elif argv[0] == "dpkg-query":
             out = "".join(f"ii {package}\n" for package in sorted(self.packages))
         elif argv[2:4] == ["apt-get", "install"]:
-            self.packages |= {p if "=" in p else f"{p}=1" for p in argv[6:]}
+            code = self.apt_install([a for a in argv[4:] if not a.startswith("-")], argv)
+        if argv[:2] == ["systemctl", "is-active"]:
+            code = int(argv[-1] not in self.active) * 3
         return subprocess.CompletedProcess(argv, code, out.encode(), b"bad line 1")
+
+    def systemctl(self, args: list[str]) -> None:  # documented start, restart, try-restart rules
+        verb, unit = args[0], args[-1]
+        if verb in ("start", "restart"):
+            self.active.add(unit)
+        elif verb == "disable" and "--now" in args:
+            self.active.discard(unit)
+        # enable starts nothing; try-restart leaves a stopped unit stopped
+
+    def apt_install(self, wanted: list[str], argv: list[str]) -> int:
+        """apt's rule: without --allow-downgrades an install that lowers a version fails (100)."""
+        changes = {}
+        for item in wanted:
+            name, _, version = item.partition("=")
+            have = [p.partition("=")[2] for p in self.packages if p.partition("=")[0] == name]
+            if have and have[0] > (version or "1") and "--allow-downgrades" not in argv:
+                return 100
+            changes[name] = version or "1"
+        self.packages = {p for p in self.packages if p.partition("=")[0] not in changes}
+        self.packages |= {f"{n}={v}" for n, v in changes.items()}
+        return 0
 
     def chown(self, path: str, uid: int, gid: int) -> None:
         name = Path(path).name.removeprefix(".").removesuffix(".skiw-new")
@@ -345,8 +371,9 @@ def test_users_are_made_outside_group_docker_and_the_operator_is_in_sudo(rig: Ri
 def test_docker_is_installed_at_its_pins_only_when_missing_or_wrong(rig: Rig) -> None:
     rig.packages = {"docker-ce=5:29.8.0-1~ubuntu.24.04~noble", "nftables=1"}
     assert rig.run() == 0
-    install = next(argv for argv in rig.calls if argv[2:4] == ["apt-get", "install"])
-    assert set(install[6:]) == PINNED | {"unattended-upgrades"}  # nftables was there
+    installs = [argv for argv in rig.calls if argv[2:4] == ["apt-get", "install"]]
+    installed = {p for argv in installs for p in argv[4:] if not p.startswith("-")}
+    assert installed == PINNED | {"unattended-upgrades"}  # nftables was there
     assert rig.read("etc/apt/preferences.d/skiw-docker").count("Pin-Priority: 1001") == 2
     assert "Signed-By: /etc/apt/keyrings/docker.asc" in rig.read(
         "etc/apt/sources.list.d/docker.sources"
@@ -421,3 +448,70 @@ def test_a_pending_file_not_owned_by_root_refuses(rig: Rig) -> None:
     (rig.root / apply.PENDING).write_text("etc/docker/daemon.json\n")
     rig.owners[apply.PENDING] = (1000, 0)
     assert rig.run() == 2 and rig.calls == []
+
+
+def installs(rig: Rig) -> list[list[str]]:
+    return [argv for argv in rig.calls if argv[2:4] == ["apt-get", "install"]]
+
+
+def test_a_newer_installed_docker_goes_back_to_the_pin_and_nothing_else_may_downgrade(
+    rig: Rig,
+) -> None:
+    rig.packages = {
+        "docker-ce=5:29.9.2-1~ubuntu.24.04~noble",
+        "docker-ce-cli=5:29.9.2-1~ubuntu.24.04~noble",
+        "docker-compose-plugin=5.7.0-1~ubuntu.24.04~noble",
+        "nftables=1",
+        "unattended-upgrades=1",
+    }
+    assert rig.run() == 0
+    assert rig.packages >= PINNED and not any("29.9.2" in p or "5.7.0" in p for p in rig.packages)
+    flagged = [argv for argv in installs(rig) if "--allow-downgrades" in argv]
+    assert flagged and all("=" in p for argv in flagged for p in argv[7:])  # pinned names only
+    rig.calls = []
+    assert rig.run() == 0 and installs(rig) == []  # at the pins: no apt
+
+
+def test_the_other_packages_never_get_the_downgrade_flag(rig: Rig) -> None:
+    rig.packages = set(PINNED) | {"nftables=2"}  # not at a pin; unattended-upgrades missing
+    assert rig.run() == 0
+    plain = [argv for argv in installs(rig) if "unattended-upgrades" in argv]
+    assert plain and all("--allow-downgrades" not in argv for argv in plain)
+
+
+def test_a_failed_install_keeps_the_reloads_owed_until_a_run_succeeds(rig: Rig) -> None:
+    rig.fail = "env DEBIAN_FRONTEND=noninteractive apt-get install"
+    assert rig.run() == 1 and rig.reloads() == []
+    owed = rig.read(apply.PENDING).split()
+    assert "etc/nftables.conf" in owed and "etc/docker/daemon.json" in owed
+    rig.fail = ""
+    assert rig.run() == 0 and not (rig.root / apply.PENDING).exists()
+    assert "nft -f /etc/nftables.conf" in rig.reloads()
+
+
+def test_fail2ban_is_started_when_the_policy_selects_it_and_it_is_installed_but_stopped(
+    rig: Rig,
+) -> None:
+    rig.packages = {"fail2ban=1"}
+    ban = {"SKIW_SSH_POLICY": "fail2ban", "SKIW_SSH_ALLOW": ""}
+    assert rig.run(**ban) == 0 and "fail2ban" in rig.active
+    rig.active.discard("fail2ban")  # stopped after a good run; no file differs
+    rig.calls = []
+    assert rig.run(**ban) == 0 and "fail2ban" in rig.active
+    assert ["systemctl", "start", "fail2ban"] in rig.calls
+
+
+def test_fail2ban_is_not_started_under_the_allowlist_policy(rig: Rig) -> None:
+    rig.packages = {"fail2ban=1"}
+    assert rig.run() == 0 and "fail2ban" not in rig.active
+    assert ["systemctl", "start", "fail2ban"] not in rig.calls
+
+
+def test_a_failed_fail2ban_start_is_retried_and_the_reloads_stay_owed(rig: Rig) -> None:
+    ban = {"SKIW_SSH_POLICY": "fail2ban", "SKIW_SSH_ALLOW": ""}
+    rig.fail = "systemctl start fail2ban"
+    assert rig.run(**ban) == 1 and "fail2ban" not in rig.active
+    assert "etc/fail2ban/jail.d/skiw.local" in rig.read(apply.PENDING).split()
+    rig.fail = ""
+    assert rig.run(**ban) == 0 and "fail2ban" in rig.active
+    assert not (rig.root / apply.PENDING).exists()

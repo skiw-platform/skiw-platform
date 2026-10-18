@@ -39,7 +39,9 @@ with `sha256sum` against `docs/DECISIONS.md` (2026-10-14, M1d-1); install as `/u
 password and SSH key by hand), and neither is in group `docker` (it is removed if found); Docker
 Engine and the Compose plugin are installed from Docker's signed repository at the versions in
 `apt/skiw-docker.pref`, with `nftables`, `unattended-upgrades` and, for `fail2ban`, `fail2ban`
-(only what is missing or at another version); the units are enabled; ssh moves from `ssh.socket`
+(only what is missing or at another version; the Docker packages alone may be moved to a lower
+version, with `--allow-downgrades`, so a host with a newer Docker returns to the reviewed pin); the
+units are enabled, and under `fail2ban` the service is started if it is not active; ssh moves from `ssh.socket`
 to `ssh.service` (on 24.04 the socket would keep listening on 22). A service restarts only when
 its file changed: `nft -f /etc/nftables.conf` (never `systemctl reload nftables`: it flushes
 Docker's rules too), ssh, docker (`live-restore` keeps containers running), journald, fail2ban.

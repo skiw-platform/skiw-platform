@@ -248,9 +248,28 @@ def converge(run: Runner, ban: bool) -> None:
     have |= {h.partition("=")[0] for h in have}  # an unpinned name matches any version
     if missing_packages := [w for w in wanted if w not in have]:
         ok(run, ["apt-get", "update"])
-        install_argv = ["apt-get", "install", "-y", "--no-install-recommends", *missing_packages]
-        ok(run, ["env", "DEBIAN_FRONTEND=noninteractive", *install_argv])
+        pinned = [
+            w for w in missing_packages if "=" in w
+        ]  # only these may go back to a lower version
+        for group, flags in (
+            (pinned, ["--allow-downgrades"]),
+            ([w for w in missing_packages if w not in pinned], []),
+        ):
+            if group:
+                install_argv = [
+                    "apt-get",
+                    "install",
+                    "-y",
+                    "--no-install-recommends",
+                    *flags,
+                    *group,
+                ]
+                ok(run, ["env", "DEBIAN_FRONTEND=noninteractive", *install_argv])
     ok(run, ["systemctl", "enable", *UNITS, *fail2ban])
+    if ban and run(["systemctl", "is-active", "--quiet", "fail2ban"], b"").returncode != 0:
+        ok(
+            run, ["systemctl", "start", "fail2ban"]
+        )  # enable and try-restart leave a stopped unit stopped
     ok(run, ["systemctl", "disable", "--now", "ssh.socket"])  # 24.04: sshd then binds Port itself
     ok(run, ["systemctl", "start", "ssh.service"])
 
