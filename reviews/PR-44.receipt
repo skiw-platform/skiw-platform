@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 44
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 0d5626e960222d3585e70e83987be40aa42df3cf
+review-file: reviews/PR-44.md
+review-file-hash: 64c936dbcb652d5f6158cb7438c27c28088b7a60
+review-log-branch-commit: 7ec27f18cbdc22d823cd976d7b3a7878fc070732
+verdict: Approved (round 2)
+ci: checks, host, image, security all success on the reviewed head (run 39084189072)
+note: M1f-1b (apply makes users, installs Docker at its pins, enables units, reloads changed services; bootstrap-db log line; hardened deploy-log write). fail2ban started when selected, pinned Docker packages alone may downgrade. M1f-2 adds check-hardening and the HBA-vs-env check. No native Ubuntu or systemd run yet (M1k). G7 and G15 still empty; apply refuses on staging and production until set.
+written-at: 2026-10-18T00:57:38Z
+pr-state-at-write: OPEN, unmerged
