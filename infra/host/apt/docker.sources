@@ -1,0 +1,6 @@
+# Installed by infra/host/apply (spec §8.4 H1): Docker's signed apt repository for Ubuntu 24.04 (G4).
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: noble
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc

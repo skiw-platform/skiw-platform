@@ -30,6 +30,9 @@ KEY_LINE = re.compile(r"v([1-9][0-9]*):([A-Za-z0-9+/]+={0,2})")
 FORMAT = "skiw-escrow-1"
 MARKER = ".restored"
 DIR_MODE = stat.S_IRWXU  # 0700: only root enters the secret and escrow directories
+LOG_DIR_MODE = stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP  # 0750
+LOG_MODE = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP  # 0640
+OTHERS_WRITE = stat.S_IWGRP | stat.S_IWOTH
 Chown = Callable[[str, int, int], None]
 Journal = Callable[[str], None]
 
@@ -47,8 +50,8 @@ class Host:
         self.chown = chown
 
 
-def to_journal(message: str) -> None:
-    syslog.openlog("bootstrap-secrets")
+def to_journal(message: str, ident: str = "bootstrap-secrets") -> None:
+    syslog.openlog(ident)
     syslog.syslog(syslog.LOG_NOTICE, message)
 
 
@@ -175,13 +178,21 @@ def install(host: Host, keys: dict[str, list[str]], to: list[str], age: Path, ma
     return path
 
 
-def record(host: Host, journal: Journal, message: str) -> None:
+def record(host: Host, journal: Journal, message: str, prog: str = "bootstrap-secrets") -> None:
     """One line to stderr, the journal and the deploy log; callers pass names only, no value."""
-    line = f"{datetime.now(UTC).isoformat()} bootstrap-secrets: {message}"
+    line = f"{datetime.now(UTC).isoformat()} {prog}: {message}"
     print(line, file=sys.stderr)
     journal(message)
-    host.deploy_log.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-    with host.deploy_log.open("a", encoding="utf-8") as log:
+    host.deploy_log.parent.mkdir(mode=LOG_DIR_MODE, parents=True, exist_ok=True)
+    mine = os.geteuid()  # root on a host: the log and its directory must be ours, never writable
+    info = host.deploy_log.parent.lstat()  # by others, and never a link a local user can aim
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != mine or info.st_mode & OTHERS_WRITE:
+        raise PermissionError(f"{host.deploy_log.parent} is a link, not ours or writable by others")
+    fd = os.open(host.deploy_log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, LOG_MODE)
+    with os.fdopen(fd, "a", encoding="utf-8") as log:
+        info = os.fstat(log.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != mine or info.st_mode & OTHERS_WRITE:
+            raise PermissionError(f"{host.deploy_log} is not ours or is writable by others")
         log.write(f"{line}\n")
 
 

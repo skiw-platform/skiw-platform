@@ -1,7 +1,8 @@
 """`apply` (spec §8.4 H1, H2, H4, H7; plan §3 M1f, first part).
 
-A fake runner stands in for the checkers (`nft -c`, `sshd -t`, `visudo -c`); a temporary root and
-a recording chown stand in for the host.
+A fake runner stands in for every system command (checkers, gpg, users, apt, systemctl) and keeps
+the users and packages it "made"; a temporary root, a recording chown and owner stand in for the
+host.
 """
 
 import json
@@ -20,6 +21,14 @@ from skiw_host.bootstrap_secrets import Refused
 HOST = Path(__file__).resolve().parents[1]
 CI_ENV = HOST / "env" / "ci.env"
 DAEMON = {"live-restore": True, "no-new-privileges": True, "log-driver": "journald"}
+PINNED = {
+    "docker-ce=5:29.9.1-1~ubuntu.24.04~noble",
+    "docker-ce-cli=5:29.9.1-1~ubuntu.24.04~noble",
+    "docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble",
+}
+KEY = (
+    f"pub:-:4096:1:8D81803C0EBFCD88:::\nfpr:::::::::{apply.DOCKER_FINGERPRINT}:\nsub:-:4096:1::::\n"
+)
 RULE = "/usr/local/sbin/bootstrap-secrets restore --env-file /etc/skiw/host.env"
 
 
@@ -27,17 +36,67 @@ class Rig:
     def __init__(self, tmp: Path) -> None:
         self.tmp = tmp
         self.root = tmp / "root"
-        self.root.mkdir()
+        (self.root / "etc/apt/keyrings").mkdir(parents=True)
+        (self.root / apply.DOCKER_KEY).write_text("Docker's public key\n")
+        self.gpg = KEY
+        self.users: dict[str, list[str]] = {}
+        self.packages: set[str] = set()  # "name=version", as dpkg-query reports them
+        self.active: set[str] = set()  # services systemd would report as active
         self.calls: list[list[str]] = []
         self.chowns: dict[str, tuple[int, int]] = {}
         self.owners: dict[str, tuple[int, int]] = {}  # destination -> uid, gid; absent is root
-        self.fail = ""  # argv[0] of the checker that fails
+        self.fail = ""  # the start of the command line that fails
         self.modes: dict[str, int] = {}  # checker -> mode of the candidate it was given
 
     def runner(self, argv: list[str], stdin: bytes) -> subprocess.CompletedProcess[bytes]:
         self.calls.append(argv)
-        self.modes[argv[0]] = Path(argv[-1]).stat().st_mode & 0o777
-        return subprocess.CompletedProcess(argv, int(argv[0] == self.fail), b"", b"bad line 1")
+        code, out = int(bool(self.fail) and " ".join(argv).startswith(self.fail)), ""
+        if tuple(argv[:-1]) in apply.CHECKERS.values():
+            self.modes[argv[0]] = Path(argv[-1]).stat().st_mode & 0o777
+        elif argv[0] == "gpg":
+            out = self.gpg
+        elif argv[:2] == ["id", "-u"]:
+            code = int(argv[2] not in self.users)
+        elif argv[:2] == ["id", "-nG"]:
+            out = " ".join([argv[2], *self.users[argv[2]]])
+        elif code:
+            pass
+        elif argv[0] == "systemctl":
+            self.systemctl(argv[1:])
+        elif argv[0] == "useradd":
+            self.users[argv[-1]] = []
+        elif argv[0] == "usermod":
+            self.users[argv[-1]] += argv[3].split(",")
+        elif argv[0] == "gpasswd":
+            self.users[argv[2]].remove(argv[3])
+        elif argv[0] == "dpkg-query":
+            out = "".join(f"ii {package}\n" for package in sorted(self.packages))
+        elif argv[2:4] == ["apt-get", "install"]:
+            code = self.apt_install([a for a in argv[4:] if not a.startswith("-")], argv)
+        if argv[:2] == ["systemctl", "is-active"]:
+            code = int(argv[-1] not in self.active) * 3
+        return subprocess.CompletedProcess(argv, code, out.encode(), b"bad line 1")
+
+    def systemctl(self, args: list[str]) -> None:  # documented start, restart, try-restart rules
+        verb, unit = args[0], args[-1]
+        if verb in ("start", "restart"):
+            self.active.add(unit)
+        elif verb == "disable" and "--now" in args:
+            self.active.discard(unit)
+        # enable starts nothing; try-restart leaves a stopped unit stopped
+
+    def apt_install(self, wanted: list[str], argv: list[str]) -> int:
+        """apt's rule: without --allow-downgrades an install that lowers a version fails (100)."""
+        changes = {}
+        for item in wanted:
+            name, _, version = item.partition("=")
+            have = [p.partition("=")[2] for p in self.packages if p.partition("=")[0] == name]
+            if have and have[0] > (version or "1") and "--allow-downgrades" not in argv:
+                return 100
+            changes[name] = version or "1"
+        self.packages = {p for p in self.packages if p.partition("=")[0] not in changes}
+        self.packages |= {f"{n}={v}" for n, v in changes.items()}
+        return 0
 
     def chown(self, path: str, uid: int, gid: int) -> None:
         name = Path(path).name.removeprefix(".").removesuffix(".skiw-new")
@@ -64,8 +123,12 @@ class Rig:
         return {
             str(p.relative_to(self.root)): (p.read_bytes(), p.stat().st_mode, p.stat().st_mtime_ns)
             for p in self.root.rglob("*")
-            if p.is_file()
+            if p.is_file() and p != self.root / apply.DOCKER_KEY
         }
+
+    def reloads(self) -> list[str]:
+        restarts = [a for a in self.calls if a[:2] == ["nft", "-f"] or "restart" in a[1]]
+        return [" ".join(a) for a in restarts]
 
 
 @pytest.fixture
@@ -165,12 +228,13 @@ def test_a_failed_check_refuses_and_installs_nothing(
     assert rig.run() == 2
     assert rig.tree() == {}
     assert "refused, nothing installed" in capsys.readouterr().err
-    assert {argv[0] for argv in rig.calls} <= {"nft", "sshd", "visudo"}  # no install step ran
+    assert {argv[0] for argv in rig.calls} <= {"gpg", "nft", "sshd", "visudo"}  # no install step
 
 
 def test_each_candidate_is_checked_with_its_final_mode(rig: Rig) -> None:
     assert rig.run() == 0
-    assert [tuple(argv[:-1]) for argv in rig.calls] == list(apply.CHECKERS.values())
+    checked = [tuple(argv[:-1]) for argv in rig.calls if argv[1] in ("-c", "-t")]
+    assert checked == list(apply.CHECKERS.values())
     assert rig.modes == {"nft": 0o644, "sshd": 0o644, "visudo": 0o440}
 
 
@@ -244,7 +308,7 @@ def test_a_directory_not_owned_by_root_or_a_link_refuses_before_any_install(
     else:
         (lib / "skiw").symlink_to(rig.tmp)
     assert rig.run() == 2
-    assert not any(p.is_file() for p in rig.root.rglob("*")) and rig.calls == []
+    assert rig.tree() == {} and rig.calls == []
 
 
 @pytest.mark.parametrize("unsafe", [0o777, 0o775, 0o757])
@@ -253,7 +317,7 @@ def test_a_directory_others_can_write_refuses_before_any_install(rig: Rig, unsaf
     module_dir.mkdir(parents=True)
     module_dir.chmod(unsafe)  # root-owned (the rig says so) but replaceable by another user
     assert rig.run() == 2
-    assert not any(p.is_file() for p in rig.root.rglob("*")) and rig.calls == []
+    assert rig.tree() == {} and rig.calls == []
 
 
 @pytest.mark.parametrize("umask", [0o000, 0o077])
@@ -290,7 +354,164 @@ def test_a_new_directory_is_never_writable_by_others_even_before_its_chmod(
 
 
 def test_a_link_planted_where_a_directory_was_to_be_created_is_refused(rig: Rig) -> None:
-    (rig.root / "etc").symlink_to(rig.tmp)  # appears after the earlier check in a real race
+    (rig.root / "usr").symlink_to(rig.tmp)  # appears after the earlier check in a real race
     with pytest.raises(Refused):
-        apply.make_directories(rig.root, Path("etc/ssh"), rig.chown)
-    assert not (rig.tmp / "ssh").exists()
+        apply.make_directories(rig.root, Path("usr/local"), rig.chown)
+    assert not (rig.tmp / "local").exists()
+
+
+def test_users_are_made_outside_group_docker_and_the_operator_is_in_sudo(rig: Rig) -> None:
+    rig.users["skiw-deploy"] = ["docker"]  # made by hand before: apply takes it out of docker
+    assert rig.run() == 0
+    assert ["gpasswd", "--delete", "skiw-deploy", "docker"] in rig.calls
+    assert rig.users == {"skiw-deploy": [], "skiw-ops": ["sudo"]}
+    assert not any("docker" in argv for argv in rig.calls if argv[0] in ("useradd", "usermod"))
+
+
+def test_docker_is_installed_at_its_pins_only_when_missing_or_wrong(rig: Rig) -> None:
+    rig.packages = {"docker-ce=5:29.8.0-1~ubuntu.24.04~noble", "nftables=1"}
+    assert rig.run() == 0
+    installs = [argv for argv in rig.calls if argv[2:4] == ["apt-get", "install"]]
+    installed = {p for argv in installs for p in argv[4:] if not p.startswith("-")}
+    assert installed == PINNED | {"unattended-upgrades"}  # nftables was there
+    assert rig.read("etc/apt/preferences.d/skiw-docker").count("Pin-Priority: 1001") == 2
+    assert "Signed-By: /etc/apt/keyrings/docker.asc" in rig.read(
+        "etc/apt/sources.list.d/docker.sources"
+    )
+    rig.calls = []
+    assert rig.run() == 0
+    assert not any("apt-get" in argv for argv in rig.calls)
+
+
+def test_units_are_enabled_and_only_changed_files_reload(rig: Rig) -> None:
+    assert rig.run() == 0
+    assert rig.reloads() == [
+        "nft -f /etc/nftables.conf",
+        "systemctl restart ssh.service",
+        "systemctl restart docker",
+        "systemctl restart systemd-journald",
+    ]
+    assert ["systemctl", "disable", "--now", "ssh.socket"] in rig.calls
+    assert ["systemctl", "enable", *apply.UNITS] in rig.calls  # allowlist: no fail2ban
+    rig.calls = []
+    assert rig.run() == 0 and rig.reloads() == []  # a second run reloads nothing
+    (rig.root / "etc/docker/daemon.json").write_text("{}")
+    assert rig.run() == 0 and rig.reloads() == ["systemctl restart docker"]
+
+
+def test_a_reload_that_failed_is_owed_until_a_run_succeeds(rig: Rig) -> None:
+    rig.fail = "systemctl restart docker"
+    assert rig.run() == 1
+    pending = rig.root / apply.PENDING
+    assert pending.read_text().split() == list(apply.RELOADS)[:4]
+    assert pending.stat().st_mode & 0o777 == 0o644 and rig.owners[apply.PENDING] == (0, 0)
+    rig.fail, rig.calls = "", []
+    assert rig.run() == 0  # no file changed now, yet every owed reload runs once
+    assert len(rig.reloads()) == 4 and not pending.exists()
+    rig.calls = []
+    assert rig.run() == 0 and rig.reloads() == []
+
+
+def test_a_stale_fail2ban_jail_is_removed_under_the_allowlist_policy(
+    rig: Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert rig.run(SKIW_SSH_POLICY="fail2ban", SKIW_SSH_ALLOW="") == 0
+    assert ["systemctl", "enable", *apply.UNITS, "fail2ban"] in rig.calls
+    assert "fail2ban=1" in rig.packages
+    rig.calls = []
+    assert rig.run() == 0  # the CI env file: allowlist
+    assert not (rig.root / "etc/fail2ban/jail.d/skiw.local").exists()
+    assert "systemctl try-restart fail2ban" in rig.reloads()
+    assert "removed etc/fail2ban/jail.d/skiw.local (policy allowlist)" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("problem", ["missing", "other key", "two keys", "owner", "link"])
+def test_the_docker_key_must_be_exactly_dockers_or_nothing_changes(rig: Rig, problem: str) -> None:
+    key = rig.root / apply.DOCKER_KEY
+    if problem == "missing":
+        key.unlink()
+    elif problem == "other key":
+        rig.gpg = KEY.replace("9DC8", "0000")
+    elif problem == "two keys":  # apt would trust both
+        rig.gpg = KEY + KEY.replace("9DC8", "0000")
+    elif problem == "owner":
+        rig.owners[apply.DOCKER_KEY] = (1000, 0)
+    else:
+        key.unlink()
+        key.symlink_to(rig.tmp / "key")
+    assert rig.run() == 2
+    assert rig.tree() == {} and {argv[0] for argv in rig.calls} <= {"gpg"}
+
+
+def test_a_pending_file_not_owned_by_root_refuses(rig: Rig) -> None:
+    (rig.root / "var/lib/skiw").mkdir(parents=True)
+    (rig.root / apply.PENDING).write_text("etc/docker/daemon.json\n")
+    rig.owners[apply.PENDING] = (1000, 0)
+    assert rig.run() == 2 and rig.calls == []
+
+
+def installs(rig: Rig) -> list[list[str]]:
+    return [argv for argv in rig.calls if argv[2:4] == ["apt-get", "install"]]
+
+
+def test_a_newer_installed_docker_goes_back_to_the_pin_and_nothing_else_may_downgrade(
+    rig: Rig,
+) -> None:
+    rig.packages = {
+        "docker-ce=5:29.9.2-1~ubuntu.24.04~noble",
+        "docker-ce-cli=5:29.9.2-1~ubuntu.24.04~noble",
+        "docker-compose-plugin=5.7.0-1~ubuntu.24.04~noble",
+        "nftables=1",
+        "unattended-upgrades=1",
+    }
+    assert rig.run() == 0
+    assert rig.packages >= PINNED and not any("29.9.2" in p or "5.7.0" in p for p in rig.packages)
+    flagged = [argv for argv in installs(rig) if "--allow-downgrades" in argv]
+    assert flagged and all("=" in p for argv in flagged for p in argv[7:])  # pinned names only
+    rig.calls = []
+    assert rig.run() == 0 and installs(rig) == []  # at the pins: no apt
+
+
+def test_the_other_packages_never_get_the_downgrade_flag(rig: Rig) -> None:
+    rig.packages = set(PINNED) | {"nftables=2"}  # not at a pin; unattended-upgrades missing
+    assert rig.run() == 0
+    plain = [argv for argv in installs(rig) if "unattended-upgrades" in argv]
+    assert plain and all("--allow-downgrades" not in argv for argv in plain)
+
+
+def test_a_failed_install_keeps_the_reloads_owed_until_a_run_succeeds(rig: Rig) -> None:
+    rig.fail = "env DEBIAN_FRONTEND=noninteractive apt-get install"
+    assert rig.run() == 1 and rig.reloads() == []
+    owed = rig.read(apply.PENDING).split()
+    assert "etc/nftables.conf" in owed and "etc/docker/daemon.json" in owed
+    rig.fail = ""
+    assert rig.run() == 0 and not (rig.root / apply.PENDING).exists()
+    assert "nft -f /etc/nftables.conf" in rig.reloads()
+
+
+def test_fail2ban_is_started_when_the_policy_selects_it_and_it_is_installed_but_stopped(
+    rig: Rig,
+) -> None:
+    rig.packages = {"fail2ban=1"}
+    ban = {"SKIW_SSH_POLICY": "fail2ban", "SKIW_SSH_ALLOW": ""}
+    assert rig.run(**ban) == 0 and "fail2ban" in rig.active
+    rig.active.discard("fail2ban")  # stopped after a good run; no file differs
+    rig.calls = []
+    assert rig.run(**ban) == 0 and "fail2ban" in rig.active
+    assert ["systemctl", "start", "fail2ban"] in rig.calls
+
+
+def test_fail2ban_is_not_started_under_the_allowlist_policy(rig: Rig) -> None:
+    rig.packages = {"fail2ban=1"}
+    assert rig.run() == 0 and "fail2ban" not in rig.active
+    assert ["systemctl", "start", "fail2ban"] not in rig.calls
+
+
+def test_a_failed_fail2ban_start_is_retried_and_the_reloads_stay_owed(rig: Rig) -> None:
+    ban = {"SKIW_SSH_POLICY": "fail2ban", "SKIW_SSH_ALLOW": ""}
+    rig.fail = "systemctl start fail2ban"
+    assert rig.run(**ban) == 1 and "fail2ban" not in rig.active
+    assert "etc/fail2ban/jail.d/skiw.local" in rig.read(apply.PENDING).split()
+    rig.fail = ""
+    assert rig.run(**ban) == 0 and "fail2ban" in rig.active
+    assert not (rig.root / apply.PENDING).exists()

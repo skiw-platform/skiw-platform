@@ -1,7 +1,7 @@
 # Host rebuild
 
 Building a staging or production VPS from nothing, or rebuilding one after loss (spec §8.4).
-Sections are added as M1 lands: host files (M1f-1a, below; users, packages and units M1f-1b), secrets (M1d),
+Sections are added as M1 lands: host files, users, packages and units (M1f-1a, M1f-1b), secrets (M1d),
 database roles (M1e), the hardening check (M1f-2);
 measured values in M1k. The operator is the owner (UNI-12); no agent holds a host credential.
 
@@ -13,8 +13,14 @@ installed) until these values are set: `SKIW_SSH_PORT` (not 22, 80, 443), `SKIW_
 `allowlist` with the operator's and the off-site host's CIDRs in `SKIW_SSH_ALLOW`, or `fail2ban`
 with it empty) and `SKIW_AUTO_REBOOT` (G15). Rates and journal cap are [A] values, measured in M1k.
 
+Before the first run, as root: `apt-get install nftables gnupg`, then fetch Docker's apt key to
+`/etc/apt/keyrings/docker.asc` (root, 0644):
+`curl -fsSL -o /etc/apt/keyrings/docker.asc https://download.docker.com/linux/ubuntu/gpg`.
+`apply` refuses (nothing changed) unless that file holds exactly one primary key with fingerprint
+`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, is root-owned and not a link.
+
 It renders the templates from the env file, checks the nftables, sshd and sudoers candidates with
-`nft -c`, `sshd -t`, `visudo -c` (install `nftables` first), then installs, root-owned, only the
+`nft -c`, `sshd -t`, `visudo -c`, then installs, root-owned, only the
 files that differ: configs under `/etc` (0644), `/etc/sudoers.d/skiw-ops` (0440), the env file as
 `/etc/skiw/host.env`, `bootstrap-secrets` and `bootstrap-db` in `/usr/local/sbin` (0755), and
 `skiw_host/`, `db/` and the templates in `/usr/local/lib/skiw/`. It prints what it changed; a
@@ -29,10 +35,20 @@ Exit 0 done, 1 failed (fix, run again), 2 refused.
 with `sha256sum` against `docs/DECISIONS.md` (2026-10-14, M1d-1); install as `/usr/local/bin/age`
 (root, 0755).
 
-**Staged to M1f-1b and M1k:** users `skiw-deploy` and `skiw-ops` (not in group `docker`), Docker
-from its signed apt repository at the pinned versions, units and reloads; until then nothing is
-reloaded. Never `systemctl reload nftables` while Docker runs (it flushes Docker's rules too). On
-an SSH port change keep one session open and test the new port from a second terminal first.
+**Then, on every run:** users `skiw-deploy` and `skiw-ops` exist (`skiw-ops` in `sudo`; set its
+password and SSH key by hand), and neither is in group `docker` (it is removed if found); Docker
+Engine and the Compose plugin are installed from Docker's signed repository at the versions in
+`apt/skiw-docker.pref`, with `nftables`, `unattended-upgrades` and, for `fail2ban`, `fail2ban`
+(only what is missing or at another version; the Docker packages alone may be moved to a lower
+version, with `--allow-downgrades`, so a host with a newer Docker returns to the reviewed pin); the
+units are enabled, and under `fail2ban` the service is started if it is not active; ssh moves from `ssh.socket`
+to `ssh.service` (on 24.04 the socket would keep listening on 22). A service restarts only when
+its file changed: `nft -f /etc/nftables.conf` (never `systemctl reload nftables`: it flushes
+Docker's rules too), ssh, docker (`live-restore` keeps containers running), journald, fail2ban.
+Reloads owed are written first to `/var/lib/skiw/apply.pending` and removed when all succeed, so
+after exit 1 run `apply` again and it redoes them. Under `allowlist`, a jail file left from
+`fail2ban` is removed (printed) and fail2ban restarted if it runs; the package and its Ubuntu
+default jail stay. On an SSH port change keep one session open and test the new port first.
 
 ## Secrets (`bootstrap-secrets`, spec §8.4 H4)
 
@@ -175,7 +191,9 @@ sudo infra/host/bootstrap-db apply --env-file <env file> --compose-file <compose
   sets each password. The SCRAM-SHA-256 verifier is computed in Python and sent on stdin: no
   password is in argv, in a file in the repo or in output. A second run changes no role.
 - Exit codes: 0 done, 1 a step failed, 2 refused (a password file is missing or malformed; nothing
-  reached the db).
+  reached the db), 3 done but its log line failed: do not repeat `prepare`/`apply` for that; fix
+  the log problem as for `bootstrap-secrets` exit 3 and note the run by hand. Each run writes one
+  value-free line to the journal (`journalctl -t bootstrap-db`) and `/var/log/skiw/deploy.log`.
 - Roles: `skiw_migrator` (owns the schema; `migrate` only), `skiw_app` (web and worker), `skiw_readonly`,
   `skiw_backup` (read only, 2 connections), and the NOLOGIN `skiw_tenant_guard`, `skiw_auth_lookup`.
 - `apply` signs in as `postgres` with a libpq password file: made inside the db container from

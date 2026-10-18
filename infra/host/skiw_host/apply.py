@@ -1,10 +1,11 @@
 """`apply --env-file <env>` (spec §8.4 H1, H2, H4, H7; runbook host-rebuild.md "Host").
 
-Installs this host's files from the repository. Every host value is checked and each rendered
-file that has a checker (nftables, sshd, sudoers) is checked as a scratch copy first: a refusal
-exits 2 with nothing installed. Then only the files that differ are installed, root-owned with
-fixed modes. A second run changes nothing. Exit 0 done, 1 failed, 2 refused.
-Users, packages, units and reloads are M1f-1b.
+Installs this host's files from the repository. Every host value, Docker's apt key and each
+rendered file that has a checker (nftables, sshd, sudoers) is checked first: a refusal exits 2 with
+nothing changed. Then only the files that differ are installed, root-owned with fixed modes; the
+users are made (never in group `docker`), the pinned packages installed, the units enabled and the
+services of changed files reloaded. Reloads still owed are kept in a root-owned pending file until
+they succeed, so a run that failed (exit 1) can simply be repeated. A second run changes nothing.
 """
 
 import argparse
@@ -18,7 +19,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from string import Template
 
-from skiw_host.bootstrap_db import Runner, run_command, settings
+from skiw_host.bootstrap_db import Failed, Runner, run_command, settings
 from skiw_host.bootstrap_secrets import Chown, Refused
 
 HOST = Path(__file__).resolve().parents[1]
@@ -36,6 +37,8 @@ TEMPLATES = {  # rendered from host config: source under infra/host -> destinati
     "docker/daemon.json": "etc/docker/daemon.json",
     "journald/skiw.conf": "etc/systemd/journald.conf.d/skiw.conf",
     "apt/52skiw-unattended": "etc/apt/apt.conf.d/52skiw-unattended",
+    "apt/docker.sources": "etc/apt/sources.list.d/docker.sources",
+    "apt/skiw-docker.pref": "etc/apt/preferences.d/skiw-docker",
 }
 FAIL2BAN = {"fail2ban/jail.local": "etc/fail2ban/jail.d/skiw.local"}  # G7 (b) only
 CHECKERS = {  # run on each candidate before anything is installed
@@ -43,6 +46,21 @@ CHECKERS = {  # run on each candidate before anything is installed
     "etc/ssh/sshd_config.d/00-skiw.conf": ("sshd", "-t", "-f"),
     "etc/sudoers.d/skiw-ops": ("visudo", "-c", "-f"),
 }
+# Run once the file changed (or was removed). nftables: `nft -f` replaces only table inet skiw; the
+# unit's reload and stop flush the whole ruleset, Docker's rules too.
+RELOADS = {
+    "etc/nftables.conf": ("nft", "-f", "/etc/nftables.conf"),
+    "etc/ssh/sshd_config.d/00-skiw.conf": ("systemctl", "restart", "ssh.service"),
+    "etc/docker/daemon.json": ("systemctl", "restart", "docker"),
+    "etc/systemd/journald.conf.d/skiw.conf": ("systemctl", "restart", "systemd-journald"),
+    "etc/fail2ban/jail.d/skiw.local": ("systemctl", "try-restart", "fail2ban"),
+}
+PENDING = "var/lib/skiw/apply.pending"  # destinations whose reload is still owed
+DOCKER_KEY = "etc/apt/keyrings/docker.asc"  # placed by the operator (runbook)
+DOCKER_FINGERPRINT = "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"  # "Docker Release (CE deb)"
+USERS = {"skiw-deploy": (), "skiw-ops": ("sudo",)}  # ops: the operator, password sudo (H2)
+PACKAGES = ("nftables", "unattended-upgrades")
+UNITS = ("nftables", "unattended-upgrades", "docker", "ssh.service")
 PORT = re.compile(r"[1-9][0-9]{0,4}")
 RATE = re.compile(r"[1-9][0-9]*/(second|minute)")
 CHECKS = {
@@ -105,10 +123,10 @@ def mode(dest: str) -> int:
     return SUDOERS if dest.startswith("etc/sudoers.d/") else CONFIG
 
 
-def untrusted(root: Path, items: list[Item], owner: Owner) -> None:
+def untrusted(root: Path, dests: list[str], owner: Owner) -> None:
     """Refuse a link, a directory not owned by root:root or one that group or others can write, on
     the way to any destination: they could swap root-executed files later."""
-    for dest, _, _ in items:
+    for dest in dests:
         path = root
         for part in Path(dest).parent.parts:
             path /= part
@@ -119,6 +137,26 @@ def untrusted(root: Path, items: list[Item], owner: Owner) -> None:
                     f"/{path.relative_to(root)} is a link, not owned by root:root or writable "
                     "by group or others"
                 )
+
+
+def trusted_file(root: Path, dest: str, owner: Owner, required: bool) -> None:
+    path = root / dest
+    if not path.exists() and not path.is_symlink():
+        if required:
+            raise Refused(f"/{dest} is missing: see the runbook")
+        return
+    if path.is_symlink() or owner(path) != ROOT or path.stat().st_mode & OTHERS_WRITE:
+        raise Refused(f"/{dest} is a link, not owned by root:root or writable by group or others")
+
+
+def docker_key(root: Path, run: Runner, owner: Owner) -> None:
+    """Exactly one primary key, Docker's: apt trusts every key in a Signed-By file."""
+    trusted_file(root, DOCKER_KEY, owner, required=True)
+    shown = run(["gpg", "--show-keys", "--with-colons", str(root / DOCKER_KEY)], b"")
+    lines = shown.stdout.decode("utf-8", "replace").splitlines()
+    primary = [i for i, line in enumerate(lines) if line.startswith("pub:")]
+    if len(primary) != 1 or lines[primary[0] + 1 :][:1] != [f"fpr:::::::::{DOCKER_FINGERPRINT}:"]:
+        raise Refused(f"/{DOCKER_KEY} is not exactly Docker's release key {DOCKER_FINGERPRINT}")
 
 
 def precheck(items: list[Item], run: Runner, chown: Chown) -> None:
@@ -150,21 +188,99 @@ def make_directories(root: Path, relative: Path, chown: Chown) -> None:
         chown(str(path), *ROOT)
 
 
-def install(root: Path, items: list[Item], chown: Chown, owner: Owner) -> list[str]:
-    changed = []
+def stale(root: Path, items: list[Item], owner: Owner) -> list[Item]:
+    """The items whose file differs in content, mode, owner or group, or is a link."""
+    todo = []
     for dest_name, data, file_mode in items:
         dest = root / dest_name
         same = dest.is_file() and not dest.is_symlink() and dest.read_bytes() == data
-        if same and stat.S_IMODE(dest.stat().st_mode) == file_mode and owner(dest) == ROOT:
-            continue
+        if not (same and stat.S_IMODE(dest.stat().st_mode) == file_mode and owner(dest) == ROOT):
+            todo.append((dest_name, data, file_mode))
+    return todo
+
+
+def install(root: Path, items: list[Item], chown: Chown) -> None:
+    for dest_name, data, file_mode in items:
+        dest = root / dest_name
         make_directories(root, Path(dest_name).parent, chown)
         tmp = dest.with_name(f".{dest.name}.skiw-new")  # a dot: sudo ignores it in sudoers.d
         tmp.write_bytes(data)
         os.chmod(tmp, file_mode)
         chown(str(tmp), *ROOT)
         os.replace(tmp, dest)
-        changed.append(dest_name)
-    return changed
+
+
+def ok(run: Runner, argv: list[str]) -> str:
+    done = run(argv, b"")
+    if done.returncode != 0:
+        detail = done.stderr.decode("utf-8", "replace")[-500:]
+        raise Failed(f"`{' '.join(argv[:4])}` exited {done.returncode}: {detail}")
+    return done.stdout.decode("utf-8", "replace")
+
+
+def pins() -> list[str]:
+    """`package=version` for each package in apt/skiw-docker.pref, the one place they are set."""
+    text = (HOST / "apt/skiw-docker.pref").read_text(encoding="utf-8")
+    stanzas = [
+        dict(line.split(": ", 1) for line in s.splitlines() if not line.startswith("#"))
+        for s in text.split("\n\n")
+    ]
+    return [
+        f"{p}={s['Pin'].removeprefix('version ')}" for s in stanzas for p in s["Package"].split()
+    ]
+
+
+def converge(run: Runner, ban: bool) -> None:
+    """Users, packages and units; each step checks first, so a repeat changes nothing."""
+    for user, groups in USERS.items():
+        if run(["id", "-u", user], b"").returncode != 0:
+            ok(run, ["useradd", "--create-home", "--shell", "/bin/bash", user])
+        member = ok(run, ["id", "-nG", user]).split()
+        if missing := [g for g in groups if g not in member]:
+            ok(run, ["usermod", "--append", "--groups", ",".join(missing), user])
+        if "docker" in member:  # root-equivalent (H2)
+            ok(run, ["gpasswd", "--delete", user, "docker"])
+    fail2ban = ["fail2ban"] if ban else []
+    wanted = [*pins(), *PACKAGES, *fail2ban]
+    names = [w.partition("=")[0] for w in wanted]
+    query = run(["dpkg-query", "-W", "-f=${db:Status-Abbrev}${Package}=${Version}\\n", *names], b"")
+    have = {line[3:] for line in query.stdout.decode().splitlines() if line.startswith("ii ")}
+    have |= {h.partition("=")[0] for h in have}  # an unpinned name matches any version
+    if missing_packages := [w for w in wanted if w not in have]:
+        ok(run, ["apt-get", "update"])
+        pinned = [
+            w for w in missing_packages if "=" in w
+        ]  # only these may go back to a lower version
+        for group, flags in (
+            (pinned, ["--allow-downgrades"]),
+            ([w for w in missing_packages if w not in pinned], []),
+        ):
+            if group:
+                install_argv = [
+                    "apt-get",
+                    "install",
+                    "-y",
+                    "--no-install-recommends",
+                    *flags,
+                    *group,
+                ]
+                ok(run, ["env", "DEBIAN_FRONTEND=noninteractive", *install_argv])
+    ok(run, ["systemctl", "enable", *UNITS, *fail2ban])
+    if ban and run(["systemctl", "is-active", "--quiet", "fail2ban"], b"").returncode != 0:
+        ok(
+            run, ["systemctl", "start", "fail2ban"]
+        )  # enable and try-restart leave a stopped unit stopped
+    ok(run, ["systemctl", "disable", "--now", "ssh.socket"])  # 24.04: sshd then binds Port itself
+    ok(run, ["systemctl", "start", "ssh.service"])
+
+
+def write_pending(root: Path, owed: list[str], chown: Chown) -> None:
+    make_directories(root, Path(PENDING).parent, chown)
+    tmp = root / f"{PENDING}.skiw-new"
+    tmp.write_text("".join(f"{dest}\n" for dest in owed), encoding="utf-8")
+    os.chmod(tmp, CONFIG)
+    chown(str(tmp), *ROOT)
+    os.replace(tmp, root / PENDING)
 
 
 def main(
@@ -177,17 +293,40 @@ def main(
     parser.add_argument("--env-file", type=Path, required=True, help="host env/<env>.env")
     parser.add_argument("--root", type=Path, default=Path("/"), help=argparse.SUPPRESS)  # tests
     args = parser.parse_args(argv)
+    root = args.root
     try:
         values, ban = host_values(args.env_file)
         items = plan(args.env_file, values, ban)
-        untrusted(args.root, items, owner)
+        jail = [*FAIL2BAN.values()]
+        untrusted(root, [*(dest for dest, _, _ in items), DOCKER_KEY, PENDING, *jail], owner)
+        trusted_file(root, PENDING, owner, required=False)
+        docker_key(root, run, owner)
         precheck(items, run, chown)
-        changed = install(args.root, items, chown, owner)
+        todo = stale(root, items, owner)
+        retired = [d for d in jail if not ban and ((root / d).exists() or (root / d).is_symlink())]
+        before = (root / PENDING).read_text("utf-8").split() if (root / PENDING).exists() else []
+        changed = [dest for dest, _, _ in todo]
+        owed = [d for d in dict.fromkeys([*before, *changed, *retired]) if d in RELOADS]
+        if owed:  # first, so a run that stops below still owes these reloads next time
+            write_pending(root, owed, chown)
+        install(root, todo, chown)
+        for dest in retired:  # allowlist now: the fail2ban jail must not stay enabled
+            (root / dest).unlink()
+        converge(run, ban)
+        for command in dict.fromkeys(RELOADS[dest] for dest in owed):
+            ok(run, list(command))
+        (root / PENDING).unlink(missing_ok=True)
     except Refused as exc:
         print(f"apply: refused, nothing installed: {exc}", file=sys.stderr)
         return 2
-    except OSError as exc:
-        print(f"apply: failed: {exc.strerror} {exc.filename}", file=sys.stderr)
+    except Failed as exc:
+        print(f"apply: failed: {exc}; fix it and run apply again", file=sys.stderr)
         return 1
-    print(f"apply: done; {len(changed)} files changed: {' '.join(changed)}", file=sys.stderr)
+    except OSError as exc:
+        print(f"apply: failed: {exc.strerror} {exc.filename}; run apply again", file=sys.stderr)
+        return 1
+    removed = "".join(f"; removed {dest} (policy allowlist)" for dest in retired)
+    print(
+        f"apply: done; {len(changed)} files changed: {' '.join(changed)}{removed}", file=sys.stderr
+    )
     return 0
