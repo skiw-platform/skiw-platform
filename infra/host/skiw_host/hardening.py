@@ -25,6 +25,8 @@ from skiw_host.bootstrap_db import Runner, run_command
 from skiw_host.bootstrap_secrets import Refused
 
 APT_LINE = re.compile(r'(\S+) "(.*)";')
+ORIGINS = ("Unattended-Upgrade::Allowed-Origins", "Unattended-Upgrade::Origins-Pattern")
+SSHD_DROP_INS = "etc/ssh/sshd_config.d"
 Owner = Callable[[Path, os.stat_result], tuple[int, int]]
 
 
@@ -87,11 +89,34 @@ def sshd(host: Host) -> list[str]:
         key, _, value = line.partition(" ")
         seen.setdefault(key.lower(), []).append(value)
     want = {k.lower(): [v] for k, v in settings_lines(host.render("sshd/00-skiw.conf"))}
-    return [
+    problems = [
         f"{k} is {' '.join(seen.get(k, ['unset']))}, want {v[0]}"
         for k, v in want.items()
         if seen.get(k) != v
     ]
+    return problems + sshd_matches(host, set(want))
+
+
+def sshd_matches(host: Host, protected: set[str]) -> list[str]:
+    """`sshd -T` shows only the global values, so a later `Match` block could weaken a checked key
+    unseen. Closed policy: no Match block may set one, and no Include other than the drop-in
+    directory is followed (so none can hide one)."""
+    names = sorted(n for n in os.listdir(host.root / SSHD_DROP_INS) if n.endswith(".conf"))
+    problems = []
+    for rel in ["etc/ssh/sshd_config", *(f"{SSHD_DROP_INS}/{n}" for n in names)]:
+        in_match = False
+        for raw in host.read(rel).decode("utf-8").splitlines():
+            words = re.split(r"[\s=]+", raw.strip(), maxsplit=1)
+            key, arg = words[0].lower(), (words[1].strip() if len(words) > 1 else "")
+            if not key or key.startswith("#"):
+                continue
+            if key == "include" and arg != f"/{SSHD_DROP_INS}/*.conf":
+                problems.append(f"/{rel} includes {arg}, which is not checked")
+            elif key == "match":
+                in_match = True
+            elif in_match and key in protected:
+                problems.append(f"/{rel} sets {key} inside a Match block")
+    return problems
 
 
 def settings_lines(text: str) -> list[tuple[str, str]]:
@@ -133,6 +158,8 @@ def unattended(host: Host) -> list[str]:
     for line in host.tool(["apt-config", "dump"]).splitlines():
         if match := APT_LINE.fullmatch(line):
             dump.setdefault(match[1], []).append(match[2])
+        elif line.startswith(ORIGINS):
+            raise Bad("cannot read an origins line of apt-config dump")
     want = {
         "APT::Periodic::Update-Package-Lists": ["1"],
         "APT::Periodic::Unattended-Upgrade": ["1"],
@@ -142,20 +169,49 @@ def unattended(host: Host) -> list[str]:
         "Unattended-Upgrade::Automatic-Reboot": [host.values["auto_reboot"]],
     }
     problems = [f"{k} is {dump.get(k)}, want {v}" for k, v in want.items() if dump.get(k) != v]
+    for key, values in dump.items():  # the whole subtrees: named children count as origins too
+        if key.startswith(ORIGINS) and key not in [*want, *ORIGINS]:
+            problems.append(f"{key} is set (every origin must be the security one)")
+        if key in ORIGINS and values != [""]:
+            problems.append(f"{key} has the value {values}")
     return problems + ([] if enabled == "enabled" else [f"unattended-upgrades is {enabled}"])
 
 
 def docker_daemon(host: Host) -> list[str]:
     info = json.loads(host.tool(["docker", "info", "--format", "{{json .}}"]))
     config = json.loads(host.read("etc/docker/daemon.json"))
+    live_options = info["SecurityOptions"]  # what the running daemon applies, not the file
     tcp = [h for h in config.get("hosts", []) if not str(h).startswith(("unix://", "fd://"))]
     problems = {
         "live-restore is off": info["LiveRestoreEnabled"] is not True,
         f"log driver is {info['LoggingDriver']}": info["LoggingDriver"] != "journald",
         "no-new-privileges is not set": config.get("no-new-privileges") is not True,
+        "the running daemon lacks no-new-privileges": "name=no-new-privileges" not in live_options,
         f"daemon hosts {tcp}": bool(tcp),
     }
-    return [problem for problem, failed in problems.items() if failed]
+    return [problem for problem, failed in problems.items() if failed] + docker_start(host)
+
+
+def docker_start(host: Host) -> list[str]:
+    """How the daemon is started (systemd unit and drop-ins): only unix or fd hosts, and no other
+    config file, whatever daemon.json says."""
+    shown = host.tool(["systemctl", "show", "docker", "--property=ExecStart", "--value"])
+    if not (found := re.search(r"argv\[\]=([^;]*);", shown)):
+        raise Bad("cannot read the ExecStart of the docker unit")
+    argv, problems, hosts = found[1].split(), [], []
+    for i, arg in enumerate(argv):
+        if arg in ("-H", "--host") and i + 1 < len(argv):
+            hosts.append(argv[i + 1])
+        elif arg.startswith(("--host=", "-H=")):
+            hosts.append(arg.partition("=")[2])
+        elif arg.startswith("-H") and len(arg) > 2:
+            hosts.append(arg[2:])
+        if arg == "--config-file" or arg.startswith("--config-file="):
+            problems.append("dockerd is started with another --config-file")
+    problems += [
+        f"dockerd is started with host {h}" for h in hosts if not h.startswith(("fd://", "unix://"))
+    ]
+    return problems
 
 
 def sockets(host: Host) -> list[str]:
@@ -167,6 +223,9 @@ def sockets(host: Host) -> list[str]:
         name = address.strip("[]").partition("%")[0]
         if fields[0] != "LISTEN" or not port.isdigit():
             raise Bad(f"cannot read `ss` line: {line.strip()}")
+        if '(("dockerd",' in line:  # the Docker API belongs on its unix socket, loopback or not
+            problems.append(f"dockerd listens on {fields[3]}")
+            continue
         public = name == "*" or not ipaddress.ip_address(name).is_loopback  # "*": any address
         if public and port not in allowed:
             problems.append(f"{fields[3]} {' '.join(fields[5:])}".strip())

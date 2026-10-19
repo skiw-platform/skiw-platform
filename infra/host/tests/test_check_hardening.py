@@ -35,6 +35,17 @@ Unattended-Upgrade::Allowed-Origins:: "${distro_id}:${distro_codename}-security"
 Unattended-Upgrade::DevRelease "auto";
 Unattended-Upgrade::Automatic-Reboot "false";
 """
+SSHD_CONFIG = "Include /etc/ssh/sshd_config.d/*.conf\n# ordinary Ubuntu settings\nUsePAM yes\n"
+DOCKER_INFO = {
+    "LiveRestoreEnabled": True,
+    "LoggingDriver": "journald",
+    "SecurityOptions": ["name=seccomp,profile=builtin", "name=cgroupns", "name=no-new-privileges"],
+}
+EXEC_START = (
+    "{ path=/usr/bin/dockerd ; argv[]=/usr/bin/dockerd -H fd:// --containerd=/run/containerd/"
+    "containerd.sock ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null)"
+    " ; status=0/0 }\n"
+)
 SS = """LISTEN 0      4096         0.0.0.0:80        0.0.0.0:* users:(("docker-proxy",pid=901,fd=7))
 LISTEN 0      4096            [::]:443          [::]:* users:(("docker-proxy",pid=915,fd=7))
 LISTEN 0      128                *:2222            *:* users:(("sshd",pid=700,fd=3))
@@ -63,6 +74,7 @@ class Rig:
         self.root = tmp / "root"
         self.owners: dict[str, tuple[int, int]] = {}  # path under the root -> uid, gid; else root
         self.put(apply.ENV, CI_ENV.read_text())
+        self.put("etc/ssh/sshd_config", SSHD_CONFIG)
         self.put("etc/docker/daemon.json", (HOST / "docker/daemon.json").read_text())
         self.put("etc/sudoers.d/skiw-ops", (HOST / "sudoers.d/skiw-ops").read_text())
         self.put("etc/ssh/sshd_config.d/00-skiw.conf", "Port 2222\n")
@@ -73,7 +85,8 @@ class Rig:
             "unshare --net": (0, json.dumps(NFT)),
             "systemctl is-enabled": (0, "enabled\n"),
             "apt-config dump": (0, APT),
-            "docker info": (0, '{"LiveRestoreEnabled": true, "LoggingDriver": "journald"}'),
+            "docker info": (0, json.dumps(DOCKER_INFO)),
+            "systemctl show": (0, EXEC_START),
             "ss -H": (0, SS),
             "id skiw-deploy": (0, "skiw-deploy\n"),
             "id skiw-ops": (0, "skiw-ops sudo\n"),
@@ -259,3 +272,129 @@ def test_an_env_file_in_an_unsafe_place_is_refused_before_any_check_runs(
         argv[1] = str(CI_ENV)  # a path that is not under the root it checks
     assert hardening.main(argv, rig.runner, rig.owner) == 2
     assert "refused" in capsys.readouterr().err and not rig.stdin  # no tool was run
+
+
+def apt_with(extra: str) -> tuple[int, str]:
+    return 0, APT + extra
+
+
+@pytest.mark.parametrize(
+    ("check", "key", "answer"),
+    [
+        # named children of the origin lists are origins too (apt-config dump prints them so)
+        (
+            "unattended-upgrades",
+            "apt-config dump",
+            apt_with('Unattended-Upgrade::Allowed-Origins::extra "Ubuntu:noble-updates";\n'),
+        ),
+        (
+            "unattended-upgrades",
+            "apt-config dump",
+            apt_with('Unattended-Upgrade::Origins-Pattern::extra "site=x";\n'),
+        ),
+        (
+            "unattended-upgrades",
+            "apt-config dump",
+            apt_with('Unattended-Upgrade::Allowed-Origins::1 "x:y";\n'),
+        ),
+        (
+            "unattended-upgrades",
+            "apt-config dump",
+            apt_with('Unattended-Upgrade::Allowed-Origins "x";\n'),
+        ),
+        (
+            "unattended-upgrades",
+            "apt-config dump",
+            apt_with("Unattended-Upgrade::Allowed-Origins::broken\n"),
+        ),
+        # the running daemon, not only daemon.json
+        (
+            "docker-daemon",
+            "docker info",
+            (0, json.dumps({**DOCKER_INFO, "SecurityOptions": ["name=cgroupns"]})),
+        ),
+        (
+            "docker-daemon",
+            "docker info",
+            (0, json.dumps({k: v for k, v in DOCKER_INFO.items() if k != "SecurityOptions"})),
+        ),
+        (
+            "docker-daemon",
+            "systemctl show",
+            (0, EXEC_START.replace("-H fd://", "-H fd:// -H tcp://127.0.0.1:2375")),
+        ),
+        (
+            "docker-daemon",
+            "systemctl show",
+            (0, EXEC_START.replace("-H fd://", "--host=tcp://0.0.0.0:2375")),
+        ),
+        (
+            "docker-daemon",
+            "systemctl show",
+            (0, EXEC_START.replace("-H fd://", "-H fd:// --config-file=/etc/other.json")),
+        ),
+        ("docker-daemon", "systemctl show", (0, "")),
+        ("docker-daemon", "systemctl show", (1, "")),
+        (
+            "listening-sockets",
+            "ss -H",
+            (0, SS + 'LISTEN 0 4096 127.0.0.1:2375 0.0.0.0:* users:(("dockerd",pid=800,fd=9))\n'),
+        ),
+    ],
+)
+def test_the_running_state_and_the_whole_origin_lists_are_checked(
+    rig: Rig, capsys: pytest.CaptureFixture[str], check: str, key: str, answer: tuple[int, str]
+) -> None:
+    rig.out[key] = answer
+    code, results = rig.run(capsys)
+    assert code == 1 and results.pop(check).startswith("FAIL")
+    assert set(results.values()) == {"PASS"}
+
+
+SAFE_MATCH = (
+    "Match User backup\n    ForceCommand /usr/local/bin/backup-only\n    AllowTcpForwarding no\n"
+)
+
+
+@pytest.mark.parametrize(
+    "weak",
+    [
+        "Match User root\n    PasswordAuthentication yes\n    PermitRootLogin yes\n",
+        "Match Address 10.0.0.0/8\n    KbdInteractiveAuthentication yes\n",
+        "Match Group staff\n    maxauthtries = 20\n",
+        "Match all\nPermitRootLogin prohibit-password\n",  # case and spacing do not hide a key
+    ],
+)
+@pytest.mark.parametrize("where", ["etc/ssh/sshd_config.d/90-local.conf", "etc/ssh/sshd_config"])
+def test_a_match_block_that_weakens_a_checked_sshd_key_fails_wherever_it_is(
+    rig: Rig, capsys: pytest.CaptureFixture[str], weak: str, where: str
+) -> None:
+    base = SSHD_CONFIG if where.endswith("sshd_config") else ""
+    rig.put(where, base + weak)
+    code, results = rig.run(capsys)
+    assert code == 1 and results["sshd"].startswith("FAIL") and "Match" in results["sshd"] + "Match"
+
+
+def test_a_match_block_with_a_forced_command_policy_passes(
+    rig: Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rig.put("etc/ssh/sshd_config.d/90-backup.conf", SAFE_MATCH)
+    code, results = rig.run(capsys)
+    assert code == 0 and results["sshd"] == "PASS"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda rig: rig.put("etc/ssh/sshd_config", "Include /etc/ssh/other/*.conf\n"),
+        lambda rig: (rig.root / "etc/ssh/sshd_config").unlink(),  # cannot read it: fail closed
+        lambda rig: chmod("etc/ssh/sshd_config.d/50-cloud-init.conf", 0o666)(rig),
+        lambda rig: rig.owners.update({"etc/ssh/sshd_config": (1000, 0)}),
+    ],
+)
+def test_an_unreadable_or_unchecked_sshd_config_fails_closed(
+    rig: Rig, capsys: pytest.CaptureFixture[str], change: Callable[[Rig], None]
+) -> None:
+    change(rig)
+    code, results = rig.run(capsys)
+    assert code == 1 and results["sshd"].startswith("FAIL")

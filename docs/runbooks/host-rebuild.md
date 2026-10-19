@@ -63,11 +63,11 @@ Files it reads must be regular files, not links, root-owned and not writable by 
 
 | Check | Passes when |
 |---|---|
-| `sshd` | `sshd -T` gives exactly the values of `00-skiw.conf` (one `port`, the host's), so a competing file is caught |
+| `sshd` | `sshd -T` gives exactly the values of `00-skiw.conf` (one `port`, the host's), so a competing file is caught; and no `Match` block in `sshd_config` or its drop-ins sets a checked key (`sshd -T` shows only the global values, so a `Match` block would hide a weaker setting for one user, group or address), and no `Include` other than the drop-in directory (a `Match` block for forced commands is fine) |
 | `nftables` | the live `table inet skiw` equals the rendered `nftables.conf` as nft prints it (handles and set entries ignored) |
-| `unattended-upgrades` | the unit is enabled; `apt-config dump` has the daily periodic runs, only the security origin, the host's reboot value, and `APT::Periodic::Enable` not `0` |
-| `docker-daemon` | `docker info`: live-restore on, journald logs; `/etc/docker/daemon.json`: no-new-privileges, no TCP `hosts` |
-| `listening-sockets` | `ss -tlnp` shows nothing on a non-loopback address except 80, 443 and the SSH port |
+| `unattended-upgrades` | the unit is enabled; `apt-config dump` has the daily periodic runs, only the security origin, the host's reboot value, and `APT::Periodic::Enable` not `0`; every key under `Allowed-Origins` and `Origins-Pattern` counts, so a named extra entry fails |
+| `docker-daemon` | the running daemon (`docker info`): live-restore on, journald logs, `no-new-privileges` in its security options; `/etc/docker/daemon.json`: no-new-privileges, no TCP `hosts`; the docker unit's `ExecStart` (including drop-ins): only `fd://` or `unix://` hosts and no other `--config-file` |
+| `listening-sockets` | `ss -tlnp` shows nothing on a non-loopback address except 80, 443 and the SSH port, and `dockerd` listens on no TCP address at all, loopback included |
 | `docker-group` | neither `skiw-deploy` nor `skiw-ops` is in group `docker` |
 | `stale-files` | no fail2ban jail under `allowlist`, no other `/etc/sudoers.d/skiw*`, no sshd drop-in sorting before `00-skiw.conf` that sets a checked key, no `/var/lib/skiw/apply.pending` (run `apply`) |
 
