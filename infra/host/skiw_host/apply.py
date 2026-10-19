@@ -80,9 +80,9 @@ def lstat_owner(path: Path) -> tuple[int, int]:
     return info.st_uid, info.st_gid
 
 
-def host_values(env_file: Path) -> tuple[dict[str, str], bool]:
+def host_values(env_file: Path, text: str | None = None) -> tuple[dict[str, str], bool]:
     """Template values and whether fail2ban is used (G7 (b)); an empty or bad value refuses."""
-    values = settings(env_file)
+    values = settings(env_file, text)
     port = values.get("SKIW_SSH_PORT", "")
     if not PORT.fullmatch(port) or int(port) > 65535 or port in ("22", "80", "443"):
         raise Refused(f"SKIW_SSH_PORT in {env_file} is empty, 22, 80, 443 or not a port (G7)")
@@ -111,7 +111,7 @@ def plan(env_file: Path, values: dict[str, str], ban: bool) -> list[Item]:
         for src, dest in (TEMPLATES | (FAIL2BAN if ban else {})).items()
     ]
     items.append((ENV, env_file.read_bytes(), CONFIG))
-    for name in ("bootstrap-secrets", "bootstrap-db"):
+    for name in ("bootstrap-secrets", "bootstrap-db", "check-hardening"):
         items.append((f"usr/local/sbin/{name}", (HOST / name).read_bytes(), PROGRAM))
     library = [*(HOST / "skiw_host").glob("*.py"), *(HOST / "db").iterdir()]
     for path in sorted([*library, *(HOST / src for src in TEMPLATES | FAIL2BAN)]):

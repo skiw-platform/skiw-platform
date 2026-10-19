@@ -2,7 +2,7 @@
 
 Building a staging or production VPS from nothing, or rebuilding one after loss (spec §8.4).
 Sections are added as M1 lands: host files, users, packages and units (M1f-1a, M1f-1b), secrets (M1d),
-database roles (M1e), the hardening check (M1f-2);
+database roles (M1e), the hardening check (M1f-2a; secret and database checks M1f-2b);
 measured values in M1k. The operator is the owner (UNI-12); no agent holds a host credential.
 
 ## Host (`apply`, spec §8.4 H1, H2, H7)
@@ -49,6 +49,31 @@ Reloads owed are written first to `/var/lib/skiw/apply.pending` and removed when
 after exit 1 run `apply` again and it redoes them. Under `allowlist`, a jail file left from
 `fail2ban` is removed (printed) and fail2ban restarted if it runs; the package and its Ubuntu
 default jail stay. On an SSH port change keep one session open and test the new port first.
+
+### Checking the host: `check-hardening` (spec §8.4 H2)
+
+Run after every `apply` and after any host change, as root: `sudo check-hardening` (installed by
+`apply` in `/usr/local/sbin`; it reads `/etc/skiw/host.env`, or `--env-file <path>`). It is
+read-only: it changes nothing, deletes nothing, and loads the rendered nftables file only in a
+throwaway network namespace (`unshare --net`). It prints one line per check, `PASS <name>` or
+`FAIL <name>: <what>`, with non-secret values only. Exit 0 all passed, 1 a check failed, 2 refused
+(not root, or the env file is invalid, a link, not root-owned or writable by others). A check whose
+tool is missing, exits non-zero or prints what it cannot read fails; it never passes by default.
+Files it reads must be regular files, not links, root-owned and not writable by group or others.
+
+| Check | Passes when |
+|---|---|
+| `sshd` | `sshd -T` gives exactly the values of `00-skiw.conf` (one `port`, the host's), so a competing file is caught |
+| `nftables` | the live `table inet skiw` equals the rendered `nftables.conf` as nft prints it (handles and set entries ignored) |
+| `unattended-upgrades` | the unit is enabled; `apt-config dump` has the daily periodic runs, only the security origin, the host's reboot value, and `APT::Periodic::Enable` not `0` |
+| `docker-daemon` | `docker info`: live-restore on, journald logs; `/etc/docker/daemon.json`: no-new-privileges, no TCP `hosts` |
+| `listening-sockets` | `ss -tlnp` shows nothing on a non-loopback address except 80, 443 and the SSH port |
+| `docker-group` | neither `skiw-deploy` nor `skiw-ops` is in group `docker` |
+| `stale-files` | no fail2ban jail under `allowlist`, no other `/etc/sudoers.d/skiw*`, no sshd drop-in sorting before `00-skiw.conf` that sets a checked key, no `/var/lib/skiw/apply.pending` (run `apply`) |
+
+On a FAIL, fix the cause (usually: run `apply` again) and rerun the check. Coming in M1f-2b: the
+secret store owners and modes, no secret value in any container environment, the database role set
+and `pg_hba.conf` against the env file. The health timer runs it monthly from M1j.
 
 ## Secrets (`bootstrap-secrets`, spec §8.4 H4)
 
