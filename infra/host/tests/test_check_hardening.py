@@ -58,14 +58,10 @@ LISTEN 0      128            [::1]:6000         [::]:* users:(("python3",pid=372
 """
 
 
-ROLES = """role|skiw_app|t|f|f|f|f|f|-1|
-role|skiw_auth_lookup|f|f|t|f|f|f|-1|
-role|skiw_backup|t|f|t|f|f|f|2|default_transaction_read_only=on
-role|skiw_migrator|t|f|f|f|f|f|-1|
-role|skiw_readonly|t|f|f|f|f|f|-1|
-role|skiw_tenant_guard|f|f|f|f|f|f|-1|
-member|skiw_backup|pg_read_all_data
-"""  # psql -A -t output of the query against a db set up by roles.sql (Postgres 17.11)
+# psql -A -t output of ROLES_QUERY on Postgres 17.11 after roles.sql (captured from the pinned
+# image): the predefined pg_* roles, postgres, the six roles, their setting and memberships.
+ROLES = (HOST / "tests/fixtures/roles-pg17.txt").read_text()
+WEB, DB = "1" * 64, "2" * 64  # `docker ps --no-trunc` ids
 COMPOSE = "srv/skiw/compose.yml"
 
 
@@ -115,7 +111,7 @@ class Rig:
             "ss -H": (0, SS),
             "id skiw-deploy": (0, "skiw-deploy\n"),
             "id skiw-ops": (0, "skiw-ops sudo\n"),
-            "docker ps": (0, "a1\nb2\n"),
+            "docker ps": (0, f"{WEB}\n{DB}\n"),
             "docker inspect": (0, self.inspect({"PATH": "/usr/bin", "SKIW_HOSTNAME": "skiw.test"})),
             "psql": (0, ROLES),
         }
@@ -130,8 +126,12 @@ class Rig:
 
     @staticmethod
     def inspect(env: dict[str, str]) -> str:
-        web = {"Name": "/skiw-web-1", "Config": {"Env": [f"{k}={v}" for k, v in env.items()]}}
-        return json.dumps([web, {"Name": "/skiw-db-1", "Config": {"Env": None}}])
+        web = {
+            "Id": WEB,
+            "Name": "/skiw-web-1",
+            "Config": {"Env": [f"{k}={v}" for k, v in env.items()]},
+        }
+        return json.dumps([web, {"Id": DB, "Name": "/skiw-db-1", "Config": {"Env": None}}])
 
     def owner(self, path: Path, info: os.stat_result) -> tuple[int, int]:
         inside = path.is_relative_to(self.root)
@@ -516,8 +516,8 @@ def test_each_data_check_fails_on_a_bad_file(
         ("container-env", "docker ps", (127, "")),  # no docker CLI
         ("role-set", "psql", (0, ROLES.replace("skiw_app|t|f|f", "skiw_app|t|f|t"))),
         ("role-set", "psql", (0, ROLES + "member|skiw_app|pg_read_all_data\n")),
-        ("role-set", "psql", (0, ROLES + "role|skiw_extra|t|f|f|f|f|f|-1|\n")),
-        ("role-set", "psql", (0, ROLES.replace("|2|default", "|-1|default"))),
+        ("role-set", "psql", (0, ROLES + "role|16400|skiw_extra|t|f|f|f|f|f|-1\n")),
+        ("role-set", "psql", (0, ROLES.replace("f|f|f|2\n", "f|f|f|-1\n"))),
         ("role-set", "psql", (0, "")),
         ("role-set", "psql", (2, "")),
     ],
@@ -561,4 +561,138 @@ def test_role_set_fails_without_a_compose_file_under_the_root(
 
 
 def test_expected_roles_are_read_from_roles_sql() -> None:
-    assert hardening.expected_roles() == set(ROLES.splitlines())
+    roles, settings, members, bad = hardening.parse_roles(ROLES)
+    want, want_settings, want_members = hardening.expected_roles()
+    assert {name: roles[name][1] for name in want} == want and len(want) == 6 and bad == 0
+    assert want_settings == settings and want_members < members  # plus pg_monitor's own grants
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        "role|16400|review_unexpected|t|t|f|f|f|f|-1\n",  # any prefix, LOGIN SUPERUSER
+        "role|16401|reports|f|f|f|f|f|f|-1\n",  # NOLOGIN too
+        "role|16402|pg_fake|f|f|f|f|f|f|-1\n",  # pg_ but not one of initdb's
+        "member|skiw_app|pg_write_all_data\n",
+        "member|postgres|skiw_app\n",
+        "member|skiw_app|skiw_migrator\n",
+        "setting|skiw_app|16384|search_path=other\n",  # per database too
+    ],
+)
+def test_the_whole_role_inventory_is_checked(
+    rig: Rig, capsys: pytest.CaptureFixture[str], rows: str
+) -> None:
+    rig.out["psql"] = (0, ROLES + rows)
+    code, results = rig.run(capsys)
+    assert code == 1 and results.pop("role-set").startswith("FAIL")
+    assert set(results.values()) == {"PASS"}
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("role|16385|skiw_app|t|f", "role|16385|skiw_app|t|t"),  # an app role made superuser
+        ("role|10|postgres|t|t", "role|10|postgres|t|f"),
+        ("role|4200|pg_signal_backend|f", "role|4200|pg_signal_backend|t"),
+        ("default_transaction_read_only=on", "default_transaction_read_only=off"),
+        ("setting|skiw_backup|0|default_transaction_read_only=on\n", ""),
+    ],
+)
+def test_privilege_and_setting_drift_fails(
+    rig: Rig, capsys: pytest.CaptureFixture[str], old: str, new: str
+) -> None:
+    assert old in ROLES
+    rig.out["psql"] = (0, ROLES.replace(old, new))
+    assert rig.run(capsys)[1]["role-set"].startswith("FAIL")
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        "setting|skiw_app|0|app.review_secret={}\n",  # native rolconfig shape
+        "role|16400|{}|t|f|f|f|f|f|-1\n",
+        "member|{}|pg_read_all_data\n",
+        "{}\n",  # a malformed row
+        "role|16400|x|{}|f\n",
+    ],
+)
+def test_database_content_never_reaches_a_diagnostic(
+    rig: Rig, capsys: pytest.CaptureFixture[str], row: str
+) -> None:
+    value = token_urlsafe(24)
+    rig.values.append(value)  # run() asserts it is in neither stdout nor stderr
+    rig.out["psql"] = (0, ROLES + row.format(value))
+    assert rig.run(capsys)[1]["role-set"].startswith("FAIL")
+
+
+SHORT = "skiw_app_password"
+
+
+@pytest.mark.parametrize("leaked", [True, False])
+def test_a_short_credential_fails_and_is_still_compared_whole(
+    rig: Rig, capsys: pytest.CaptureFixture[str], leaked: bool
+) -> None:
+    value = token_urlsafe(8)  # 11 characters: below the substring-search minimum
+    rig.values.append(value)
+    rig.put(f"{hardening.SECRETS}/{SHORT}", f"{value}\n", hardening.SECRET_MODE)
+    env = {"PATH": "/usr/bin", "DATABASE_PASSWORD": value if leaked else "other"}
+    rig.out["docker inspect"] = (0, rig.inspect(env))
+    result = rig.run(capsys)[1]["container-env"]
+    assert result.startswith(
+        f"FAIL {SHORT} is shorter than 16 characters, so it cannot be searched"
+    )
+    assert ("skiw-web-1 DATABASE_PASSWORD" in result) is leaked
+
+
+def test_an_empty_secret_file_fails(rig: Rig, capsys: pytest.CaptureFixture[str]) -> None:
+    rig.put(f"{hardening.SECRETS}/{SHORT}", "", hardening.SECRET_MODE)
+    assert rig.run(capsys)[1]["container-env"] == f"FAIL {SHORT} is empty"
+
+
+BAD_ENVS: tuple[object, ...] = (0, False, {}, [1], ["A=1", 2], "A=1")
+
+
+def item(**fields: object) -> dict[str, object]:
+    return {"Id": WEB, "Name": "/skiw-web-1", "Config": {"Env": ["PATH=/usr/bin"]}, **fields}
+
+
+def db_item(**fields: object) -> dict[str, object]:
+    return {**item(Id=DB, Name="/skiw-db-1"), **fields}
+
+
+@pytest.mark.parametrize(
+    "items",
+    [
+        [item(), item()],  # one id twice, the other missing
+        [item(), db_item(Id="3" * 64)],  # a container that was not asked for
+        [item()],
+        [item(), db_item(Config=None)],
+        [item(), db_item(Config=[])],
+        [item(), db_item(Name=None)],
+        *([item(), db_item(Config={"Env": env})] for env in BAD_ENVS),
+        [item(), db_item(Config={})],  # no Env key at all
+    ],
+)
+def test_container_evidence_of_the_wrong_shape_fails(
+    rig: Rig, capsys: pytest.CaptureFixture[str], items: list[dict[str, object]]
+) -> None:
+    rig.out["docker inspect"] = (0, json.dumps(items))
+    code, results = rig.run(capsys)
+    assert code == 1 and results.pop("container-env").startswith("FAIL")
+    assert set(results.values()) == {"PASS"}
+
+
+@pytest.mark.parametrize("ids", ["a1\nb2\n", f"{WEB}\n{WEB}\n"])
+def test_unreadable_container_ids_fail(
+    rig: Rig, capsys: pytest.CaptureFixture[str], ids: str
+) -> None:
+    rig.out["docker ps"] = (0, ids)
+    assert rig.run(capsys)[1]["container-env"].startswith("FAIL")
+
+
+@pytest.mark.parametrize("env", [None, [], ["PATH=/usr/bin", "LANG=C.UTF-8"]])
+def test_clean_container_environments_pass(
+    rig: Rig, capsys: pytest.CaptureFixture[str], env: list[str] | None
+) -> None:
+    rig.out["docker inspect"] = (0, json.dumps([item(), db_item(Config={"Env": env})]))
+    assert rig.run(capsys)[1]["container-env"] == "PASS"
