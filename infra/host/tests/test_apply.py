@@ -161,8 +161,9 @@ def test_installs_rendered_files_root_owned_with_their_modes(rig: Rig) -> None:
     items = apply.plan(CI_ENV, *apply.host_values(CI_ENV))
     modes = {dest: (rig.root / dest).stat().st_mode & 0o777 for dest, _, _ in items}
     assert modes["etc/sudoers.d/skiw-ops"] == 0o440
-    assert {modes[f"usr/local/sbin/{n}"] for n in ("bootstrap-secrets", "bootstrap-db")} == {0o755}
-    assert list(modes.values()).count(0o644) == len(modes) - 3  # all others: 0644
+    programs = ("bootstrap-secrets", "bootstrap-db", "check-hardening")
+    assert {modes[f"usr/local/sbin/{n}"] for n in programs} == {0o755}
+    assert list(modes.values()).count(0o644) == len(modes) - 4  # all others: 0644
     assert {Path(dest).name for dest in modes} <= rig.chowns.keys()
     assert set(rig.chowns.values()) == {(0, 0)}  # root:root, the checked candidates too
     assert {f"{apply.LIB}/db/roles.sql", f"{apply.LIB}/nftables.conf"} <= modes.keys()

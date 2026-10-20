@@ -65,8 +65,9 @@ def run_command(argv: list[str], stdin: bytes) -> subprocess.CompletedProcess[by
     return subprocess.run(argv, input=stdin, capture_output=True, check=False)  # noqa: S603 - argv built here, no shell
 
 
-def settings(env_file: Path) -> dict[str, str]:
-    lines = env_file.read_text(encoding="utf-8").splitlines()
+def settings(env_file: Path, text: str | None = None) -> dict[str, str]:
+    """The KEY=value lines of the env file, or of `text` when the caller already read it safely."""
+    lines = (env_file.read_text(encoding="utf-8") if text is None else text).splitlines()
     pairs = (line.partition("=") for line in lines if line and not line.startswith("#"))
     return {key.strip(): value.strip() for key, _, value in pairs}
 
