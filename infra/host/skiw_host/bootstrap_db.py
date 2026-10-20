@@ -72,8 +72,8 @@ def settings(env_file: Path, text: str | None = None) -> dict[str, str]:
     return {key.strip(): value.strip() for key, _, value in pairs}
 
 
-def render_hba(env_file: Path) -> str:
-    values = settings(env_file)
+def render_hba(env_file: Path, text: str | None = None) -> str:
+    values = settings(env_file, text)
     if not DB_NAME.fullmatch(values.get("SKIW_POSTGRES_DB", "")):
         raise Refused(f"SKIW_POSTGRES_DB in {env_file} is empty or not a plain name")
     for name in ("SKIW_NET_APP", "SKIW_NET_OPS"):

@@ -13,11 +13,15 @@ import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from secrets import token_urlsafe
 from string import Template
 
 import pytest
 
 from skiw_host import apply, hardening
+from skiw_host.bootstrap_db import HBA, HBA_MODE, render_hba
+from skiw_host.bootstrap_secrets import DIR_MODE
+from skiw_host.secrets import INVENTORY, OWNER, Kind
 
 HOST = Path(__file__).resolve().parents[1]
 CI_ENV = HOST / "env" / "ci.env"
@@ -54,6 +58,17 @@ LISTEN 0      128            [::1]:6000         [::]:* users:(("python3",pid=372
 """
 
 
+ROLES = """role|skiw_app|t|f|f|f|f|f|-1|
+role|skiw_auth_lookup|f|f|t|f|f|f|-1|
+role|skiw_backup|t|f|t|f|f|f|2|default_transaction_read_only=on
+role|skiw_migrator|t|f|f|f|f|f|-1|
+role|skiw_readonly|t|f|f|f|f|f|-1|
+role|skiw_tenant_guard|f|f|f|f|f|f|-1|
+member|skiw_backup|pg_read_all_data
+"""  # psql -A -t output of the query against a db set up by roles.sql (Postgres 17.11)
+COMPOSE = "srv/skiw/compose.yml"
+
+
 def live_table(
     change: Callable[[list[dict[str, dict[str, object]]]], None] = lambda _: None,
 ) -> str:
@@ -79,6 +94,16 @@ class Rig:
         self.put("etc/sudoers.d/skiw-ops", (HOST / "sudoers.d/skiw-ops").read_text())
         self.put("etc/ssh/sshd_config.d/00-skiw.conf", "Port 2222\n")
         self.put("etc/ssh/sshd_config.d/50-cloud-init.conf", "PasswordAuthentication yes\n")
+        self.put(HBA, render_hba(CI_ENV), HBA_MODE)
+        self.put(COMPOSE, "services: {}\n")
+        self.values = []  # generated per run; must never be printed
+        for secret in INVENTORY:
+            value = token_urlsafe(32)
+            line = f"v1:{value}" if secret.kind is Kind.APP_KEY else value
+            self.put(f"{hardening.SECRETS}/{secret.name}", f"{line}\n", hardening.SECRET_MODE)
+            self.owners[f"{hardening.SECRETS}/{secret.name}"] = (OWNER[secret.name], 0)
+            self.values.append(value)
+        os.chmod(self.root / hardening.SECRETS, DIR_MODE)
         self.out = {
             "sshd -T": (0, SSHD),
             "nft -j": (0, live_table()),
@@ -90,6 +115,9 @@ class Rig:
             "ss -H": (0, SS),
             "id skiw-deploy": (0, "skiw-deploy\n"),
             "id skiw-ops": (0, "skiw-ops sudo\n"),
+            "docker ps": (0, "a1\nb2\n"),
+            "docker inspect": (0, self.inspect({"PATH": "/usr/bin", "SKIW_HOSTNAME": "skiw.test"})),
+            "psql": (0, ROLES),
         }
         self.stdin: dict[str, bytes] = {}
 
@@ -100,20 +128,32 @@ class Rig:
         path.write_text(text)
         os.chmod(path, mode)
 
+    @staticmethod
+    def inspect(env: dict[str, str]) -> str:
+        web = {"Name": "/skiw-web-1", "Config": {"Env": [f"{k}={v}" for k, v in env.items()]}}
+        return json.dumps([web, {"Name": "/skiw-db-1", "Config": {"Env": None}}])
+
     def owner(self, path: Path, info: os.stat_result) -> tuple[int, int]:
         inside = path.is_relative_to(self.root)
         return self.owners.get(str(path.relative_to(self.root)), (0, 0)) if inside else (0, 0)
 
     def runner(self, argv: list[str], stdin: bytes) -> subprocess.CompletedProcess[bytes]:
         key = f"id {argv[2]}" if argv[0] == "id" else " ".join(argv[:2])
+        key = "psql" if argv[:2] == ["docker", "compose"] else key
         self.stdin[key] = stdin
         code, out = self.out.get(key, (127, ""))
         return subprocess.CompletedProcess(argv, code, out.encode(), b"")
 
     def run(self, capsys: pytest.CaptureFixture[str], *extra: str) -> tuple[int, dict[str, str]]:
         argv = ["--env-file", str(self.root / apply.ENV), "--root", str(self.root), *extra]
+        argv = (
+            argv
+            if "--compose-file" in extra
+            else [*argv, "--compose-file", str(self.root / COMPOSE)]
+        )
         code = hardening.main(argv, self.runner, self.owner)
         out = capsys.readouterr()
+        assert not any(value in out.out + out.err for value in self.values)  # UNI-09, always
         lines = [line.split(" ", 2) for line in out.out.splitlines()]
         return code, {
             name.rstrip(":"): f"{status} {rest[0] if rest else ''}".strip()
@@ -134,6 +174,7 @@ def test_a_hardened_host_passes_every_check(rig: Rig, capsys: pytest.CaptureFixt
         rig.stdin["unshare --net"]
         == Template(rendered).substitute(apply.host_values(CI_ENV)[0]).encode()
     )
+    assert rig.stdin["psql"] == hardening.ROLES_QUERY
 
 
 def drop_rule(tables: list[dict[str, dict[str, object]]]) -> None:
@@ -426,3 +467,98 @@ def test_an_unreadable_or_unchecked_sshd_config_fails_closed(
     change(rig)
     code, results = rig.run(capsys)
     assert code == 1 and results["sshd"].startswith("FAIL")
+
+
+KEY = f"{hardening.SECRETS}/field_kek"
+
+
+@pytest.mark.parametrize(
+    ("check", "change"),
+    [
+        ("secret-store", chmod(KEY, 0o440)),
+        ("secret-store", chmod(hardening.SECRETS, 0o755)),
+        ("secret-store", lambda rig: rig.owners.update({KEY: (10003, 0)})),
+        ("secret-store", lambda rig: rig.owners.update({hardening.SECRETS: (1000, 0)})),
+        (
+            "secret-store",
+            lambda rig: rig.put(f"{hardening.SECRETS}/old_key", "x\n", hardening.SECRET_MODE),
+        ),
+        ("secret-store", lambda rig: (rig.root / f"{hardening.SECRETS}/ghcr_read_token").unlink()),
+        ("secret-store", link(KEY)),
+        ("secret-store", link(hardening.SECRETS)),
+        ("container-env", link(KEY)),  # never read through a link
+        (
+            "pg-hba",
+            lambda rig: rig.put(HBA, render_hba(CI_ENV) + "host all all all trust\n", HBA_MODE),
+        ),
+        ("pg-hba", chmod(HBA, 0o666)),
+        ("pg-hba", link(HBA)),
+        ("role-set", link(COMPOSE)),
+        ("role-set", lambda rig: rig.owners.update({COMPOSE: (1000, 0)})),
+    ],
+)
+def test_each_data_check_fails_on_a_bad_file(
+    rig: Rig, capsys: pytest.CaptureFixture[str], check: str, change: Callable[[Rig], None]
+) -> None:
+    change(rig)
+    code, results = rig.run(capsys)
+    assert code == 1 and results[check].startswith("FAIL")
+
+
+@pytest.mark.parametrize(
+    ("check", "key", "answer"),
+    [
+        ("container-env", "docker inspect", (0, "[{}]")),
+        ("container-env", "docker inspect", (0, "{}")),
+        ("container-env", "docker inspect", (1, "")),  # a container stopped after `docker ps`
+        ("container-env", "docker inspect", (0, '[{"Name": "/a", "Config": {"Env": null}}]')),
+        ("container-env", "docker ps", (1, "")),
+        ("container-env", "docker ps", (127, "")),  # no docker CLI
+        ("role-set", "psql", (0, ROLES.replace("skiw_app|t|f|f", "skiw_app|t|f|t"))),
+        ("role-set", "psql", (0, ROLES + "member|skiw_app|pg_read_all_data\n")),
+        ("role-set", "psql", (0, ROLES + "role|skiw_extra|t|f|f|f|f|f|-1|\n")),
+        ("role-set", "psql", (0, ROLES.replace("|2|default", "|-1|default"))),
+        ("role-set", "psql", (0, "")),
+        ("role-set", "psql", (2, "")),
+    ],
+)
+def test_each_data_check_fails_on_a_bad_or_unreadable_answer(
+    rig: Rig, capsys: pytest.CaptureFixture[str], check: str, key: str, answer: tuple[int, str]
+) -> None:
+    rig.out[key] = answer
+    code, results = rig.run(capsys)
+    assert code == 1 and results.pop(check).startswith("FAIL")
+    assert set(results.values()) == {"PASS"}
+
+
+def test_no_running_container_has_nothing_to_leak(
+    rig: Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rig.out["docker ps"] = (0, "")
+    rig.out.pop("docker inspect")  # not called: `docker inspect` with no id exits 1
+    assert rig.run(capsys)[1]["container-env"] == "PASS"
+
+
+def test_a_secret_in_a_container_environment_is_named_never_shown(
+    rig: Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for value in (rig.values[0], f"prefix-{rig.values[-1]}"):  # an app key's base64, a password
+        rig.out["docker inspect"] = (0, rig.inspect({"PATH": "/usr/bin", "LEAK": value}))
+        code, results = rig.run(capsys)  # run() asserts no value reached stdout or stderr
+        assert code == 1 and results["container-env"] == "FAIL a secret value is in skiw-web-1 LEAK"
+
+
+@pytest.mark.parametrize("compose", [None, "/elsewhere/compose.yml"])
+def test_role_set_fails_without_a_compose_file_under_the_root(
+    rig: Rig, capsys: pytest.CaptureFixture[str], compose: str | None
+) -> None:
+    argv = ["--env-file", str(rig.root / apply.ENV), "--root", str(rig.root)]
+    argv += ["--compose-file", compose] if compose else []
+    assert hardening.main(argv, rig.runner, rig.owner) == 1
+    assert (
+        "FAIL role-set: needs --compose-file" in capsys.readouterr().out and "psql" not in rig.stdin
+    )
+
+
+def test_expected_roles_are_read_from_roles_sql() -> None:
+    assert hardening.expected_roles() == set(ROLES.splitlines())

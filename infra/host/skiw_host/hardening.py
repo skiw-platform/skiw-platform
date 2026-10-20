@@ -1,10 +1,10 @@
-"""`check-hardening` (spec §8.4 H2, H7; runbook host-rebuild.md "Host").
+"""`check-hardening` (spec §8.4 H2, H4, H6, H7; runbook host-rebuild.md "Host").
 
 Read-only: it never changes the host. One line per check, `PASS name` or `FAIL name: what`; a check
 whose tool is missing, exits non-zero or prints what cannot be parsed fails, never passes. Files are
 read without following links, with the owner and mode checked on the open file. No secret value
-is ever printed. Each check is one entry in CHECKS; the secret-store, container-env, role-set and
-pg-hba checks are added in M1f-2b.
+is ever printed: the container check names the container and the variable only. Each check is
+one entry in CHECKS. role-set needs `--compose-file` (the host's compose.yml, fixed in M1g).
 Exit 0 all passed, 1 a check failed, 2 refused (not root, or a bad env file).
 """
 
@@ -21,8 +21,9 @@ from string import Template
 from typing import Any
 
 from skiw_host import apply
-from skiw_host.bootstrap_db import Runner, run_command
-from skiw_host.bootstrap_secrets import Refused
+from skiw_host.bootstrap_db import DB, HBA, HBA_MODE, Runner, psql_script, render_hba, run_command
+from skiw_host.bootstrap_secrets import DIR_MODE, MARKER, Refused
+from skiw_host.secrets import OWNER
 
 APT_LINE = re.compile(r'(\S+) "(.*)";')
 ORIGINS = ("Unattended-Upgrade::Allowed-Origins", "Unattended-Upgrade::Origins-Pattern")
@@ -31,6 +32,18 @@ SSHD_DROP_INS = "etc/ssh/sshd_config.d"
 SSHD_ALIASES = {"challengeresponseauthentication": "kbdinteractiveauthentication"}
 # sshd strips quotes from a keyword; this scan does not, so it refuses any line that has them
 SSHD_QUOTES = "\"'\\"
+SECRETS = "etc/skiw/secrets"
+SECRET_MODE = stat.S_IRUSR  # 0400 (bootstrap-secrets, bootstrap-db)
+MIN_SECRET = 16  # shorter strings are not looked for in container environments (owner, M1f-2b)
+ROLES_QUERY = rb"""\pset format unaligned
+\pset tuples_only on
+SELECT concat_ws('|', 'role', rolname, rolcanlogin, rolsuper, rolbypassrls, rolcreatedb,
+  rolcreaterole, rolreplication, rolconnlimit, coalesce(array_to_string(rolconfig, ','), ''))
+FROM pg_roles WHERE rolname LIKE 'skiw\_%';
+SELECT concat_ws('|', 'member', m.member::regrole, m.roleid::regrole)
+FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member WHERE r.rolname LIKE 'skiw\_%';
+"""
+ATTRIBUTES = ("LOGIN", "SUPERUSER", "BYPASSRLS", "CREATEDB", "CREATEROLE", "REPLICATION")
 Owner = Callable[[Path, os.stat_result], tuple[int, int]]
 
 
@@ -41,6 +54,8 @@ class Bad(Exception):
 class Host:
     def __init__(self, args: argparse.Namespace, run: Runner, owner: Owner, env_text: str) -> None:
         self.root, self.env_file, self.run, self.owner = args.root, args.env_file, run, owner
+        self.compose: Path | None = args.compose_file
+        self.env_text = env_text
         self.values, self.ban = apply.host_values(self.env_file, env_text)
 
     def tool(self, argv: list[str], stdin: bytes = b"") -> str:
@@ -246,6 +261,82 @@ def docker_group(host: Host) -> list[str]:
     ]
 
 
+def secret_store(host: Host) -> list[str]:
+    try:
+        apply.untrusted(host.root, [f"{SECRETS}/x"], lambda p: host.owner(p, p.lstat()))
+    except Refused as exc:
+        raise Bad(str(exc)) from None
+    info = (host.root / SECRETS).lstat()  # the directory itself, never a link's target
+    mode = stat.S_IMODE(info.st_mode)
+    if not stat.S_ISDIR(info.st_mode) or host.owner(host.root / SECRETS, info) != (0, 0):
+        return [f"/{SECRETS} is not a directory owned by root:root"]  # never listed through a link
+    problems = [] if mode == DIR_MODE else [f"/{SECRETS} has mode {mode:04o}, want 0700"]
+    names = sorted(os.listdir(host.root / SECRETS))
+    problems += [f"{name} is missing" for name in sorted(OWNER.keys() - set(names))]
+    for name in names:
+        if name not in OWNER and name != MARKER:
+            problems.append(f"{name} is not in the inventory")
+            continue
+        try:
+            host.read(f"{SECRETS}/{name}", OWNER.get(name, 0), SECRET_MODE)
+        except (Bad, OSError) as exc:
+            problems.append(str(exc) if isinstance(exc, Bad) else f"{name}: {exc.strerror}")
+    return problems
+
+
+def container_env(host: Host) -> list[str]:
+    values = set()
+    for name in sorted(OWNER):  # every value and, for `v<n>:` key lines, the part after the colon
+        for line in host.read(f"{SECRETS}/{name}", OWNER[name], SECRET_MODE).decode().splitlines():
+            values |= {v for v in (line, line.partition(":")[2]) if len(v) >= MIN_SECRET}
+    ids = host.tool(["docker", "ps", "-q", "--no-trunc"]).split()
+    items = json.loads(host.tool(["docker", "inspect", *ids])) if ids else []
+    if not isinstance(items, list) or len(items) != len(ids):
+        raise Bad("docker inspect did not describe every running container")
+    found = []
+    for item in items:
+        for entry in item["Config"]["Env"] or []:  # a container without environment has null
+            if any(value in entry.partition("=")[2] for value in values):
+                found.append(f"{item['Name'].lstrip('/')} {entry.partition('=')[0]}")
+    return [f"a secret value is in {', '.join(found)}"] if found else []
+
+
+def expected_roles() -> set[str]:
+    """roles.sql read as data: each ALTER ROLE's attributes, SET and GRANT ... TO."""
+    lines = (DB / "roles.sql").read_text("utf-8").splitlines()
+    sql = " ".join(line for line in lines if not line.lstrip().startswith("--"))
+    settings = re.finditer(r"ALTER ROLE (\w+) SET (\w+) = (\w+);", sql)
+    config = {m[1]: f"{m[2]}={m[3]}" for m in settings}
+    want = {f"member|{m[2]}|{m[1]}" for m in re.finditer(r"GRANT (\w+) TO (\w+);", sql)}
+    for role, rest in re.findall(r"ALTER ROLE (\w+) ((?:NO)?LOGIN[^;]*);", sql):
+        words = rest.split()
+        limit = words[words.index("LIMIT") + 1] if "LIMIT" in words else "-1"
+        flags = "|".join("t" if attribute in words else "f" for attribute in ATTRIBUTES)
+        want.add(f"role|{role}|{flags}|{limit}|{config.get(role, '')}")
+    return want
+
+
+def role_set(host: Host) -> list[str]:
+    """The six roles, their attributes and the one membership, as the database reports them,
+    through the socket as postgres (bootstrap-db's password-file wrapper)."""
+    if host.compose is None or not host.compose.is_relative_to(host.root):
+        raise Bad("needs --compose-file, the host's compose.yml (its path is fixed in M1g)")
+    host.read(str(host.compose.relative_to(host.root)))  # root-owned, not a link: docker reads it
+    compose = ["docker", "compose", "-f", str(host.compose), "--env-file", str(host.env_file)]
+    psql = [*compose, "exec", "-T", "db", "sh", "-c", psql_script()]
+    actual = set(host.tool(psql, ROLES_QUERY).splitlines()) - {""}
+    want = expected_roles()
+    return [f"missing {line}" for line in sorted(want - actual)] + [
+        f"unexpected {line}" for line in sorted(actual - want)
+    ]
+
+
+def pg_hba(host: Host) -> list[str]:
+    data = host.read(HBA, mode=HBA_MODE).decode("utf-8")
+    rendered = render_hba(host.env_file, host.env_text)  # the env text read safely at start
+    return [] if data == rendered else [f"/{HBA} differs from the file rendered from the env file"]
+
+
 def stale_files(host: Host) -> list[str]:
     """Files apply would not install now, and owed reloads; reported, never removed."""
     problems = []
@@ -275,6 +366,10 @@ CHECKS: dict[str, Callable[[Host], list[str]]] = {
     "listening-sockets": sockets,
     "docker-group": docker_group,
     "stale-files": stale_files,
+    "secret-store": secret_store,
+    "container-env": container_env,
+    "role-set": role_set,
+    "pg-hba": pg_hba,
 }
 
 
@@ -283,6 +378,7 @@ def main(
 ) -> int:
     parser = argparse.ArgumentParser(prog="check-hardening", description=__doc__)
     parser.add_argument("--env-file", type=Path, default=Path("/") / apply.ENV)
+    parser.add_argument("--compose-file", type=Path, help="role-set: the host's compose.yml")
     parser.add_argument("--root", type=Path, default=Path("/"), help=argparse.SUPPRESS)  # tests
     args = parser.parse_args(argv)
     try:
