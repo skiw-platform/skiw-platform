@@ -27,6 +27,8 @@ from skiw_host.bootstrap_secrets import Refused
 APT_LINE = re.compile(r'(\S+) "(.*)";')
 ORIGINS = ("Unattended-Upgrade::Allowed-Origins", "Unattended-Upgrade::Origins-Pattern")
 SSHD_DROP_INS = "etc/ssh/sshd_config.d"
+# sshd_config keywords that name the same setting as a checked key (sshd -T prints the first name)
+SSHD_ALIASES = {"challengeresponseauthentication": "kbdinteractiveauthentication"}
 Owner = Callable[[Path, os.stat_result], tuple[int, int]]
 
 
@@ -108,6 +110,7 @@ def sshd_matches(host: Host, protected: set[str]) -> list[str]:
         for raw in host.read(rel).decode("utf-8").splitlines():
             words = re.split(r"[\s=]+", raw.strip(), maxsplit=1)
             key, arg = words[0].lower(), (words[1].strip() if len(words) > 1 else "")
+            key = SSHD_ALIASES.get(key, key)
             if not key or key.startswith("#"):
                 continue
             if key == "include" and arg != f"/{SSHD_DROP_INS}/*.conf":

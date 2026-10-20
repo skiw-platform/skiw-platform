@@ -363,6 +363,11 @@ SAFE_MATCH = (
         "Match Address 10.0.0.0/8\n    KbdInteractiveAuthentication yes\n",
         "Match Group staff\n    maxauthtries = 20\n",
         "Match all\nPermitRootLogin prohibit-password\n",  # case and spacing do not hide a key
+        # the old name of KbdInteractiveAuthentication: sshd -T still prints no globally while the
+        # matching user gets yes (the global answer in the rig stays no, as on a real host)
+        "Match User ops\n    ChallengeResponseAuthentication yes\n",
+        "Match Address 192.0.2.0/24\nchallengeresponseauthentication=yes\n",
+        "Match Group staff\n\tCHALLENGERESPONSEAUTHENTICATION  no\n",
     ],
 )
 @pytest.mark.parametrize("where", ["etc/ssh/sshd_config.d/90-local.conf", "etc/ssh/sshd_config"])
