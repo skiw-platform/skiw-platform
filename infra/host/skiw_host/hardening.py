@@ -29,6 +29,8 @@ ORIGINS = ("Unattended-Upgrade::Allowed-Origins", "Unattended-Upgrade::Origins-P
 SSHD_DROP_INS = "etc/ssh/sshd_config.d"
 # sshd_config keywords that name the same setting as a checked key (sshd -T prints the first name)
 SSHD_ALIASES = {"challengeresponseauthentication": "kbdinteractiveauthentication"}
+# sshd strips quotes from a keyword; this scan does not, so it refuses any line that has them
+SSHD_QUOTES = "\"'\\"
 Owner = Callable[[Path, os.stat_result], tuple[int, int]]
 
 
@@ -113,7 +115,9 @@ def sshd_matches(host: Host, protected: set[str]) -> list[str]:
             key = SSHD_ALIASES.get(key, key)
             if not key or key.startswith("#"):
                 continue
-            if key == "include" and arg != f"/{SSHD_DROP_INS}/*.conf":
+            if any(c in key for c in SSHD_QUOTES):
+                problems.append(f"/{rel} has a quoted or escaped keyword, which is not checked")
+            elif key == "include" and arg != f"/{SSHD_DROP_INS}/*.conf":
                 problems.append(f"/{rel} includes {arg}, which is not checked")
             elif key == "match":
                 in_match = True

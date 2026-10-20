@@ -380,6 +380,29 @@ def test_a_match_block_that_weakens_a_checked_sshd_key_fails_wherever_it_is(
     assert code == 1 and results["sshd"].startswith("FAIL") and "Match" in results["sshd"] + "Match"
 
 
+@pytest.mark.parametrize(
+    "quoted",
+    [
+        'Match User ops\n    "PasswordAuthentication" yes\n',
+        '"Match" User ops\n    PasswordAuthentication yes\n',
+        '"Include" /etc/ssh/unchecked.conf\n',
+        'Include "/etc/ssh/unchecked.conf"\n',
+        'Match User ops\n    "ChallengeResponseAuthentication" yes\n',
+        'Match User ops\n    "KbdInteractiveAuthentication"=yes\n',
+        "Match User ops\n    'PasswordAuthentication' yes\n",
+        "Match User ops\n    Password\\Authentication yes\n",
+    ],
+)
+@pytest.mark.parametrize("where", ["etc/ssh/sshd_config.d/90-local.conf", "etc/ssh/sshd_config"])
+def test_a_quoted_sshd_keyword_fails_wherever_it_is(
+    rig: Rig, capsys: pytest.CaptureFixture[str], quoted: str, where: str
+) -> None:
+    base = SSHD_CONFIG if where.endswith("sshd_config") else ""
+    rig.put(where, base + quoted)
+    code, results = rig.run(capsys)
+    assert code == 1 and results["sshd"].startswith("FAIL")
+
+
 def test_a_match_block_with_a_forced_command_policy_passes(
     rig: Rig, capsys: pytest.CaptureFixture[str]
 ) -> None:
