@@ -515,7 +515,7 @@ def test_each_data_check_fails_on_a_bad_file(
         ("container-env", "docker ps", (1, "")),
         ("container-env", "docker ps", (127, "")),  # no docker CLI
         ("role-set", "psql", (0, ROLES.replace("skiw_app|t|f|f", "skiw_app|t|f|t"))),
-        ("role-set", "psql", (0, ROLES + "member|skiw_app|pg_read_all_data\n")),
+        ("role-set", "psql", (0, ROLES + "member|skiw_app|pg_read_all_data|f|t|t\n")),
         ("role-set", "psql", (0, ROLES + "role|16400|skiw_extra|t|f|f|f|f|f|-1\n")),
         ("role-set", "psql", (0, ROLES.replace("f|f|f|2\n", "f|f|f|-1\n"))),
         ("role-set", "psql", (0, "")),
@@ -564,7 +564,66 @@ def test_expected_roles_are_read_from_roles_sql() -> None:
     roles, settings, members, bad = hardening.parse_roles(ROLES)
     want, want_settings, want_members = hardening.expected_roles()
     assert {name: roles[name][1] for name in want} == want and len(want) == 6 and bad == 0
-    assert want_settings == settings and want_members < members  # plus pg_monitor's own grants
+    assert want_settings == settings and want_members == {
+        ("skiw_backup", "pg_read_all_data"): ("f", "t", "t")  # PG16+ GRANT defaults
+    }
+    assert members == {**hardening.BASELINE_MEMBERS, **want_members}  # the native run, exactly
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "problem"),
+    [
+        (  # (a) GRANT pg_write_all_data TO pg_read_all_data (native row)
+            "member|pg_monitor|pg_read_all_settings|f|t|t\n",
+            "member|pg_monitor|pg_read_all_settings|f|t|t\n"
+            "member|pg_read_all_data|pg_write_all_data|f|t|t\n",
+            "unexpected membership: pg_read_all_data in pg_write_all_data",
+        ),
+        (  # (b, c) ... WITH INHERIT FALSE, SET FALSE: backup loses its read access
+            "member|skiw_backup|pg_read_all_data|f|t|t",
+            "member|skiw_backup|pg_read_all_data|f|f|f",
+            "skiw_backup in pg_read_all_data: options differ from the allowed grant: inherit, set",
+        ),
+        (  # (b) INHERIT FALSE alone
+            "member|skiw_backup|pg_read_all_data|f|t|t",
+            "member|skiw_backup|pg_read_all_data|f|f|t",
+            "skiw_backup in pg_read_all_data: options differ from the allowed grant: inherit",
+        ),
+        (  # (c) SET FALSE alone
+            "member|skiw_backup|pg_read_all_data|f|t|t",
+            "member|skiw_backup|pg_read_all_data|f|t|f",
+            "skiw_backup in pg_read_all_data: options differ from the allowed grant: set",
+        ),
+        (  # (d) WITH ADMIN OPTION: backup could delegate its read access
+            "member|skiw_backup|pg_read_all_data|f|t|t",
+            "member|skiw_backup|pg_read_all_data|t|t|t",
+            "skiw_backup in pg_read_all_data: options differ from the allowed grant: admin",
+        ),
+        (  # (e) a baseline edge with changed options
+            "member|pg_monitor|pg_read_all_stats|f|t|t",
+            "member|pg_monitor|pg_read_all_stats|f|f|t",
+            "pg_monitor in pg_read_all_stats: options differ from the allowed grant: inherit",
+        ),
+        (  # a baseline edge revoked
+            "member|pg_monitor|pg_stat_scan_tables|f|t|t\n",
+            "",
+            "pg_monitor is not a member of pg_stat_scan_tables",
+        ),
+        (  # a second grant of the same pair (another grantor)
+            "member|skiw_backup|pg_read_all_data|f|t|t\n",
+            "member|skiw_backup|pg_read_all_data|f|t|t\nmember|skiw_backup|pg_read_all_data|f|t|t\n",
+            "skiw_backup in pg_read_all_data: granted more than once",
+        ),
+    ],
+)
+def test_memberships_are_exactly_roles_sql_and_the_baseline_with_their_options(
+    rig: Rig, capsys: pytest.CaptureFixture[str], old: str, new: str, problem: str
+) -> None:
+    assert old in ROLES
+    rig.out["psql"] = (0, ROLES.replace(old, new))
+    code, results = rig.run(capsys)
+    assert code == 1 and results.pop("role-set") == f"FAIL {problem}"
+    assert set(results.values()) == {"PASS"}
 
 
 @pytest.mark.parametrize(
@@ -573,9 +632,10 @@ def test_expected_roles_are_read_from_roles_sql() -> None:
         "role|16400|review_unexpected|t|t|f|f|f|f|-1\n",  # any prefix, LOGIN SUPERUSER
         "role|16401|reports|f|f|f|f|f|f|-1\n",  # NOLOGIN too
         "role|16402|pg_fake|f|f|f|f|f|f|-1\n",  # pg_ but not one of initdb's
-        "member|skiw_app|pg_write_all_data\n",
-        "member|postgres|skiw_app\n",
-        "member|skiw_app|skiw_migrator\n",
+        "member|skiw_app|pg_write_all_data|f|t|t\n",
+        "member|postgres|skiw_app|f|t|t\n",
+        "member|skiw_app|skiw_migrator|f|t|t\n",
+        "member|skiw_app|pg_read_all_data\n",  # the pre-PG16 shape, no options: unparsable
         "setting|skiw_app|16384|search_path=other\n",  # per database too
     ],
 )
@@ -611,7 +671,7 @@ def test_privilege_and_setting_drift_fails(
     [
         "setting|skiw_app|0|app.review_secret={}\n",  # native rolconfig shape
         "role|16400|{}|t|f|f|f|f|f|-1\n",
-        "member|{}|pg_read_all_data\n",
+        "member|{}|pg_read_all_data|f|t|t\n",
         "{}\n",  # a malformed row
         "role|16400|x|{}|f\n",
     ],

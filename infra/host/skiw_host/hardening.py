@@ -45,7 +45,8 @@ SELECT concat_ws('|', 'role', oid, rolname, rolcanlogin, rolsuper, rolbypassrls,
   rolcreaterole, rolreplication, rolconnlimit) FROM pg_roles;
 SELECT concat_ws('|', 'setting', r.rolname, s.setdatabase, c)
 FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole, unnest(s.setconfig) c;
-SELECT concat_ws('|', 'member', u.rolname, g.rolname)
+SELECT concat_ws('|', 'member', u.rolname, g.rolname, m.admin_option, m.inherit_option,
+  m.set_option)
 FROM pg_auth_members m JOIN pg_roles u ON u.oid = m.member JOIN pg_roles g ON g.oid = m.roleid;
 """
 BOOTSTRAP, BOOTSTRAP_OID = (
@@ -67,7 +68,16 @@ LABELS = (
 ATTRIBUTES = ("LOGIN", "SUPERUSER", "BYPASSRLS", "CREATEDB", "CREATEROLE", "REPLICATION")
 Owner = Callable[[Path, os.stat_result], tuple[int, int]]
 Settings = set[tuple[str, str, str]]  # role, database oid (0: every database), name=value
-Members = set[tuple[str, str]]  # member, group
+# (member, group) -> admin, inherit, set option ('t'/'f'); () when the pair is granted twice
+Members = dict[tuple[str, str], tuple[str, ...]]
+MEMBER_OPTIONS = ("admin", "inherit", "set")
+# PostgreSQL 17.11's own memberships right after initdb, with their options (native run, the
+# fixture roles-pg17.txt). Exactly these and roles.sql's grants are allowed; nothing else.
+BASELINE_MEMBERS: Members = {
+    ("pg_monitor", "pg_read_all_settings"): ("f", "t", "t"),
+    ("pg_monitor", "pg_read_all_stats"): ("f", "t", "t"),
+    ("pg_monitor", "pg_stat_scan_tables"): ("f", "t", "t"),
+}
 
 
 class Bad(Exception):
@@ -370,7 +380,17 @@ def expected_roles() -> tuple[dict[str, tuple[str, ...]], Settings, Members]:
         (m[1], "0", f"{m[2]}={m[3]}")
         for m in re.finditer(r"ALTER ROLE (\w+) SET (\w+) = (\w+);", sql)
     }
-    members = {(m[2], m[1]) for m in re.finditer(r"GRANT (\w+) TO (\w+);", sql)}
+    members: Members = {}
+    for m in re.finditer(r"GRANT (\w+) TO (\w+)(?: WITH ([\w ,]+))?;", sql):
+        # PostgreSQL 16+ defaults: no ADMIN, SET, INHERIT as the member role's own (INHERIT)
+        noinherit = re.search(rf"ALTER ROLE {m[2]} [^;]*\bNOINHERIT\b", sql)
+        options = {"ADMIN": "f", "INHERIT": "f" if noinherit else "t", "SET": "t"}
+        for item in filter(None, (m[3] or "").split(",")):
+            name, value = item.split()
+            if name not in options or value not in ("TRUE", "FALSE", "OPTION"):
+                raise ValueError(item)
+            options[name] = "f" if value == "FALSE" else "t"
+        members[(m[2], m[1])] = (options["ADMIN"], options["INHERIT"], options["SET"])
     attributes = {}
     for role, rest in re.findall(r"ALTER ROLE (\w+) ((?:NO)?LOGIN[^;]*);", sql):
         words = rest.split()
@@ -383,7 +403,7 @@ def parse_roles(out: str) -> tuple[dict[str, tuple[int, tuple[str, ...]]], Setti
     """The query's rows; a row of any other shape is only counted, never kept or shown."""
     roles: dict[str, tuple[int, tuple[str, ...]]] = {}
     settings: Settings = set()
-    members: Members = set()
+    members: Members = {}
     bad = 0
     for line in filter(None, out.splitlines()):
         f = line.split("|")
@@ -398,8 +418,8 @@ def parse_roles(out: str) -> tuple[dict[str, tuple[int, tuple[str, ...]]], Setti
             roles[f[2]] = (int(f[1]), tuple(f[3:10]))
         elif f[0] == "setting" and len(f) >= 4 and f[2].isdigit() and "=" in f[3]:
             settings.add((f[1], f[2], "|".join(f[3:])))
-        elif f[0] == "member" and len(f) == 3:
-            members.add((f[1], f[2]))
+        elif f[0] == "member" and len(f) == 6 and all(x in ("t", "f") for x in f[3:6]):
+            members[(f[1], f[2])] = () if (f[1], f[2]) in members else tuple(f[3:6])
         else:
             bad += 1
     return roles, settings, members, bad
@@ -446,11 +466,20 @@ def role_set(host: Host) -> list[str]:
         problems.append(f"{label}: {shown} is not as roles.sql sets it")
     present = {(role, conf.partition("=")[0]) for role, _, conf in settings}
     problems += [f"{role}: {name} is not set" for role, name in sorted(named - present)]
-    for member, group in sorted(members - want_members):
-        if not (member in system and group in system):  # PostgreSQL's own grants (pg_monitor)
-            pair = f"{member} in {group}" if {member, group} <= known else "a role not in roles.sql"
+    allowed = {**BASELINE_MEMBERS, **want_members}
+    for (member, group), options in sorted(members.items()):
+        pair = f"{member} in {group}" if {member, group} <= known else "a role not in roles.sql"
+        if (member, group) not in allowed:
             problems.append(f"unexpected membership: {pair}")
-    problems += [f"{m} is not a member of {g}" for m, g in sorted(want_members - members)]
+        elif not options:
+            problems.append(f"{pair}: granted more than once")
+        elif diff := [
+            o
+            for o, a, w in zip(MEMBER_OPTIONS, options, allowed[member, group], strict=True)
+            if a != w
+        ]:
+            problems.append(f"{pair}: options differ from the allowed grant: {', '.join(diff)}")
+    problems += [f"{m} is not a member of {g}" for m, g in sorted(allowed.keys() - members.keys())]
     return problems
 
 

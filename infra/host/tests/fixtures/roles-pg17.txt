@@ -21,7 +21,7 @@ role|16387|skiw_backup|t|f|t|f|f|f|2
 role|16389|skiw_tenant_guard|f|f|f|f|f|f|-1
 role|16390|skiw_auth_lookup|f|f|t|f|f|f|-1
 setting|skiw_backup|0|default_transaction_read_only=on
-member|skiw_backup|pg_read_all_data
-member|pg_monitor|pg_read_all_settings
-member|pg_monitor|pg_read_all_stats
-member|pg_monitor|pg_stat_scan_tables
+member|skiw_backup|pg_read_all_data|f|t|t
+member|pg_monitor|pg_read_all_settings|f|t|t
+member|pg_monitor|pg_read_all_stats|f|t|t
+member|pg_monitor|pg_stat_scan_tables|f|t|t
