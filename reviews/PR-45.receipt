@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 45
+repo: charliekhc/skiw-platform
+reviewed-head-sha: a4316581b06618f1d5b88a186d265ed08c67eaa8
+review-file: reviews/PR-45.md
+review-file-hash: 5d561d8a88b582e8b6e9960c154dae321a7c8889
+review-log-branch-commit: 89afc9eb4cd5e7bb16a3c82e4dca6f15529347e7
+verdict: Approved (round 5)
+ci: checks, host, image, security all success on the reviewed head (run 39362317141)
+note: M1f-2a (check-hardening framework; sshd incl. Match/quote/alias scan, nftables, unattended-upgrades, docker-daemon, sockets, docker-group, stale-files). M1f-2b adds secret-store, container-env, role-set, pg-hba checks. No native Ubuntu or systemd run yet (M1k). G7 and G15 still empty.
+written-at: 2026-10-20T03:52:36Z
+pr-state-at-write: OPEN, unmerged
