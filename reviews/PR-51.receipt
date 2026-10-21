@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 51
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: b70d56644ac5a38848db692138559a12c5c1e16b
+review-file: reviews/PR-51.md
+review-file-hash: 33d6c46b246dfec8d7f21a0f927eb7219f1b49da
+review-log-branch-commit: 36ff6e1e37fb9d5754cfb40992e9cfe6602df9ae
+verdict: Approved (round 2)
+ci: checks, host, image, security all success on the reviewed head (run 39585008053)
+note: vite 8.3.2 to 8.3.4 for GHSA-587h-7wmj-h5pm, DECISIONS entry added in round 1 fix. Clears the security job on main and on PR 47. Repo moved to the skiw-platform organization on 2026-10-21.
+written-at: 2026-10-21T12:18:18Z
+pr-state-at-write: OPEN, unmerged
