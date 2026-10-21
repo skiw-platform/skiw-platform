@@ -87,11 +87,13 @@ class Rig:
         self.put(apply.ENV, CI_ENV.read_text())
         self.put("etc/ssh/sshd_config", SSHD_CONFIG)
         self.put("etc/docker/daemon.json", (HOST / "docker/daemon.json").read_text())
-        self.put("etc/sudoers.d/skiw-ops", (HOST / "sudoers.d/skiw-ops").read_text())
+        for rule in ("skiw-ops", "skiw-deploy"):
+            self.put(f"etc/sudoers.d/{rule}", (HOST / f"sudoers.d/{rule}").read_text())
         self.put("etc/ssh/sshd_config.d/00-skiw.conf", "Port 2222\n")
         self.put("etc/ssh/sshd_config.d/50-cloud-init.conf", "PasswordAuthentication yes\n")
         self.put(HBA, render_hba(CI_ENV), HBA_MODE)
         self.put(COMPOSE, "services: {}\n")
+        self.put(apply.STATE, f"SKIW_IMAGE=ghcr.io/charliekhc/skiw-platform@sha256:{'3' * 64}\n")
         self.values = []  # generated per run; must never be printed
         for secret in INVENTORY:
             value = token_urlsafe(32)
@@ -116,6 +118,7 @@ class Rig:
             "psql": (0, ROLES),
         }
         self.stdin: dict[str, bytes] = {}
+        self.argv: dict[str, list[str]] = {}
 
     def put(self, rel: str, text: str, mode: int = apply.CONFIG) -> None:
         path = self.root / rel
@@ -141,6 +144,7 @@ class Rig:
         key = f"id {argv[2]}" if argv[0] == "id" else " ".join(argv[:2])
         key = "psql" if argv[:2] == ["docker", "compose"] else key
         self.stdin[key] = stdin
+        self.argv[key] = argv
         code, out = self.out.get(key, (127, ""))
         return subprocess.CompletedProcess(argv, code, out.encode(), b"")
 
@@ -548,16 +552,20 @@ def test_a_secret_in_a_container_environment_is_named_never_shown(
         assert code == 1 and results["container-env"] == "FAIL a secret value is in skiw-web-1 LEAK"
 
 
-@pytest.mark.parametrize("compose", [None, "/elsewhere/compose.yml"])
 def test_role_set_fails_without_a_compose_file_under_the_root(
-    rig: Rig, capsys: pytest.CaptureFixture[str], compose: str | None
+    rig: Rig, capsys: pytest.CaptureFixture[str]
 ) -> None:
     argv = ["--env-file", str(rig.root / apply.ENV), "--root", str(rig.root)]
-    argv += ["--compose-file", compose] if compose else []
-    assert hardening.main(argv, rig.runner, rig.owner) == 1
-    assert (
-        "FAIL role-set: needs --compose-file" in capsys.readouterr().out and "psql" not in rig.stdin
+    assert hardening.main(argv, rig.runner, rig.owner) == 0  # default: /srv/skiw/compose.yml
+    assert "/srv/skiw/compose.yml" in " ".join(rig.argv["psql"])
+    assert str(rig.root / apply.STATE) in rig.argv["psql"]  # SKIW_IMAGE from skiw-deploy
+    rig.stdin.clear()
+    assert hardening.main(
+        [*argv, "--compose-file", "/elsewhere/compose.yml"], rig.runner, rig.owner
     )
+    assert "FAIL role-set: needs --compose-file" in capsys.readouterr().out
+    (rig.root / apply.STATE).unlink()  # before the first deploy: Compose cannot resolve the image
+    assert hardening.main(argv, rig.runner, rig.owner) == 1 and "psql" not in rig.stdin
 
 
 def test_expected_roles_are_read_from_roles_sql() -> None:

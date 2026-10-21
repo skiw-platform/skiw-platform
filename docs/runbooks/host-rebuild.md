@@ -21,8 +21,10 @@ Before the first run, as root: `apt-get install nftables gnupg`, then fetch Dock
 
 It renders the templates from the env file, checks the nftables, sshd and sudoers candidates with
 `nft -c`, `sshd -t`, `visudo -c`, then installs, root-owned, only the
-files that differ: configs under `/etc` (0644), `/etc/sudoers.d/skiw-ops` (0440), the env file as
-`/etc/skiw/host.env`, `bootstrap-secrets` and `bootstrap-db` in `/usr/local/sbin` (0755), and
+files that differ: configs under `/etc` (0644), `/etc/sudoers.d/skiw-ops` and `skiw-deploy` (0440),
+the env file as `/etc/skiw/host.env`, the stack as `/srv/skiw/compose.yml` with `/srv/skiw/caddy/`
+(0644), `bootstrap-secrets`, `bootstrap-db`, `check-hardening`, `skiw-deploy` and `skiw-deploy-ssh`
+in `/usr/local/sbin` (0755), and
 `skiw_host/`, `db/` and the templates in `/usr/local/lib/skiw/`. It prints what it changed; a
 second run changes nothing. A file counts as unchanged only when its content, mode, owner and group
 all match and it is not a link; otherwise `apply` puts it back root-owned. It refuses (nothing
@@ -54,7 +56,7 @@ default jail stay. On an SSH port change keep one session open and test the new 
 
 Run after every `apply` and after any host change, as root: `sudo check-hardening` (installed by
 `apply` in `/usr/local/sbin`; it reads `/etc/skiw/host.env`, or `--env-file <path>`; add
-`--compose-file <compose.yml>` for `role-set`, whose path is fixed in M1g). It is
+for `role-set` it uses `/srv/skiw/compose.yml`, or `--compose-file`, with `/var/lib/skiw/deploy.env`). It is
 read-only: it changes nothing, deletes nothing, and loads the rendered nftables file only in a
 throwaway network namespace (`unshare --net`). It prints one line per check, `PASS <name>` or
 `FAIL <name>: <what>`, with non-secret values only. Exit 0 all passed, 1 a check failed, 2 refused
@@ -70,10 +72,10 @@ Files it reads must be regular files, not links, root-owned and not writable by 
 | `docker-daemon` | the running daemon (`docker info`): live-restore on, journald logs, `no-new-privileges` in its security options; `/etc/docker/daemon.json`: no-new-privileges, no TCP `hosts`; the docker unit's `ExecStart` (including drop-ins): only `fd://` or `unix://` hosts and no other `--config-file` |
 | `listening-sockets` | `ss -tlnp` shows nothing on a non-loopback address except 80, 443 and the SSH port, and `dockerd` listens on no TCP address at all, loopback included |
 | `docker-group` | neither `skiw-deploy` nor `skiw-ops` is in group `docker` |
-| `stale-files` | no fail2ban jail under `allowlist`, no other `/etc/sudoers.d/skiw*`, no sshd drop-in sorting before `00-skiw.conf` that sets a checked key, no `/var/lib/skiw/apply.pending` (run `apply`) |
+| `stale-files` | no fail2ban jail under `allowlist`, no `/etc/sudoers.d/skiw*` but `skiw-ops` and `skiw-deploy`, no sshd drop-in sorting before `00-skiw.conf` that sets a checked key, no `/var/lib/skiw/apply.pending` (run `apply`) |
 | `secret-store` | `/etc/skiw/secrets` is a root:root 0700 directory, not a link; it holds every inventory name (`skiw_host/secrets.py`) and nothing else but `.restored`; each file is a regular file, mode 0400, owned by its inventory uid, group root |
 | `container-env` | no running container's environment (`docker inspect`) holds a secret value: a secret line, or the part after `v<n>:`, of 16 characters or more is searched inside every value; a shorter credential is compared whole and also FAILs as unsupported (it cannot be searched safely), as does an empty secret file; each container from `docker ps` must be described exactly once, with a `Config` and an `Env` that is null or a list of strings; a FAIL names the secret file, container and variable, never the value |
-| `role-set` | through the db socket as `postgres` (`docker compose exec db`, bootstrap-db's password file), the WHOLE role inventory: only the six roles of `roles.sql` (with their attributes, connection limits and settings), `postgres` (the bootstrap superuser, the only superuser) and PostgreSQL's predefined `pg_*` roles (made by initdb; none may log in, be superuser or bypass RLS); any other role, of any name, fails; memberships are exactly `roles.sql`'s grants (`skiw_backup` in `pg_read_all_data`) plus PostgreSQL 17.11's own after initdb (`pg_monitor` in `pg_read_all_settings`, `pg_read_all_stats` and `pg_stat_scan_tables`), each with its options (`admin_option` false, `inherit_option` true, `set_option` true); any other membership (also between `pg_*` roles, e.g. `pg_read_all_data` in `pg_write_all_data`), a missing one, one granted twice or changed options (`INHERIT FALSE`, `SET FALSE`, `ADMIN OPTION`) fails. A FAIL names only roles from that list and `roles.sql`'s settings; other roles are counted (find them with `\du`), and no setting value or database row is ever printed; fails without `--compose-file` |
+| `role-set` | through the db socket as `postgres` (`docker compose exec db`, bootstrap-db's password file), the WHOLE role inventory: only the six roles of `roles.sql` (with their attributes, connection limits and settings), `postgres` (the bootstrap superuser, the only superuser) and PostgreSQL's predefined `pg_*` roles (made by initdb; none may log in, be superuser or bypass RLS); any other role, of any name, fails; memberships are exactly `roles.sql`'s grants (`skiw_backup` in `pg_read_all_data`) plus PostgreSQL 17.11's own after initdb (`pg_monitor` in `pg_read_all_settings`, `pg_read_all_stats` and `pg_stat_scan_tables`), each with its options (`admin_option` false, `inherit_option` true, `set_option` true); any other membership (also between `pg_*` roles, e.g. `pg_read_all_data` in `pg_write_all_data`), a missing one, one granted twice or changed options (`INHERIT FALSE`, `SET FALSE`, `ADMIN OPTION`) fails. A FAIL names only roles from that list and `roles.sql`'s settings; other roles are counted (find them with `\du`), and no setting value or database row is ever printed; fails while `/srv/skiw/compose.yml` (or `--compose-file`) or skiw-deploy's state file `/var/lib/skiw/deploy.env` (root, 0644) is missing or untrusted |
 | `pg-hba` | `/etc/skiw/db/pg_hba.conf` (root, 0444) equals the template rendered from the env file; after a subnet change run `bootstrap-db prepare` again |
 
 On a FAIL, fix the cause (usually: run `apply` again; for `secret-store` and `pg-hba` the
@@ -205,14 +207,16 @@ Run it in this order on a new or rebuilt host. It needs root, for the same reaso
    so `db` cannot start before this step.
 3. Start `db` with the same Compose file and environment file, and wait until it is healthy.
    Compose checks the whole file, so it refuses this step until `SKIW_HOSTNAME` (owner value G9)
-   and `SKIW_IMAGE` (written by `skiw-deploy`, M1g) have values. On a real host this step is
+   and `SKIW_IMAGE` have values; before the first deploy there is no state file, so give the
+   digest you will deploy on the command line, as below. On a real host this step is
    staged to M1g and M1k. CI runs it with `env/ci.env`, which sets both.
 4. `apply` sets the roles and the passwords.
 
 ```
 sudo infra/host/bootstrap-db prepare --env-file <env file>
-sudo docker compose -f <compose.yml> --env-file <env file> up -d --wait db
-sudo infra/host/bootstrap-db apply --env-file <env file> --compose-file <compose.yml>
+sudo env SKIW_IMAGE=<repository>@<digest> docker compose -f /srv/skiw/compose.yml \
+  --env-file /etc/skiw/host.env up -d --wait db
+sudo bootstrap-db apply --env-file /etc/skiw/host.env --compose-file /srv/skiw/compose.yml
 ```
 
 - `prepare` makes each missing DB password file (32 random bytes, mode 0400, owner from the

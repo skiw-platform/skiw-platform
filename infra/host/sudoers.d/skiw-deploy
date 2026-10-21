@@ -1,0 +1,5 @@
+# Installed by infra/host/apply (spec §8.4 H3; runbook deploy.md). Reached only from the forced
+# command skiw-deploy-ssh, which passes the key role from authorized_keys. One command, its
+# arguments pinned by a regular expression (sudo 1.9.10+): any other or extra argument (the
+# test-only --root) does not match. `\:` is sudoers' escape; no comma, which would split the rule.
+skiw-deploy ALL=(root) NOPASSWD: /usr/local/sbin/skiw-deploy ^--key (production|staging) (deploy sha256\:[0-9a-f]{64}( [1-9][0-9]*)?|rollback sha256\:[0-9a-f]{64})$

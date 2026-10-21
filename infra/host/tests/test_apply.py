@@ -7,6 +7,7 @@ host.
 
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -160,10 +161,12 @@ def test_installs_rendered_files_root_owned_with_their_modes(rig: Rig) -> None:
     assert not (rig.root / "etc/fail2ban").exists()  # allowlist: no fail2ban jail
     items = apply.plan(CI_ENV, *apply.host_values(CI_ENV))
     modes = {dest: (rig.root / dest).stat().st_mode & 0o777 for dest, _, _ in items}
-    assert modes["etc/sudoers.d/skiw-ops"] == 0o440
-    programs = ("bootstrap-secrets", "bootstrap-db", "check-hardening")
-    assert {modes[f"usr/local/sbin/{n}"] for n in programs} == {0o755}
-    assert list(modes.values()).count(0o644) == len(modes) - 4  # all others: 0644
+    assert modes["etc/sudoers.d/skiw-ops"] == modes["etc/sudoers.d/skiw-deploy"] == 0o440
+    assert {modes[f"usr/local/sbin/{n}"] for n in apply.PROGRAMS} == {0o755}
+    assert len(apply.PROGRAMS) == 5 and "skiw-deploy-ssh" in apply.PROGRAMS
+    assert list(modes.values()).count(0o644) == len(modes) - 7  # all others: 0644
+    assert rig.read(apply.COMPOSE) == (HOST / "compose.yml").read_text()  # ./caddy/ next to it
+    assert rig.read("srv/skiw/caddy/Caddyfile") == (HOST / "caddy/Caddyfile").read_text()
     assert {Path(dest).name for dest in modes} <= rig.chowns.keys()
     assert set(rig.chowns.values()) == {(0, 0)}  # root:root, the checked candidates too
     assert {f"{apply.LIB}/db/roles.sql", f"{apply.LIB}/nftables.conf"} <= modes.keys()
@@ -236,6 +239,8 @@ def test_each_candidate_is_checked_with_its_final_mode(rig: Rig) -> None:
     assert rig.run() == 0
     checked = [tuple(argv[:-1]) for argv in rig.calls if argv[1] in ("-c", "-t")]
     assert checked == list(apply.CHECKERS.values())
+    rules = {Path(argv[-1]).name for argv in rig.calls if argv[0] == "visudo"}
+    assert rules == {"skiw-ops", "skiw-deploy"}  # both sudoers rules, before anything installs
     assert rig.modes == {"nft": 0o644, "sshd": 0o644, "visudo": 0o440}
 
 
@@ -259,6 +264,32 @@ def test_the_sudoers_rule_pins_the_whole_restore_command() -> None:
         assert not sudo_allows(RULE, [*RULE.split(), *extra])
     assert not sudo_allows(RULE, RULE.replace("restore", "init").split())
     assert not sudo_allows(RULE, RULE.split()[:-1])
+
+
+def test_the_deploy_sudoers_rule_pins_one_command_and_its_argument_shapes() -> None:
+    text = (HOST / "sudoers.d/skiw-deploy").read_text()
+    rules = [line for line in text.splitlines() if line and not line.startswith("#")]
+    user, _, command = rules[0].partition(" ALL=(root) NOPASSWD: ")
+    program, _, pattern = command.partition(" ")
+    assert len(rules) == 1 and user == "skiw-deploy" and program == "/usr/local/sbin/skiw-deploy"
+    assert pattern[0] + pattern[-1] == "^$" and "," not in pattern  # a comma splits sudoers rules
+    regex = re.compile(pattern[1:-1].replace("\\:", ":"))  # sudo: ERE on the joined arguments
+    digest = f"sha256:{'a' * 64}"
+    for good in (f"deploy {digest}", f"deploy {digest} 123", f"rollback {digest}"):
+        assert regex.fullmatch(f"--key staging {good}") and regex.fullmatch(
+            f"--key production {good}"
+        )
+    for bad in (
+        f"--key staging deploy {digest} 1 x",
+        f"--key staging deploy {digest} --root /tmp",
+        f"--root /tmp --key staging deploy {digest}",
+        f"--key owner deploy {digest}",
+        f"--key staging deploy sha256:{'A' * 64}",
+        f"--key staging rollback {digest} 1",
+        "--key staging deploy sha256:abc",
+        "--key staging id",
+    ):
+        assert not regex.fullmatch(bad), bad
 
 
 def test_installed_bootstrap_db_finds_its_db_directory(rig: Rig) -> None:
