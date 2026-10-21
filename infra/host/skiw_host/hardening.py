@@ -1,10 +1,10 @@
-"""`check-hardening` (spec §8.4 H2, H7; runbook host-rebuild.md "Host").
+"""`check-hardening` (spec §8.4 H2, H4, H6, H7; runbook host-rebuild.md "Host").
 
 Read-only: it never changes the host. One line per check, `PASS name` or `FAIL name: what`; a check
 whose tool is missing, exits non-zero or prints what cannot be parsed fails, never passes. Files are
 read without following links, with the owner and mode checked on the open file. No secret value
-is ever printed. Each check is one entry in CHECKS; the secret-store, container-env, role-set and
-pg-hba checks are added in M1f-2b.
+is ever printed: the container check names the container and the variable only. Each check is
+one entry in CHECKS. role-set needs `--compose-file` (the host's compose.yml, fixed in M1g).
 Exit 0 all passed, 1 a check failed, 2 refused (not root, or a bad env file).
 """
 
@@ -21,8 +21,9 @@ from string import Template
 from typing import Any
 
 from skiw_host import apply
-from skiw_host.bootstrap_db import Runner, run_command
-from skiw_host.bootstrap_secrets import Refused
+from skiw_host.bootstrap_db import DB, HBA, HBA_MODE, Runner, psql_script, render_hba, run_command
+from skiw_host.bootstrap_secrets import DIR_MODE, MARKER, Refused
+from skiw_host.secrets import OWNER
 
 APT_LINE = re.compile(r'(\S+) "(.*)";')
 ORIGINS = ("Unattended-Upgrade::Allowed-Origins", "Unattended-Upgrade::Origins-Pattern")
@@ -31,7 +32,52 @@ SSHD_DROP_INS = "etc/ssh/sshd_config.d"
 SSHD_ALIASES = {"challengeresponseauthentication": "kbdinteractiveauthentication"}
 # sshd strips quotes from a keyword; this scan does not, so it refuses any line that has them
 SSHD_QUOTES = "\"'\\"
+SECRETS = "etc/skiw/secrets"
+SECRET_MODE = stat.S_IRUSR  # 0400 (bootstrap-secrets, bootstrap-db)
+MIN_SECRET = 16  # shorter strings are not looked for in container environments (owner, M1f-2b)
+KEY_LINE = re.compile(r"v[1-9][0-9]*:(.+)")  # app keys; the payload is searched too
+CONTAINER_ID = re.compile(r"[0-9a-f]{64}")  # `docker ps --no-trunc`
+SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")  # container and variable names shown
+# The whole role inventory (no name filter), every role setting, every membership.
+ROLES_QUERY = rb"""\pset format unaligned
+\pset tuples_only on
+SELECT concat_ws('|', 'role', oid, rolname, rolcanlogin, rolsuper, rolbypassrls, rolcreatedb,
+  rolcreaterole, rolreplication, rolconnlimit) FROM pg_roles;
+SELECT concat_ws('|', 'setting', r.rolname, s.setdatabase, c)
+FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole, unnest(s.setconfig) c;
+SELECT concat_ws('|', 'member', u.rolname, g.rolname, m.admin_option, m.inherit_option,
+  m.set_option)
+FROM pg_auth_members m JOIN pg_roles u ON u.oid = m.member JOIN pg_roles g ON g.oid = m.roleid;
+"""
+BOOTSTRAP, BOOTSTRAP_OID = (
+    "postgres",
+    10,
+)  # initdb's superuser (POSTGRES_USER), BOOTSTRAP_SUPERUSERID
+FIRST_NORMAL_OID = (
+    16384  # below it: made by initdb, so pg_* there are PostgreSQL's predefined roles
+)
+LABELS = (
+    "login",
+    "superuser",
+    "bypassrls",
+    "createdb",
+    "createrole",
+    "replication",
+    "connection limit",
+)
+ATTRIBUTES = ("LOGIN", "SUPERUSER", "BYPASSRLS", "CREATEDB", "CREATEROLE", "REPLICATION")
 Owner = Callable[[Path, os.stat_result], tuple[int, int]]
+Settings = set[tuple[str, str, str]]  # role, database oid (0: every database), name=value
+# (member, group) -> admin, inherit, set option ('t'/'f'); () when the pair is granted twice
+Members = dict[tuple[str, str], tuple[str, ...]]
+MEMBER_OPTIONS = ("admin", "inherit", "set")
+# PostgreSQL 17.11's own memberships right after initdb, with their options (native run, the
+# fixture roles-pg17.txt). Exactly these and roles.sql's grants are allowed; nothing else.
+BASELINE_MEMBERS: Members = {
+    ("pg_monitor", "pg_read_all_settings"): ("f", "t", "t"),
+    ("pg_monitor", "pg_read_all_stats"): ("f", "t", "t"),
+    ("pg_monitor", "pg_stat_scan_tables"): ("f", "t", "t"),
+}
 
 
 class Bad(Exception):
@@ -41,6 +87,8 @@ class Bad(Exception):
 class Host:
     def __init__(self, args: argparse.Namespace, run: Runner, owner: Owner, env_text: str) -> None:
         self.root, self.env_file, self.run, self.owner = args.root, args.env_file, run, owner
+        self.compose: Path | None = args.compose_file
+        self.env_text = env_text
         self.values, self.ban = apply.host_values(self.env_file, env_text)
 
     def tool(self, argv: list[str], stdin: bytes = b"") -> str:
@@ -246,6 +294,201 @@ def docker_group(host: Host) -> list[str]:
     ]
 
 
+def secret_store(host: Host) -> list[str]:
+    try:
+        apply.untrusted(host.root, [f"{SECRETS}/x"], lambda p: host.owner(p, p.lstat()))
+    except Refused as exc:
+        raise Bad(str(exc)) from None
+    info = (host.root / SECRETS).lstat()  # the directory itself, never a link's target
+    mode = stat.S_IMODE(info.st_mode)
+    if not stat.S_ISDIR(info.st_mode) or host.owner(host.root / SECRETS, info) != (0, 0):
+        return [f"/{SECRETS} is not a directory owned by root:root"]  # never listed through a link
+    problems = [] if mode == DIR_MODE else [f"/{SECRETS} has mode {mode:04o}, want 0700"]
+    names = sorted(os.listdir(host.root / SECRETS))
+    problems += [f"{name} is missing" for name in sorted(OWNER.keys() - set(names))]
+    for name in names:
+        if name not in OWNER and name != MARKER:
+            problems.append(f"{name} is not in the inventory")
+            continue
+        try:
+            host.read(f"{SECRETS}/{name}", OWNER.get(name, 0), SECRET_MODE)
+        except (Bad, OSError) as exc:
+            problems.append(str(exc) if isinstance(exc, Bad) else f"{name}: {exc.strerror}")
+    return problems
+
+
+def secret_lines(host: Host) -> tuple[list[str], set[str], set[str]]:
+    """Problems, the strings searched as substrings (16+ characters: a whole line, or the part
+    after `v<n>:`) and the shorter ones, only compared whole; named by file, never shown."""
+    problems, long, short = [], set(), set()
+    for name in sorted(OWNER):
+        text = host.read(f"{SECRETS}/{name}", OWNER[name], SECRET_MODE).decode()
+        lines = [line for line in text.splitlines() if line]
+        if not lines:
+            problems.append(f"{name} is empty")
+        for line in lines:
+            payload = m[1] if (m := KEY_LINE.fullmatch(line)) else line
+            if len(payload) < MIN_SECRET:
+                problems.append(
+                    f"{name} is shorter than {MIN_SECRET} characters, so it cannot be searched"
+                )
+                short |= {line, payload}
+            long |= {v for v in (line, payload) if len(v) >= MIN_SECRET}
+    return problems, long, short
+
+
+def environments(host: Host) -> list[tuple[str, list[str]]]:
+    """(name, Env) of every running container, each requested id described exactly once."""
+    ids = host.tool(["docker", "ps", "-q", "--no-trunc"]).split()
+    if not all(CONTAINER_ID.fullmatch(i) for i in ids) or len(set(ids)) != len(ids):
+        raise Bad("cannot read the container ids from docker ps")
+    items = json.loads(host.tool(["docker", "inspect", *ids])) if ids else []
+    if not isinstance(items, list) or sorted(
+        str(item.get("Id")) if isinstance(item, dict) else "" for item in items
+    ) != sorted(ids):
+        raise Bad("docker inspect did not describe each running container exactly once")
+    found = []
+    for item in items:
+        config, env = item.get("Config"), (item.get("Config") or {}).get("Env", 0)
+        if not isinstance(config, dict) or not isinstance(item.get("Name"), str):
+            raise Bad("docker inspect gave a container without Config or Name")
+        if env is not None and not (isinstance(env, list) and all(isinstance(e, str) for e in env)):
+            raise Bad("docker inspect gave an Env that is not null or a list of strings")
+        found.append((item["Name"].lstrip("/"), env or []))
+    return found
+
+
+def container_env(host: Host) -> list[str]:
+    problems, long, short = secret_lines(host)
+    found = []
+    for container, env in environments(host):
+        for entry in env:
+            variable, _, value = entry.partition("=")
+            if any(v in value for v in long) or value in short:
+                name = container if SAFE_NAME.fullmatch(container) else "a container"
+                found.append(
+                    f"{name} {variable if SAFE_NAME.fullmatch(variable) else 'a variable'}"
+                )
+    return problems + ([f"a secret value is in {', '.join(found)}"] if found else [])
+
+
+def expected_roles() -> tuple[dict[str, tuple[str, ...]], Settings, Members]:
+    """roles.sql read as data: each role's attributes and limit, its settings, its memberships."""
+    lines = (DB / "roles.sql").read_text("utf-8").splitlines()
+    sql = " ".join(line for line in lines if not line.lstrip().startswith("--"))
+    settings = {
+        (m[1], "0", f"{m[2]}={m[3]}")
+        for m in re.finditer(r"ALTER ROLE (\w+) SET (\w+) = (\w+);", sql)
+    }
+    members: Members = {}
+    for m in re.finditer(r"GRANT (\w+) TO (\w+)(?: WITH ([\w ,]+))?;", sql):
+        # PostgreSQL 16+ defaults: no ADMIN, SET, INHERIT as the member role's own (INHERIT)
+        noinherit = re.search(rf"ALTER ROLE {m[2]} [^;]*\bNOINHERIT\b", sql)
+        options = {"ADMIN": "f", "INHERIT": "f" if noinherit else "t", "SET": "t"}
+        for item in filter(None, (m[3] or "").split(",")):
+            name, value = item.split()
+            if name not in options or value not in ("TRUE", "FALSE", "OPTION"):
+                raise ValueError(item)
+            options[name] = "f" if value == "FALSE" else "t"
+        members[(m[2], m[1])] = (options["ADMIN"], options["INHERIT"], options["SET"])
+    attributes = {}
+    for role, rest in re.findall(r"ALTER ROLE (\w+) ((?:NO)?LOGIN[^;]*);", sql):
+        words = rest.split()
+        limit = words[words.index("LIMIT") + 1] if "LIMIT" in words else "-1"
+        attributes[role] = (*("t" if a in words else "f" for a in ATTRIBUTES), limit)
+    return attributes, settings, members
+
+
+def parse_roles(out: str) -> tuple[dict[str, tuple[int, tuple[str, ...]]], Settings, Members, int]:
+    """The query's rows; a row of any other shape is only counted, never kept or shown."""
+    roles: dict[str, tuple[int, tuple[str, ...]]] = {}
+    settings: Settings = set()
+    members: Members = {}
+    bad = 0
+    for line in filter(None, out.splitlines()):
+        f = line.split("|")
+        if (
+            f[0] == "role"
+            and len(f) == 10
+            and f[1].isdigit()
+            and f[2] not in roles
+            and all(x in ("t", "f") for x in f[3:9])
+            and re.fullmatch(r"-?[0-9]+", f[9])
+        ):
+            roles[f[2]] = (int(f[1]), tuple(f[3:10]))
+        elif f[0] == "setting" and len(f) >= 4 and f[2].isdigit() and "=" in f[3]:
+            settings.add((f[1], f[2], "|".join(f[3:])))
+        elif f[0] == "member" and len(f) == 6 and all(x in ("t", "f") for x in f[3:6]):
+            members[(f[1], f[2])] = () if (f[1], f[2]) in members else tuple(f[3:6])
+        else:
+            bad += 1
+    return roles, settings, members, bad
+
+
+def role_set(host: Host) -> list[str]:
+    """The whole role inventory, as the database reports it through the socket as postgres
+    (bootstrap-db's password-file wrapper), against roles.sql, `postgres` and PostgreSQL's own
+    predefined roles. Messages carry only names that cannot hold database content: those of
+    roles.sql, `postgres`, the predefined roles and roles.sql's setting names."""
+    if host.compose is None or not host.compose.is_relative_to(host.root):
+        raise Bad("needs --compose-file, the host's compose.yml (its path is fixed in M1g)")
+    host.read(str(host.compose.relative_to(host.root)))  # root-owned, not a link: docker reads it
+    compose = ["docker", "compose", "-f", str(host.compose), "--env-file", str(host.env_file)]
+    psql = [*compose, "exec", "-T", "db", "sh", "-c", psql_script()]
+    roles, settings, members, bad = parse_roles(host.tool(psql, ROLES_QUERY))
+    want, want_settings, want_members = expected_roles()
+    system = {n for n, (oid, _) in roles.items() if n.startswith("pg_") and oid < FIRST_NORMAL_OID}
+    known = {*want, BOOTSTRAP, *system}
+    problems = [f"{bad} unparsable role rows"] if bad else []
+    if extra := [n for n in roles if n not in known]:
+        supers = sum(roles[n][1][1] == "t" for n in extra)
+        problems.append(
+            f"{len(extra)} roles not in roles.sql ({supers} superuser); list them with \\du"
+        )
+    oid, attributes = roles.get(BOOTSTRAP, (0, ()))
+    if oid != BOOTSTRAP_OID or attributes[1:2] != ("t",):
+        problems.append(f"{BOOTSTRAP} is not the bootstrap superuser")
+    for name, wanted in want.items():
+        if name not in roles:
+            problems.append(f"{name} is missing")
+        elif diff := [
+            label for label, a, w in zip(LABELS, roles[name][1], wanted, strict=True) if a != w
+        ]:
+            problems.append(f"{name}: {', '.join(diff)} differ from roles.sql")
+    for name in sorted(system):
+        if roles[name][1][:3] != ("f", "f", "f"):
+            problems.append(f"{name} can log in, is a superuser or bypasses RLS")
+    named = {(role, conf.partition("=")[0]) for role, _, conf in want_settings}
+    for role, _db, conf in sorted(settings - want_settings):
+        setting = conf.partition("=")[0]
+        label = role if role in known else "a role not in roles.sql"
+        shown = setting if (role, setting) in named else "a setting"
+        problems.append(f"{label}: {shown} is not as roles.sql sets it")
+    present = {(role, conf.partition("=")[0]) for role, _, conf in settings}
+    problems += [f"{role}: {name} is not set" for role, name in sorted(named - present)]
+    allowed = {**BASELINE_MEMBERS, **want_members}
+    for (member, group), options in sorted(members.items()):
+        pair = f"{member} in {group}" if {member, group} <= known else "a role not in roles.sql"
+        if (member, group) not in allowed:
+            problems.append(f"unexpected membership: {pair}")
+        elif not options:
+            problems.append(f"{pair}: granted more than once")
+        elif diff := [
+            o
+            for o, a, w in zip(MEMBER_OPTIONS, options, allowed[member, group], strict=True)
+            if a != w
+        ]:
+            problems.append(f"{pair}: options differ from the allowed grant: {', '.join(diff)}")
+    problems += [f"{m} is not a member of {g}" for m, g in sorted(allowed.keys() - members.keys())]
+    return problems
+
+
+def pg_hba(host: Host) -> list[str]:
+    data = host.read(HBA, mode=HBA_MODE).decode("utf-8")
+    rendered = render_hba(host.env_file, host.env_text)  # the env text read safely at start
+    return [] if data == rendered else [f"/{HBA} differs from the file rendered from the env file"]
+
+
 def stale_files(host: Host) -> list[str]:
     """Files apply would not install now, and owed reloads; reported, never removed."""
     problems = []
@@ -275,6 +518,10 @@ CHECKS: dict[str, Callable[[Host], list[str]]] = {
     "listening-sockets": sockets,
     "docker-group": docker_group,
     "stale-files": stale_files,
+    "secret-store": secret_store,
+    "container-env": container_env,
+    "role-set": role_set,
+    "pg-hba": pg_hba,
 }
 
 
@@ -283,6 +530,7 @@ def main(
 ) -> int:
     parser = argparse.ArgumentParser(prog="check-hardening", description=__doc__)
     parser.add_argument("--env-file", type=Path, default=Path("/") / apply.ENV)
+    parser.add_argument("--compose-file", type=Path, help="role-set: the host's compose.yml")
     parser.add_argument("--root", type=Path, default=Path("/"), help=argparse.SUPPRESS)  # tests
     args = parser.parse_args(argv)
     try:

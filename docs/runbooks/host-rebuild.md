@@ -2,7 +2,7 @@
 
 Building a staging or production VPS from nothing, or rebuilding one after loss (spec §8.4).
 Sections are added as M1 lands: host files, users, packages and units (M1f-1a, M1f-1b), secrets (M1d),
-database roles (M1e), the hardening check (M1f-2a; secret and database checks M1f-2b);
+database roles (M1e), the hardening check (M1f-2a, M1f-2b);
 measured values in M1k. The operator is the owner (UNI-12); no agent holds a host credential.
 
 ## Host (`apply`, spec §8.4 H1, H2, H7)
@@ -50,10 +50,11 @@ after exit 1 run `apply` again and it redoes them. Under `allowlist`, a jail fil
 `fail2ban` is removed (printed) and fail2ban restarted if it runs; the package and its Ubuntu
 default jail stay. On an SSH port change keep one session open and test the new port first.
 
-### Checking the host: `check-hardening` (spec §8.4 H2)
+### Checking the host: `check-hardening` (spec §8.4 H2, H4, H6)
 
 Run after every `apply` and after any host change, as root: `sudo check-hardening` (installed by
-`apply` in `/usr/local/sbin`; it reads `/etc/skiw/host.env`, or `--env-file <path>`). It is
+`apply` in `/usr/local/sbin`; it reads `/etc/skiw/host.env`, or `--env-file <path>`; add
+`--compose-file <compose.yml>` for `role-set`, whose path is fixed in M1g). It is
 read-only: it changes nothing, deletes nothing, and loads the rendered nftables file only in a
 throwaway network namespace (`unshare --net`). It prints one line per check, `PASS <name>` or
 `FAIL <name>: <what>`, with non-secret values only. Exit 0 all passed, 1 a check failed, 2 refused
@@ -70,10 +71,14 @@ Files it reads must be regular files, not links, root-owned and not writable by 
 | `listening-sockets` | `ss -tlnp` shows nothing on a non-loopback address except 80, 443 and the SSH port, and `dockerd` listens on no TCP address at all, loopback included |
 | `docker-group` | neither `skiw-deploy` nor `skiw-ops` is in group `docker` |
 | `stale-files` | no fail2ban jail under `allowlist`, no other `/etc/sudoers.d/skiw*`, no sshd drop-in sorting before `00-skiw.conf` that sets a checked key, no `/var/lib/skiw/apply.pending` (run `apply`) |
+| `secret-store` | `/etc/skiw/secrets` is a root:root 0700 directory, not a link; it holds every inventory name (`skiw_host/secrets.py`) and nothing else but `.restored`; each file is a regular file, mode 0400, owned by its inventory uid, group root |
+| `container-env` | no running container's environment (`docker inspect`) holds a secret value: a secret line, or the part after `v<n>:`, of 16 characters or more is searched inside every value; a shorter credential is compared whole and also FAILs as unsupported (it cannot be searched safely), as does an empty secret file; each container from `docker ps` must be described exactly once, with a `Config` and an `Env` that is null or a list of strings; a FAIL names the secret file, container and variable, never the value |
+| `role-set` | through the db socket as `postgres` (`docker compose exec db`, bootstrap-db's password file), the WHOLE role inventory: only the six roles of `roles.sql` (with their attributes, connection limits and settings), `postgres` (the bootstrap superuser, the only superuser) and PostgreSQL's predefined `pg_*` roles (made by initdb; none may log in, be superuser or bypass RLS); any other role, of any name, fails; memberships are exactly `roles.sql`'s grants (`skiw_backup` in `pg_read_all_data`) plus PostgreSQL 17.11's own after initdb (`pg_monitor` in `pg_read_all_settings`, `pg_read_all_stats` and `pg_stat_scan_tables`), each with its options (`admin_option` false, `inherit_option` true, `set_option` true); any other membership (also between `pg_*` roles, e.g. `pg_read_all_data` in `pg_write_all_data`), a missing one, one granted twice or changed options (`INHERIT FALSE`, `SET FALSE`, `ADMIN OPTION`) fails. A FAIL names only roles from that list and `roles.sql`'s settings; other roles are counted (find them with `\du`), and no setting value or database row is ever printed; fails without `--compose-file` |
+| `pg-hba` | `/etc/skiw/db/pg_hba.conf` (root, 0444) equals the template rendered from the env file; after a subnet change run `bootstrap-db prepare` again |
 
-On a FAIL, fix the cause (usually: run `apply` again) and rerun the check. Coming in M1f-2b: the
-secret store owners and modes, no secret value in any container environment, the database role set
-and `pg_hba.conf` against the env file. The health timer runs it monthly from M1j.
+On a FAIL, fix the cause (usually: run `apply` again; for `secret-store` and `pg-hba` the
+bootstrap steps below) and rerun the check. Before the secrets and the database exist, those four
+checks fail, as expected. The health timer runs it monthly from M1j.
 
 ## Secrets (`bootstrap-secrets`, spec §8.4 H4)
 
@@ -239,4 +244,4 @@ sudo infra/host/bootstrap-db apply --env-file <env file> --compose-file <compose
 
 ### Not verified yet
 On a real VPS (M1k): the owner's recipients, the off-host copy of the bundle, a restore on a fresh
-host, and `check-hardening` of owners and modes (M1f).
+host, and `check-hardening` of owners and modes on both hosts (M1k).
