@@ -304,7 +304,7 @@ def test_profiles_and_networks(config: Config) -> None:
 
 def test_app_image_must_be_set_and_pinned() -> None:
     assert render(ENV / "ci.env", SKIW_IMAGE="").returncode != 0
-    tagged = load(ENV / "ci.env", SKIW_IMAGE="ghcr.io/charliekhc/skiw-platform:latest")
+    tagged = load(ENV / "ci.env", SKIW_IMAGE="ghcr.io/skiw-platform/skiw-platform:latest")
     assert [problem.split(":")[0] for problem in unpinned(tagged)] == ["migrate", "web", "worker"]
 
 

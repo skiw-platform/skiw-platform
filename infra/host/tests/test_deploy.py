@@ -22,7 +22,7 @@ import pytest
 from skiw_host import apply, deploy, hardening
 
 HOST = Path(__file__).resolve().parents[1]
-REPO = "ghcr.io/charliekhc/skiw-platform"
+REPO = "ghcr.io/skiw-platform/skiw-platform"
 NEW, OLD = f"sha256:{'a' * 64}", f"sha256:{'b' * 64}"
 NO_PLAN = "Planned operations:\n  No planned migration operations.\n"
 A_PLAN = "Planned operations:\njobs.0002_x\n    Raw SQL operation\n"
@@ -324,7 +324,7 @@ def test_a_bad_request_is_refused_and_nothing_runs(rig: Rig, argv: tuple[str, ..
         ("staging", {"SKIW_ENVIRONMENT": "production"}),
         ("staging", {"SKIW_ENVIRONMENT": ""}),
         ("staging", {"SKIW_IMAGE_REPOSITORY": "ghcr.io/someone-else"}),
-        ("staging", {"SKIW_IMAGE_REPOSITORY": "docker.io/charliekhc/skiw-platform"}),
+        ("staging", {"SKIW_IMAGE_REPOSITORY": "docker.io/skiw-platform/skiw-platform"}),
         ("staging", {"SKIW_HOSTNAME": ""}),
         ("staging", {"SKIW_DEPLOY_HEALTH_TIMEOUT_S": "0"}),
     ],
