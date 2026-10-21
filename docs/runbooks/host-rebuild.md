@@ -207,16 +207,20 @@ Run it in this order on a new or rebuilt host. It needs root, for the same reaso
    so `db` cannot start before this step.
 3. Start `db` with the same Compose file and environment file, and wait until it is healthy.
    Compose checks the whole file, so it refuses this step until `SKIW_HOSTNAME` (owner value G9)
-   and `SKIW_IMAGE` have values; before the first deploy there is no state file, so give the
-   digest you will deploy on the command line, as below. On a real host this step is
+   and `SKIW_IMAGE` have values. Before the first deploy there is no state file, so give the
+   full `<repository>@sha256:<digest>` you will deploy to **both** commands below (`bootstrap-db
+   apply` runs Compose too and passes its environment on; a variable set for one `sudo` command does
+   not reach the next). After a deploy, use the image in `/var/lib/skiw/deploy.env`. On a real host this step is
    staged to M1g and M1k. CI runs it with `env/ci.env`, which sets both.
 4. `apply` sets the roles and the passwords.
 
 ```
 sudo infra/host/bootstrap-db prepare --env-file <env file>
-sudo env SKIW_IMAGE=<repository>@<digest> docker compose -f /srv/skiw/compose.yml \
+image=ghcr.io/<owner>/<name>@sha256:<64 hex>   # the digest you will deploy
+sudo env SKIW_IMAGE="$image" docker compose -f /srv/skiw/compose.yml \
   --env-file /etc/skiw/host.env up -d --wait db
-sudo bootstrap-db apply --env-file /etc/skiw/host.env --compose-file /srv/skiw/compose.yml
+sudo env SKIW_IMAGE="$image" bootstrap-db apply --env-file /etc/skiw/host.env \
+  --compose-file /srv/skiw/compose.yml
 ```
 
 - `prepare` makes each missing DB password file (32 random bytes, mode 0400, owner from the

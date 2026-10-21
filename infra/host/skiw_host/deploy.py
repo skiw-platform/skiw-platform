@@ -13,10 +13,12 @@ changed), 3 done but the log line failed.
 import argparse
 import fcntl
 import json
+import math
 import os
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import syslog
 import tempfile
@@ -45,6 +47,8 @@ LOCK_MODE = stat.S_IRUSR | stat.S_IWUSR  # 0600
 TOKEN_FILE = f"{SECRETS}/ghcr_read_token"
 HEARTBEAT_S = 10  # procrastinate 3.10 Worker.update_heartbeat_interval (default)
 POLL_S = 2
+SWITCH_S = 300  # bound on one `docker compose up -d` or `stop` (switch and recovery)
+TimedRunner = Callable[[list[str], bytes, float], subprocess.CompletedProcess[bytes]]
 # The pre-migration dump hook: the `backup` service's `predeploy` command (built in M1g-2) prints
 # exactly this one line when the encrypted dump and its checksum are written. Anything else,
 # including today's plain pg_dump, stops the deploy before `migrate`.
@@ -52,6 +56,9 @@ DUMP = ["--profile", "ops", "run", "--rm", "-T", "backup", "predeploy"]
 DUMP_DONE = re.compile(r"predeploy [0-9]{8}T[0-9]{6}Z\.dump\.age [0-9a-f]{64}")
 PLAN = ["--profile", "deploy", "run", "--rm", "-T", "migrate", "python", "app/manage.py", "migrate"]
 WORKERS = "SELECT coalesce(max(id), 0) FROM procrastinate_workers;"
+# Server-side bounds, so a statement stuck behind a lock is cancelled by the database too, not only
+# its `docker compose exec` client by the subprocess timeout.
+BOUND = "SET statement_timeout = {0}; SET lock_timeout = {0};"
 LIVE = (
     "SELECT count(*) FROM procrastinate_workers"
     " WHERE id > {} AND last_heartbeat > now() - interval '{} seconds';"
@@ -64,9 +71,15 @@ def to_alert(message: str) -> None:  # picked up by the health alert sender (M1j
     syslog.syslog(syslog.LOG_ALERT, message)
 
 
+def run_timed(argv: list[str], stdin: bytes, timeout: float) -> subprocess.CompletedProcess[bytes]:
+    """subprocess.run kills the child and raises TimeoutExpired when the bound passes."""
+    return subprocess.run(argv, input=stdin, capture_output=True, check=False, timeout=timeout)  # noqa: S603 - argv built here, no shell
+
+
 class Deploy:
     def __init__(self, root: Path, run: Runner, owner: Owner, chown: Chown) -> None:
         self.root, self.run, self.owner, self.chown = root, run, owner, chown
+        self.timed: TimedRunner = run_timed  # the switch, the health probes and the recovery
         self.clock: Callable[[], float] = time.monotonic
         self.sleep: Callable[[float], None] = time.sleep
 
@@ -80,8 +93,8 @@ class Deploy:
         except OSError as exc:  # missing, or a link (ELOOP)
             raise Refused(f"/{rel}: {exc.strerror}") from None
 
-    def ok(self, argv: list[str], label: str, stdin: bytes = b"") -> str:
-        done = self.run(argv, stdin)
+    def ok(self, argv: list[str], label: str, stdin: bytes = b"", bound: float = 0) -> str:
+        done = self.timed(argv, stdin, bound) if bound else self.run(argv, stdin)
         if done.returncode != 0:  # the output may quote config or data: withheld
             raise Failed(f"`{label}` exited {done.returncode}")
         return done.stdout.decode("utf-8")
@@ -133,15 +146,17 @@ def lock(d: Deploy) -> int:
     return fd
 
 
-def current(d: Deploy, repository: str) -> str | None:
-    """The image in the state file, or None before the first deploy."""
+def current(d: Deploy, repository: str) -> tuple[str, bytes] | None:
+    """The running image and the state file's exact content, or None: no deploy has succeeded
+    (a failed first deploy removes the state it wrote)."""
     path = d.root / apply.STATE
     if not path.exists() and not path.is_symlink():
         return None
-    image = settings(path, d.read(apply.STATE, apply.CONFIG).decode("utf-8")).get("SKIW_IMAGE", "")
+    data = d.read(apply.STATE, apply.CONFIG)
+    image = settings(path, data.decode("utf-8")).get("SKIW_IMAGE", "")
     if image.partition("@")[0] != repository or not DIGEST.fullmatch(image.partition("@")[2]):
         raise Refused(f"/{apply.STATE} does not name an image of the fixed repository")
-    return image
+    return image, data
 
 
 def pull(d: Deploy, repository: str, image: str) -> None:
@@ -180,85 +195,114 @@ def pending(d: Deploy, image: str) -> bool:
     raise Failed("`migrate --plan` printed something that is not a plan")
 
 
-def workers(d: Deploy, image: str, query: str) -> int:
+def workers(d: Deploy, image: str, query: str, bound: float) -> int:
+    """One count, bounded by `bound` seconds on the client and in the database."""
     psql = [*d.compose(image), "exec", "-T", "db", "sh", "-c", psql_script()]
-    script = f"\\pset format unaligned\n\\pset tuples_only on\n{query}\n"
-    out = d.ok(psql, "psql", script.encode()).strip()
+    limits = BOUND.format(max(1, int(bound * 1000)))
+    script = f"\\pset format unaligned\n\\pset tuples_only on\n{limits}\n{query}\n"
+    out = d.ok(psql, "psql", script.encode(), bound).strip()
     if not re.fullmatch(r"[0-9]{1,19}", out):
         raise Failed("psql did not print one count")
     return int(out)
 
 
-def switch(d: Deploy, image: str) -> None:
+def write_state(d: Deploy, data: bytes | None) -> None:
+    """Replace the state file atomically with `data`, or remove it (None)."""
     try:  # checked before the pull too; a change since then fails here (migrate has run)
         apply.untrusted(d.root, [apply.STATE], lambda p: d.owner(p, p.lstat()))
         apply.make_directories(d.root, Path(apply.STATE).parent, d.chown)
     except Refused as exc:
         raise Failed(str(exc)) from None
+    if data is None:
+        (d.root / apply.STATE).unlink(missing_ok=True)
+        return
     tmp = d.root / f"{apply.STATE}.skiw-new"
     tmp.unlink(missing_ok=True)  # a leftover of a stopped run, in a root-only directory
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, apply.CONFIG)
-    with os.fdopen(fd, "w", encoding="ascii") as handle:
-        handle.write(f"SKIW_IMAGE={image}\n")
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(data)
         handle.flush()
         os.fsync(handle.fileno())
     os.chmod(tmp, apply.CONFIG)
     d.chown(str(tmp), *apply.ROOT)
     os.replace(tmp, d.root / apply.STATE)
-    d.ok([*d.compose(image), "up", "-d"], "docker compose up")
 
 
-def healthy(d: Deploy, image: str, hostname: str, timeout: int, before: int) -> bool:
-    """/readyz 200 through Caddy within the timeout, then a worker newer than `before` with a
-    heartbeat, within two heartbeat intervals. Any error counts as not healthy."""
-    curl = ["curl", "--silent", "--output", "/dev/null", "--write-out", "%{http_code}"]
-    curl += ["--max-time", "5", "--resolve", f"{hostname}:443:127.0.0.1"]
-    curl += [f"https://{hostname}/readyz"]
+def switch(d: Deploy, image: str) -> None:
+    write_state(d, f"SKIW_IMAGE={image}\n".encode("ascii"))
+    d.ok([*d.compose(image), "up", "-d"], "docker compose up", bound=SWITCH_S)
 
-    def ready() -> bool:  # curl exits non-zero (and writes 000) when it gets no response
-        done = d.run(curl, b"")
+
+def within(d: Deploy, limit: float, probe: Callable[[float], bool]) -> bool:
+    """Poll `probe(seconds left)` until it passes; a result that arrives after the deadline is
+    rejected, and each probe is itself bounded by the time left."""
+    deadline = d.clock() + limit
+    while (left := deadline - d.clock()) > 0:
+        passed = probe(left)
+        if d.clock() > deadline:
+            return False
+        if passed:
+            return True
+        d.sleep(min(POLL_S, max(0.0, deadline - d.clock())))
+    return False
+
+
+def healthy(d: Deploy, image: str, hostname: str, timeout: int, floor: int) -> bool:
+    """/readyz 200 through Caddy within the timeout, then a worker with an id above `floor` and a
+    fresh heartbeat within two heartbeat intervals. A timeout or error raises (not healthy)."""
+
+    def ready(left: float) -> bool:  # curl exits non-zero (and writes 000) without a response
+        curl = ["curl", "--silent", "--output", "/dev/null", "--write-out", "%{http_code}"]
+        curl += ["--max-time", str(max(1, min(5, math.floor(left))))]
+        curl += ["--resolve", f"{hostname}:443:127.0.0.1", f"https://{hostname}/readyz"]
+        done = d.timed(curl, b"", left)
         return done.returncode == 0 and done.stdout == b"200"
 
-    def registered() -> bool:
-        return workers(d, image, LIVE.format(before, 2 * HEARTBEAT_S)) > 0
+    def registered(left: float) -> bool:
+        return workers(d, image, LIVE.format(floor, 2 * HEARTBEAT_S), left) > 0
 
-    for limit, probe in ((timeout, ready), (2 * HEARTBEAT_S, registered)):
-        deadline = d.clock() + limit
-        while not probe():
-            if d.clock() >= deadline:
-                return False
-            d.sleep(POLL_S)
-    return True
+    return within(d, timeout, ready) and within(d, 2 * HEARTBEAT_S, registered)
 
 
 def deploy(
     d: Deploy, alert: Journal, image: str, repository: str, hostname: str, timeout: int
 ) -> str:
-    previous = current(d, repository)
+    found = current(d, repository)
+    previous, prior = found if found else (None, None)
     pull(d, repository, image)
     if pending(d, image):
         out = d.ok([*d.compose(image), *DUMP], "pre-migration dump")
         if not DUMP_DONE.fullmatch(out.strip()):
             raise Failed("the pre-migration dump did not report a written dump")
     d.ok([*d.compose(image), *PLAN], "migrate")  # as skiw_migrator; old containers keep serving
-    before = workers(d, image, WORKERS)
-    switch(d, image)
+    # Same digest: Compose keeps the running worker, so its fresh heartbeat is the proof; a new
+    # digest recreates the worker, which must register above the ids that existed before.
+    floor = 0 if previous == image else workers(d, image, WORKERS, 2 * HEARTBEAT_S)
     was = (previous or "none").rpartition("@")[2]
-    try:
-        if healthy(d, image, hostname, timeout, before):
+    step = "switch"
+    try:  # from the state replacement on, every failure goes through the recovery below
+        switch(d, image)
+        step = "health check"
+        if healthy(d, image, hostname, timeout, floor):
             return f"deployed; previous {was}"
-    except Exception:  # noqa: S110 - unreadable health is unhealthy: switch back below
+    except Exception:  # noqa: S110 - a failed or unreadable step: recover below
         pass
-    back = f"switched back to {was}" if previous else "no previous digest: web and worker stopped"
-    try:
+    try:  # each command bounded by SWITCH_S; migrations are never reversed
         if previous is None:
-            d.ok([*d.compose(image), "stop", "web", "worker"], "docker compose stop")
+            try:
+                d.ok([*d.compose(image), "stop", "web", "worker"], "compose stop", bound=SWITCH_S)
+            finally:
+                write_state(d, None)  # a failed first image is never a later switch-back target
+            back = "no previous digest: web and worker stopped"
         else:
-            switch(d, previous)
+            write_state(d, prior)
+            d.ok([*d.compose(previous), "up", "-d"], "docker compose up", bound=SWITCH_S)
+            back = f"switched back to {was}"
+        alert(f"deploy {image.partition('@')[2]} failed its {step}; {back}")
     except Exception:  # reported and alerted, never hidden
-        back = f"switching back to {was} FAILED: see docs/runbooks/deploy.md"
-    alert(f"deploy {image.partition('@')[2]} failed its health check; {back}")
-    raise Failed(f"the health check failed; {back}; migrations were not reversed")
+        back = f"RECOVERY FAILED, switching back to {was}: see docs/runbooks/deploy.md"
+        alert(f"deploy {image.partition('@')[2]} failed its {step}; {back}")
+    raise Failed(f"the {step} failed; {back}; migrations were not reversed")
 
 
 def main(

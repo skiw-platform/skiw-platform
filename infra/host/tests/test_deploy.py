@@ -1,13 +1,16 @@
 """`skiw-deploy` and its forced command `skiw-deploy-ssh` (spec §8.4 H3; plan §3 M1g, first part).
 
 A fake runner stands in for docker (login, pull by digest, image inspect, compose run/up/stop/exec)
-and curl, with their documented failure rules; a fake clock stands in for time. The GHCR token is
+and curl, with their documented failure rules: `compose up` recreates web and worker only when the
+image changed (an unchanged worker keeps its procrastinate id) and may apply a change and still
+exit 1; a bounded command may time out. A fake clock stands in for time. The GHCR token is
 generated per test and must reach `docker login` on stdin only, never argv, output or a log.
 """
 
 import fcntl
 import json
 import os
+import re
 import stat
 import subprocess
 from collections.abc import Callable
@@ -39,8 +42,16 @@ class Rig:
         self.pulled: set[str] = set()
         self.running: str | None = None  # the image web and worker run
         self.healthy = {f"{REPO}@{OLD}", f"{REPO}@{NEW}"}
-        self.out = {"plan": (0, NO_PLAN), "dump": (1, ""), "migrate": (0, ""), "up": (0, "")}
-        self.workers, self.registered = 4, True
+        self.out = {"plan": (0, NO_PLAN), "dump": (1, ""), "migrate": (0, "")}
+        self.top = 4  # the highest procrastinate worker id
+        self.worker: int | None = None  # the live worker's id
+        self.registered = True  # a recreated worker registers and keeps its heartbeat fresh
+        self.partial: set[str] = set()  # `up` with these images applies them, then exits 1
+        self.broken: set[str] = set()  # `up` with these images changes nothing, exits 1
+        self.slow: tuple[str, float] = ("", 0.0)  # a command (substring) and the time it takes
+        self.raises: tuple[str, BaseException | None] = ("", None)
+        self.bounds: list[tuple[str, float]] = []
+        self.scripts: list[str] = []  # psql scripts sent to db  # (curl | exec | up | stop, bound)
         self.calls: list[list[str]] = []
         self.now = 0.0
         self.journal: list[str] = []
@@ -58,6 +69,23 @@ class Rig:
         assert self.secret not in " ".join(argv)  # the token never in argv
         code, out = self.answer(argv, stdin)
         return subprocess.CompletedProcess(argv, code, out.encode(), b"")
+
+    def timed(
+        self, argv: list[str], stdin: bytes, bound: float
+    ) -> subprocess.CompletedProcess[bytes]:
+        self.bounds.append((next(a for a in ("curl", "exec", "up", "stop") if a in argv), bound))
+        line = " ".join(argv) + stdin.decode()
+        if (error := self.raises[1]) and self.raises[0] in line:
+            self.calls.append(argv)
+            self.raises = ("", None)  # once: the recovery's own commands run normally
+            raise error
+        if self.slow[0] and self.slow[0] in line:
+            self.now += self.slow[1]
+        return self.runner(argv, stdin)
+
+    def serve(self, image: str) -> None:
+        self.put(apply.STATE, f"SKIW_IMAGE={image}\n")
+        self.running, self.worker = image, self.top
 
     def answer(self, argv: list[str], stdin: bytes) -> tuple[int, str]:
         if argv[:2] == ["docker", "--config"] and argv[3] == "login":
@@ -87,20 +115,26 @@ class Rig:
         if args[-1] == "migrate":
             return self.out["migrate"]
         if args[:2] == ["up", "-d"]:
-            self.running = image if self.out["up"][0] == 0 else self.running
-            return self.out["up"]
+            if image in self.broken:
+                return 1, ""
+            if image != self.running:  # changed: web and worker recreated, a new worker id
+                self.top += 1
+                self.running, self.worker = image, self.top if self.registered else None
+            return int(image in self.partial), ""
         if args == ["stop", "web", "worker"]:
-            self.running = None
+            self.running = self.worker = None
             return 0, ""
         if args[:3] == ["exec", "-T", "db"]:
+            self.scripts.append(stdin.decode())
             if b"max(id)" in stdin:
-                return 0, f"{self.workers}\n"
-            return 0, "1\n" if self.registered and self.running else "0\n"
+                return 0, f"{self.top}\n"
+            above = int(stdin.decode().partition("WHERE id > ")[2].split()[0])
+            return 0, "1\n" if self.worker and self.worker > above else "0\n"
         return 1, ""
 
     def run(self, *argv: str) -> int:
         d = deploy.Deploy(self.root, self.runner, lambda p, i: (0, 0), lambda p, u, g: None)
-        d.clock, d.sleep = lambda: self.now, self.tick
+        d.clock, d.sleep, d.timed = lambda: self.now, self.tick, self.timed
         args = [*argv, "--root", str(self.root)]
         code = deploy.main(args, journal=self.journal.append, alert=self.alerts.append, d=d)
         logged = "".join(self.journal) + (self.root / "var/log/skiw/deploy.log").read_text()
@@ -170,7 +204,7 @@ def test_a_failed_migration_step_stops_before_the_switch(
 
 @pytest.mark.parametrize("fault", ["readyz", "worker"])
 def test_a_failed_health_check_switches_back_and_alerts(rig: Rig, fault: str) -> None:
-    rig.put(apply.STATE, f"SKIW_IMAGE={REPO}@{OLD}\n")
+    rig.serve(f"{REPO}@{OLD}")
     if fault == "readyz":
         rig.healthy = {f"{REPO}@{OLD}"}
     else:
@@ -183,10 +217,82 @@ def test_a_failed_health_check_switches_back_and_alerts(rig: Rig, fault: str) ->
     assert "migrations were not reversed" in rig.journal[0]
 
 
-def test_a_first_deploy_that_fails_its_health_check_stops_web_and_worker(rig: Rig) -> None:
-    rig.healthy = set()
+def test_a_failed_first_deploy_leaves_nothing_to_switch_back_to(rig: Rig) -> None:
+    rig.healthy = {f"{REPO}@{OLD}"}  # NEW fails /readyz
     assert rig.run("--key", "staging", "deploy", NEW) == 1
-    assert rig.running is None and rig.alerts and "web and worker stopped" in rig.alerts[0]
+    assert rig.running is None and not (rig.root / apply.STATE).exists()
+    assert ("stop", deploy.SWITCH_S) in rig.bounds  # the cleanup is bounded too
+    assert rig.alerts == [
+        f"deploy {NEW} failed its health check; no previous digest: web and worker stopped"
+    ]
+    rig.calls.clear()
+    rig.journal.clear()
+    rig.registered = False  # OLD passes /readyz but its worker never registers
+    assert rig.run("--key", "staging", "deploy", OLD) == 1
+    assert rig.running is None and not (rig.root / apply.STATE).exists()  # NEW not restarted
+    assert not any(f"={REPO}@{NEW}" in " ".join(c) for c in rig.calls)
+
+
+@pytest.mark.parametrize("fault", ["partial", "raises"])
+def test_a_failed_switch_is_recovered_like_a_failed_health_check(rig: Rig, fault: str) -> None:
+    rig.serve(f"{REPO}@{OLD}")
+    before = rig.state()
+    if fault == "partial":  # `up` recreated the services with NEW, then exited 1
+        rig.partial = {f"{REPO}@{NEW}"}
+    else:  # after the state replacement, the candidate's `up` raises
+        rig.raises = (" up -d", OSError(5, "Input/output error"))
+    assert rig.run("--key", "staging", "deploy", NEW) == 1
+    assert rig.running == f"{REPO}@{OLD}" and rig.state() == before
+    assert any(c[-2:] == ["up", "-d"] and c[1].endswith(NEW) for c in rig.calls)
+    assert rig.alerts == [f"deploy {NEW} failed its switch; switched back to {OLD}"]
+    assert sum(c[-1] == "migrate" for c in rig.calls) == 1  # never reversed, never re-run
+
+
+def test_a_failed_recovery_is_alerted_as_such_and_releases_the_lock(rig: Rig) -> None:
+    rig.serve(f"{REPO}@{OLD}")
+    rig.healthy, rig.broken = {f"{REPO}@{OLD}"}, {f"{REPO}@{OLD}"}
+    assert rig.run("--key", "staging", "deploy", NEW) == 1
+    assert len(rig.alerts) == 1 and "RECOVERY FAILED, switching back to" in rig.alerts[0]
+    assert "RECOVERY FAILED" in rig.journal[0] and "migrations were not reversed" in rig.journal[0]
+    fd = os.open(rig.root / deploy.LOCK, os.O_RDWR)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # free again
+    os.close(fd)
+
+
+def test_the_same_healthy_digest_deploys_twice(rig: Rig) -> None:
+    assert rig.run("--key", "staging", "deploy", NEW) == 0
+    worker = rig.worker
+    rig.journal.clear()
+    assert rig.run("--key", "staging", "deploy", NEW) == 0  # Compose keeps the running worker
+    assert rig.worker == worker and rig.alerts == [] and "deployed" in rig.journal[0]
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        ("last_heartbeat", 120.0, None),  # a positive count that arrives after the deadline
+        ("last_heartbeat", 0.0, subprocess.TimeoutExpired("docker", 20)),  # never returns
+        ("curl", 0.0, subprocess.TimeoutExpired("curl", 5)),
+    ],
+)
+def test_a_late_or_hanging_health_probe_fails_the_deploy(
+    rig: Rig, fault: tuple[str, float, BaseException | None]
+) -> None:
+    rig.serve(f"{REPO}@{OLD}")
+    rig.slow, rig.raises = (fault[0], fault[1]), (fault[0], fault[2])
+    assert rig.run("--key", "staging", "deploy", NEW) == 1
+    assert rig.running == f"{REPO}@{OLD}" and rig.alerts[0].endswith(f"switched back to {OLD}")
+    limits = {"curl": 60, "exec": 2 * deploy.HEARTBEAT_S, "up": deploy.SWITCH_S}
+    assert all(0 < bound <= limits[kind] for kind, bound in rig.bounds)  # each probe bounded
+    assert [b for kind, b in rig.bounds if kind == "up"] == [deploy.SWITCH_S] * 2  # and recovery
+    for argv in (c for c in rig.calls if c[0] == "curl"):
+        assert 1 <= int(argv[argv.index("--max-time") + 1]) <= 5
+    for script in (s for s in rig.scripts if "last_heartbeat" in s):  # cancelled in the database
+        ms = [int(x) for x in re.findall(r"(?:statement|lock)_timeout = ([0-9]+);", script)]
+        assert len(ms) == 2 and all(0 < m <= 2 * deploy.HEARTBEAT_S * 1000 for m in ms)
+    fd = os.open(rig.root / deploy.LOCK, os.O_RDWR)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # the lock was released
+    os.close(fd)
 
 
 @pytest.mark.parametrize(
@@ -277,6 +383,7 @@ def test_a_digest_the_repository_does_not_hold_fails_at_the_pull(rig: Rig, fault
 def test_a_failed_log_line_after_a_deploy_exits_3(rig: Rig) -> None:
     rig.put("var/log/skiw", "not a directory\n")
     d = deploy.Deploy(rig.root, rig.runner, lambda p, i: (0, 0), lambda p, u, g: None)
+    d.clock, d.sleep, d.timed = lambda: rig.now, rig.tick, rig.timed
     argv = ["--key", "staging", "deploy", NEW, "--root", str(rig.root)]
     assert deploy.main(argv, journal=rig.journal.append, alert=rig.alerts.append, d=d) == 3
 
