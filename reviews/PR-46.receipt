@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 46
+repo: charliekhc/skiw-platform
+reviewed-head-sha: 602b596435a6fabeeaf7249f78f37d0f86f060c6
+review-file: reviews/PR-46.md
+review-file-hash: 32269b0457c24f00bf344009ec5cbac76dbdef94
+review-log-branch-commit: 3547e9ad3d1afe74a1749ad089d4c917bc3522cc
+verdict: Approved (round 3)
+ci: checks, host, image, security all success on the reviewed head (run 39404997396)
+note: M1f-2b (check-hardening secret-store, container-env, role-set, pg-hba). role-set reads every role, setting and membership with options; no database output in messages; credentials under 16 characters fail closed. role-set needs --compose-file (path fixed in M1g). No real-host run yet (M1k). G7 and G15 still empty. The review file holds two Round 3 blocks for the same head, both Approved.
+written-at: 2026-10-21T03:57:59Z
+pr-state-at-write: OPEN, unmerged
