@@ -239,3 +239,12 @@
 - **Versions:** none new.
 - **Exception to a rule?** no
 - **Decided by:** owner (split, 16-character minimum, compose path as a required option until M1g); builder (check rules)
+
+## 2026-10-21 — Vite 8.3.2 to 8.3.4 for GHSA-587h-7wmj-h5pm
+- **Decision:** `web` pins `vite` `8.3.4` (was `8.3.2`, recorded in the 2026-10-06 entry above, which stays as history). The `security` job (`pnpm audit --audit-level high`) began to fail on 2026-10-21 for `vite` `>=8.3.0 <=8.3.2` through `launch-editor` (`fs.existsSync()` check bypass on Windows, severity high; fixed from `vite` 8.3.3). The maintainer advisory is dated 2026-10-06 and GitHub's advisory database records 2026-10-20; the failure was first seen in CI on 2026-10-21. Only `web/package.json` and `pnpm-lock.yaml` change.
+- **Why:** UNI-14 (exact pins, patched versions); the CI rule that any high finding fails stays unchanged and was not suppressed. `8.3.4` is the newest release that passes pnpm's release-age gate; the latest, `8.3.5`, would need a `minimumReleaseAgeExclude` entry, which would weaken that gate.
+- **Alternatives rejected:** `8.3.5` with a release-age exception; an audit ignore for the advisory; waiting for Dependabot PR 50 (ten packages in one change, and `main` stays red until it merges).
+- **Scope / affects:** `web/package.json`, `pnpm-lock.yaml`; CI `security` job; PR 47 and every open branch.
+- **Versions:** `vite` 8.3.2 to 8.3.4. Checked: `make audit-web` reports no known vulnerabilities; lint, typecheck, pytest 383, vitest 3 and `pnpm build` pass; all four CI jobs pass.
+- **Exception to a rule?** no
+- **Decided by:** owner (open the bump as its own PR); builder (version choice)
