@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 47
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: c2fdaf1f3435032b5750148b719d526be3825226
+review-file: reviews/PR-47.md
+review-file-hash: 347793a590a7dcb6f10cba49d14da48bb232e5d5
+review-log-branch-commit: 62638110e5576efc676efcbd5d00d336042a3745
+verdict: Approved with conditions (round 3)
+ci: checks, host, image, security all success on the reviewed head (run 39606036358)
+conditions: two deferred P2s go to the image-path follow-up PR, before M1h starts: (1) record the worker probe as a TEN-10 ops database path in the closed mapping (PROJECT.md / DECISIONS); (2) image repository and remote still name the old owner after the org move (ghcr.io/skiw-platform/skiw-platform in infra/host/env/*.env and tests, PROJECT.md line 66, DECISIONS repo entry, plan line 178).
+note: M1g-1 (deploy core for staging: forced command, sudoers rule, pull by digest, migrate, switch, bounded health check, automatic recovery). Production deploys, --rollback, staging check G11, accepted-digest record, contract refusal, migration_labels, dump image and restore.md section are M1g-2. No real-host run yet (M1k); a killed process mid-switch has no in-process recovery (noted for M1k).
+written-at: 2026-10-21T14:21:34Z
+pr-state-at-write: OPEN, unmerged
