@@ -4,7 +4,7 @@ Read-only: it never changes the host. One line per check, `PASS name` or `FAIL n
 whose tool is missing, exits non-zero or prints what cannot be parsed fails, never passes. Files are
 read without following links, with the owner and mode checked on the open file. No secret value
 is ever printed: the container check names the container and the variable only. Each check is
-one entry in CHECKS. role-set needs `--compose-file` (the host's compose.yml, fixed in M1g).
+one entry in CHECKS. role-set reads /srv/skiw/compose.yml (or --compose-file) and the deploy state.
 Exit 0 all passed, 1 a check failed, 2 refused (not root, or a bad env file).
 """
 
@@ -87,7 +87,7 @@ class Bad(Exception):
 class Host:
     def __init__(self, args: argparse.Namespace, run: Runner, owner: Owner, env_text: str) -> None:
         self.root, self.env_file, self.run, self.owner = args.root, args.env_file, run, owner
-        self.compose: Path | None = args.compose_file
+        self.compose: Path | None = args.compose_file or args.root / apply.COMPOSE
         self.env_text = env_text
         self.values, self.ban = apply.host_values(self.env_file, env_text)
 
@@ -431,9 +431,11 @@ def role_set(host: Host) -> list[str]:
     predefined roles. Messages carry only names that cannot hold database content: those of
     roles.sql, `postgres`, the predefined roles and roles.sql's setting names."""
     if host.compose is None or not host.compose.is_relative_to(host.root):
-        raise Bad("needs --compose-file, the host's compose.yml (its path is fixed in M1g)")
+        raise Bad("needs --compose-file under the root (default /srv/skiw/compose.yml)")
     host.read(str(host.compose.relative_to(host.root)))  # root-owned, not a link: docker reads it
     compose = ["docker", "compose", "-f", str(host.compose), "--env-file", str(host.env_file)]
+    host.read(apply.STATE, mode=apply.CONFIG)  # SKIW_IMAGE, written by skiw-deploy
+    compose += ["--env-file", str(host.root / apply.STATE)]
     psql = [*compose, "exec", "-T", "db", "sh", "-c", psql_script()]
     roles, settings, members, bad = parse_roles(host.tool(psql, ROLES_QUERY))
     want, want_settings, want_members = expected_roles()
@@ -496,7 +498,7 @@ def stale_files(host: Host) -> list[str]:
         if not host.ban and ((host.root / dest).exists() or (host.root / dest).is_symlink()):
             problems.append(f"/{dest} is present under the allowlist policy")
     for name in sorted(os.listdir(host.root / "etc/sudoers.d")):
-        if name.startswith("skiw") and name != "skiw-ops":
+        if name.startswith("skiw") and name not in ("skiw-ops", "skiw-deploy"):
             problems.append(f"/etc/sudoers.d/{name} is not installed by apply")
     checked = {key.lower() for key, _ in settings_lines(host.render("sshd/00-skiw.conf"))}
     drop_ins = "etc/ssh/sshd_config.d"
@@ -530,7 +532,7 @@ def main(
 ) -> int:
     parser = argparse.ArgumentParser(prog="check-hardening", description=__doc__)
     parser.add_argument("--env-file", type=Path, default=Path("/") / apply.ENV)
-    parser.add_argument("--compose-file", type=Path, help="role-set: the host's compose.yml")
+    parser.add_argument("--compose-file", type=Path, help=f"role-set; default /{apply.COMPOSE}")
     parser.add_argument("--root", type=Path, default=Path("/"), help=argparse.SUPPRESS)  # tests
     args = parser.parse_args(argv)
     try:

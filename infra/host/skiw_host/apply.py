@@ -25,6 +25,8 @@ from skiw_host.bootstrap_secrets import Chown, Refused
 HOST = Path(__file__).resolve().parents[1]
 LIB = "usr/local/lib/skiw"  # skiw_host, db/ and the templates; the executables put it on sys.path
 ENV = "etc/skiw/host.env"  # the env file the sudoers rule names
+COMPOSE = "srv/skiw/compose.yml"  # the host's stack; ./caddy/ next to it
+STATE = "var/lib/skiw/deploy.env"  # SKIW_IMAGE, written only by skiw-deploy
 CONFIG = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH  # 0644
 DIRECTORY = stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH  # 0755
 OTHERS_WRITE = stat.S_IWGRP | stat.S_IWOTH
@@ -41,10 +43,25 @@ TEMPLATES = {  # rendered from host config: source under infra/host -> destinati
     "apt/skiw-docker.pref": "etc/apt/preferences.d/skiw-docker",
 }
 FAIL2BAN = {"fail2ban/jail.local": "etc/fail2ban/jail.d/skiw.local"}  # G7 (b) only
+VERBATIM = {  # copied as they are: the sudoers rule holds a regular expression with `$`
+    "sudoers.d/skiw-deploy": "etc/sudoers.d/skiw-deploy",
+    "compose.yml": COMPOSE,
+    **{
+        f"caddy/{n}": f"srv/skiw/caddy/{n}" for n in ("Caddyfile", "edge.caddy", "maintenance.html")
+    },
+}
+PROGRAMS = (
+    "bootstrap-secrets",
+    "bootstrap-db",
+    "check-hardening",
+    "skiw-deploy",
+    "skiw-deploy-ssh",
+)
 CHECKERS = {  # run on each candidate before anything is installed
     "etc/nftables.conf": ("nft", "-c", "-f"),
     "etc/ssh/sshd_config.d/00-skiw.conf": ("sshd", "-t", "-f"),
     "etc/sudoers.d/skiw-ops": ("visudo", "-c", "-f"),
+    "etc/sudoers.d/skiw-deploy": ("visudo", "-c", "-f"),
 }
 # Run once the file changed (or was removed). nftables: `nft -f` replaces only table inet skiw; the
 # unit's reload and stop flush the whole ruleset, Docker's rules too.
@@ -111,7 +128,8 @@ def plan(env_file: Path, values: dict[str, str], ban: bool) -> list[Item]:
         for src, dest in (TEMPLATES | (FAIL2BAN if ban else {})).items()
     ]
     items.append((ENV, env_file.read_bytes(), CONFIG))
-    for name in ("bootstrap-secrets", "bootstrap-db", "check-hardening"):
+    items += [(dest, (HOST / src).read_bytes(), mode(dest)) for src, dest in VERBATIM.items()]
+    for name in PROGRAMS:
         items.append((f"usr/local/sbin/{name}", (HOST / name).read_bytes(), PROGRAM))
     library = [*(HOST / "skiw_host").glob("*.py"), *(HOST / "db").iterdir()]
     for path in sorted([*library, *(HOST / src for src in TEMPLATES | FAIL2BAN)]):
