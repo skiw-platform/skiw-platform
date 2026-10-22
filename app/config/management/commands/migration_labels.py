@@ -1,8 +1,8 @@
 """`manage.py migration_labels` (spec §8.4 H3; plan §3 M1g): from the migration files alone, no
 database. Prints one JSON object, every entry "<app label>.<migration name>", sorted:
   head        the leaf migrations (the migration head),
-  contracts   the contract migrations: a drop or rename, whose class sets `skiw_contract = True`
-              (UNI-15; skiw-deploy refuses a rollback across one),
+  contracts   the contract migrations: a drop or rename (a table rename too), whose class sets
+              `skiw_contract = True` (UNI-15; skiw-deploy refuses a rollback across one),
   migrations  every migration the image ships.
 
 The contract-flag guard (`needs_flag`) looks at the operations a migration runs against the
@@ -29,6 +29,7 @@ CONTRACT_OPERATIONS = (
     migrations.RenameField,
     migrations.RenameModel,
     migrations.AlterField,
+    migrations.AlterModelTable,  # a new db_table renames the table an older release reads
 )
 # Where Django's own operation classes live; any other class is unknown to the guard.
 DJANGO_OPERATIONS = ("django.db.migrations.operations.", "django.contrib.postgres.operations")

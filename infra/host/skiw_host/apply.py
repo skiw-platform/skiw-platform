@@ -57,6 +57,7 @@ PROGRAMS = (
     "check-hardening",
     "skiw-deploy",
     "skiw-deploy-ssh",
+    "skiw-staging-status",
 )
 CHECKERS = {  # run on each candidate before anything is installed
     "etc/nftables.conf": ("nft", "-c", "-f"),

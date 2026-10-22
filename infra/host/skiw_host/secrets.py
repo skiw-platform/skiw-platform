@@ -3,7 +3,8 @@
 Readers are the Compose services that mount the file (infra/host/compose.yml); the owner is the uid
 those services run as. A file no service mounts is read on the host by root only. The Compose
 config test checks readers and uids against compose.yml.
-Open (plan §0 G11): the staging-check mechanism adds one name; it is not fixed yet, so not listed.
+G11 (b): `staging_status_key` is production's private SSH key for the staging status forced command
+(skiw-staging-status); only production holds it.
 """
 
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ class Secret:
     kind: Kind
     readers: tuple[str, ...]
     uid: int
+    environments: tuple[str, ...] = ("production", "staging")  # the hosts that hold it
 
 
 INVENTORY: tuple[Secret, ...] = (
@@ -50,6 +52,13 @@ INVENTORY: tuple[Secret, ...] = (
     Secret("postgres_password", Kind.DB_PASSWORD, ("db",), DB_UID),
     Secret("skiw_readonly_password", Kind.DB_PASSWORD, (), ROOT_UID),  # socket only (M1e)
     Secret("ghcr_read_token", Kind.OWNER_SUPPLIED, (), ROOT_UID),  # skiw-deploy, as root (M1g)
+    Secret("staging_status_key", Kind.OWNER_SUPPLIED, (), ROOT_UID, ("production",)),  # G11 (b)
 )
+STATUS_KEY = "staging_status_key"  # an OpenSSH private key: searched as its joined body
 APP_KEYS = tuple(secret.name for secret in INVENTORY if secret.kind is Kind.APP_KEY)
 OWNER = {secret.name: secret.uid for secret in INVENTORY}
+
+
+def held(environment: str) -> dict[str, int]:
+    """name -> owner uid of the secrets a host of this environment holds."""
+    return {s.name: s.uid for s in INVENTORY if environment in s.environments}

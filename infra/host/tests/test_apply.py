@@ -163,8 +163,8 @@ def test_installs_rendered_files_root_owned_with_their_modes(rig: Rig) -> None:
     modes = {dest: (rig.root / dest).stat().st_mode & 0o777 for dest, _, _ in items}
     assert modes["etc/sudoers.d/skiw-ops"] == modes["etc/sudoers.d/skiw-deploy"] == 0o440
     assert {modes[f"usr/local/sbin/{n}"] for n in apply.PROGRAMS} == {0o755}
-    assert len(apply.PROGRAMS) == 5 and "skiw-deploy-ssh" in apply.PROGRAMS
-    assert list(modes.values()).count(0o644) == len(modes) - 7  # all others: 0644
+    assert len(apply.PROGRAMS) == 6 and "skiw-staging-status" in apply.PROGRAMS
+    assert list(modes.values()).count(0o644) == len(modes) - 8  # all others: 0644
     assert rig.read(apply.COMPOSE) == (HOST / "compose.yml").read_text()  # ./caddy/ next to it
     assert rig.read("srv/skiw/caddy/Caddyfile") == (HOST / "caddy/Caddyfile").read_text()
     assert {Path(dest).name for dest in modes} <= rig.chowns.keys()
