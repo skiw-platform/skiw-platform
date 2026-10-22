@@ -22,6 +22,9 @@ command `/etc/sudoers.d/skiw-deploy` allows (its arguments pinned by a regular e
   key role), `SKIW_IMAGE_REPOSITORY` (the one repository, `ghcr.io/<owner>/<name>`; the login user is
   `<owner>`), `SKIW_HOSTNAME` (G9), `SKIW_DEPLOY_HEALTH_TIMEOUT_S` (60).
 - `/etc/skiw/secrets/ghcr_read_token` placed (host-rebuild.md), root, 0400.
+- `SKIW_BACKUP_IMAGE` (the published predeploy image, by digest, M1h) and `SKIW_DUMP_RECIPIENTS`
+  (the owner's public age recipient(s) for dumps, G5) are set; `apply` made
+  `/srv/skiw/backups/predeploy` (uid 10003, 0700).
 - First deploy only: `bootstrap-db prepare`, start `db` and `bootstrap-db apply` (host-rebuild.md,
   "Database roles"), giving the digest you are about to deploy as `SKIW_IMAGE`.
 
@@ -32,10 +35,12 @@ command `/etc/sudoers.d/skiw-deploy` allows (its arguments pinned by a regular e
    lock (`/run/skiw-deploy.lock`, `flock`: one deploy at a time).
 2. Pulls `<repository>@<digest>`: `docker login` with the token on stdin into a temporary 0700
    config directory, removed after the pull; checks the image carries that digest.
-3. `migrate --plan` in the new image. If anything is planned, the pre-migration dump runs (the
-   `backup` service's `predeploy` command, built in M1g-2); it must print
-   `predeploy <time>.dump.age <sha256>`. **Until M1g-2 any deploy with a pending migration stops
-   here** (exit 1, nothing changed).
+3. `migrate --plan` in the new image. If anything is planned, the pre-migration dump runs
+   (`backup` service, `predeploy`: `pg_dump -Fc` as `skiw_backup` without the guard key tables'
+   data, the whole stream encrypted with `age` to `SKIW_DUMP_RECIPIENTS` and read by
+   `pg_restore -f /dev/null` (header, table of contents, data blocks; not a test restore); the
+   dump, its `.sha256` and the directory are synced to disk); it must print
+   `predeploy <time>.dump.age <sha256>`, else the deploy stops (exit 1, nothing changed).
 4. `migrate` as `skiw_migrator`. A failure stops the deploy; the old containers keep serving.
 5. Writes `SKIW_IMAGE=<repository>@<digest>` to `/var/lib/skiw/deploy.env` (root, 0644; Compose and
    `check-hardening` read it) and runs `docker compose up -d` (at most 300 s). Compose recreates

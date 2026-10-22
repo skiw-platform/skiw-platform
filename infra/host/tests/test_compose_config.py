@@ -306,6 +306,9 @@ def test_app_image_must_be_set_and_pinned() -> None:
     assert render(ENV / "ci.env", SKIW_IMAGE="").returncode != 0
     tagged = load(ENV / "ci.env", SKIW_IMAGE="ghcr.io/skiw-platform/skiw-platform:latest")
     assert [problem.split(":")[0] for problem in unpinned(tagged)] == ["migrate", "web", "worker"]
+    assert render(ENV / "ci.env", SKIW_BACKUP_IMAGE="").returncode != 0
+    tagged = load(ENV / "ci.env", SKIW_BACKUP_IMAGE="ghcr.io/skiw-platform/skiw-predeploy:latest")
+    assert [problem.split(":")[0] for problem in unpinned(tagged)] == ["backup"]
 
 
 @pytest.mark.parametrize("name", ["staging.env", "production.env"])
@@ -313,6 +316,7 @@ def test_host_env_files_refuse_to_render_until_complete(name: str) -> None:
     assert declared(name).keys() == declared("ci.env").keys() - {"SKIW_IMAGE"}
     assert render(ENV / name, SKIW_IMAGE=declared("ci.env")["SKIW_IMAGE"]).returncode != 0
     gaps = {k: declared("ci.env")[k] for k in ("SKIW_IMAGE", "SKIW_HOSTNAME")}  # set by deploy, G9
+    gaps["SKIW_BACKUP_IMAGE"] = declared("ci.env")["SKIW_BACKUP_IMAGE"]  # published by CI (M1h)
     gaps |= {
         k: declared("ci.env")[k] for k in ("SKIW_WORKER_HARD_EXIT_S", "SKIW_WORKER_STOP_GRACE_S")
     }

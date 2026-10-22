@@ -6,6 +6,7 @@
 #                        (same digest as ../../docker-compose.yml)
 #   clamav/clamav:1.5.4  index sha256:638d90201ee7ee6a82d249a2fc23b132e578673b5f1f2766852b127676ca1ef6
 #   app                  ${SKIW_IMAGE}: ghcr.io/...@sha256:<digest>, written by skiw-deploy (M1g)
+#   backup               ${SKIW_BACKUP_IMAGE}: infra/host/backup/predeploy, published by CI (M1h)
 name: skiw
 
 x-hardened: &hardened
@@ -138,14 +139,16 @@ services:
 
   backup:
     <<: *hardened
-    # pg_dump base until M1g builds infra/host/backup/predeploy FROM this digest; the dump command
-    # is wired there. Only the version check runs until then.
-    image: postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
+    # infra/host/backup/predeploy (FROM the db's postgres digest + pinned age), published by CI by
+    # digest (M1h). skiw-deploy runs `run --rm -T backup predeploy` before a migration (H3 step 4).
+    image: ${SKIW_BACKUP_IMAGE:?SKIW_BACKUP_IMAGE must be the predeploy image by digest}
     profiles: [ops]
     restart: "no"
     user: "10003:10003"
-    entrypoint: [pg_dump]
-    command: [--version]
+    command: [predeploy]
+    environment:
+      SKIW_POSTGRES_DB: ${SKIW_POSTGRES_DB:?}
+      SKIW_DUMP_RECIPIENTS: ${SKIW_DUMP_RECIPIENTS:-}  # the owner's PUBLIC age recipients (G5)
     secrets: [skiw_backup_password]
     volumes: ["skiw-files:/srv/files:ro", "/srv/skiw/backups:/srv/skiw/backups"]
     networks: [ops]
