@@ -37,8 +37,10 @@ command `/etc/sudoers.d/skiw-deploy` allows (its arguments pinned by a regular e
    config directory, removed after the pull; checks the image carries that digest.
 3. `migrate --plan` in the new image. If anything is planned, the pre-migration dump runs
    (`backup` service, `predeploy`: `pg_dump -Fc` as `skiw_backup` without the guard key tables'
-   data, checked by `pg_restore --list`, encrypted with `age` to `SKIW_DUMP_RECIPIENTS`); it must
-   print `predeploy <time>.dump.age <sha256>`, else the deploy stops (exit 1, nothing changed).
+   data, the whole stream encrypted with `age` to `SKIW_DUMP_RECIPIENTS` and read by
+   `pg_restore -f /dev/null` (header, table of contents, data blocks; not a test restore); the
+   dump, its `.sha256` and the directory are synced to disk); it must print
+   `predeploy <time>.dump.age <sha256>`, else the deploy stops (exit 1, nothing changed).
 4. `migrate` as `skiw_migrator`. A failure stops the deploy; the old containers keep serving.
 5. Writes `SKIW_IMAGE=<repository>@<digest>` to `/var/lib/skiw/deploy.env` (root, 0644; Compose and
    `check-hardening` read it) and runs `docker compose up -d` (at most 300 s). Compose recreates

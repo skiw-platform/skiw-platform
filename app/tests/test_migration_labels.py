@@ -3,12 +3,14 @@
 import json
 from io import StringIO
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 
+import pytest
 from django.apps import apps
 from django.core.management import call_command
-from django.db import migrations
+from django.db import migrations, models
 from django.db.migrations.loader import MigrationLoader
+from django.db.migrations.operations.base import Operation
 
 from config.management.commands.migration_labels import labels, needs_flag
 
@@ -53,7 +55,7 @@ def test_the_flag_rule_and_the_contract_list_on_fixture_migrations() -> None:
 
     class Loader:
         def __init__(self) -> None:
-            self.disk_migrations: dict[tuple[str, str], Any] = {
+            self.disk_migrations: dict[tuple[str, str], migrations.Migration] = {
                 ("x", "0001_add"): Add("0001_add", "x"),
                 ("x", "0002_drop"): FlaggedDrop("0002_drop", "x"),
             }
@@ -64,3 +66,60 @@ def test_the_flag_rule_and_the_contract_list_on_fixture_migrations() -> None:
         "contracts": ["x.0002_drop"],
         "migrations": ["x.0001_add", "x.0002_drop"],
     }
+
+
+# The five contract operations, each built as an own migration would write it.
+CONTRACT = {
+    "RemoveField": migrations.RemoveField("thing", "old"),
+    "DeleteModel": migrations.DeleteModel("Thing"),
+    "RenameField": migrations.RenameField("thing", "old", "new"),
+    "RenameModel": migrations.RenameModel("Thing", "Item"),
+    "AlterField": migrations.AlterField("thing", "name", models.TextField()),
+}
+
+
+def migration(ops: list[Operation], flagged: bool) -> migrations.Migration:
+    """A migration class as an own app writes it; the UNI-15 marker is a class attribute."""
+    body: dict[str, object] = {"operations": ops} | ({"skiw_contract": True} if flagged else {})
+    case: type[migrations.Migration] = type("Case", (migrations.Migration,), body)
+    return case("0003_case", "x")
+
+
+def wrapped(op: Operation) -> Operation:
+    """The database runs `op`; the state sees nothing."""
+    return migrations.SeparateDatabaseAndState(database_operations=[op], state_operations=[])
+
+
+@pytest.mark.parametrize("name", sorted(CONTRACT))
+@pytest.mark.parametrize("wrap", [False, True], ids=["direct", "in-database-operations"])
+def test_a_contract_operation_needs_the_flag_direct_or_wrapped(name: str, wrap: bool) -> None:
+    op = wrapped(wrapped(CONTRACT[name])) if wrap else CONTRACT[name]
+    assert needs_flag(migration([op], flagged=False))
+    flagged = migration([op], flagged=True)
+    assert not needs_flag(flagged)
+
+    class Loader:
+        def __init__(self) -> None:
+            self.disk_migrations = {("x", "0003_case"): flagged}
+            self.graph = type("G", (), {"leaf_nodes": lambda _: [("x", "0003_case")]})()
+
+    assert labels(Loader())["contracts"] == ["x.0003_case"]
+
+
+def test_state_only_and_safe_wrapped_operations_need_no_flag() -> None:
+    state_only = migrations.SeparateDatabaseAndState(state_operations=[CONTRACT["RemoveField"]])
+    safe = wrapped(migrations.AddField("thing", "new", models.TextField(null=True)))
+    assert not needs_flag(migration([state_only, safe], flagged=False))
+
+
+class Custom(Operation):
+    """An operation class Django does not define: the guard cannot see what it runs."""
+
+    def state_forwards(self, app_label: str, state: object) -> None:
+        pass
+
+
+def test_an_unknown_operation_class_needs_the_flag_even_when_wrapped() -> None:
+    assert needs_flag(migration([Custom()], flagged=False))
+    assert needs_flag(migration([wrapped(Custom())], flagged=False))
+    assert not needs_flag(migration([wrapped(Custom())], flagged=True))
