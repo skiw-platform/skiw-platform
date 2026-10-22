@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 54
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: 085d518d8711f55400108a56bb5bed9444d79f21
+review-file: reviews/PR-54.md
+review-file-hash: 931d599be3f0e9b963895ecb920e67797db46067
+review-log-branch-commit: 02557fb097ba4be6a8d605e06c9df2088f6fb6cf
+verdict: Approved with conditions (round 2)
+deferred-conditions: P2 AlterModelTable in CONTRACT_OPERATIONS (plus plan sentence and test) -> M1g-2b (Part B)
+ci: checks, host, image, security all success on the reviewed head (run 39760030759)
+note: M1g-2a, pre-migration dump image and migration_labels. Part A of the owner-chosen M1g-2 split. P3 open, non-blocking: pg_dump --lock-wait-timeout.
+written-at: 2026-10-22T10:18:16Z
+pr-state-at-write: OPEN, unmerged
