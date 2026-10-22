@@ -21,6 +21,7 @@ from string import Template
 
 from skiw_host.bootstrap_db import Failed, Runner, run_command, settings
 from skiw_host.bootstrap_secrets import Chown, Refused
+from skiw_host.secrets import BACKUP_UID
 
 HOST = Path(__file__).resolve().parents[1]
 LIB = "usr/local/lib/skiw"  # skiw_host, db/ and the templates; the executables put it on sys.path
@@ -72,6 +73,8 @@ RELOADS = {
     "etc/systemd/journald.conf.d/skiw.conf": ("systemctl", "restart", "systemd-journald"),
     "etc/fail2ban/jail.d/skiw.local": ("systemctl", "try-restart", "fail2ban"),
 }
+BACKUPS = "srv/skiw/backups/predeploy"  # the pre-migration dumps, written by `backup` (uid 10003)
+BACKUP_DIR_MODE = stat.S_IRWXU  # 0700
 PENDING = "var/lib/skiw/apply.pending"  # destinations whose reload is still owed
 DOCKER_KEY = "etc/apt/keyrings/docker.asc"  # placed by the operator (runbook)
 DOCKER_FINGERPRINT = "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"  # "Docker Release (CE deb)"
@@ -292,6 +295,20 @@ def converge(run: Runner, ban: bool) -> None:
     ok(run, ["systemctl", "start", "ssh.service"])
 
 
+def backup_directory(root: Path, chown: Chown) -> None:
+    """/srv/skiw/backups (root, 0755) and its `predeploy` directory, 0700 and owned by the backup
+    service's uid from the mkdir call on; never a link."""
+    make_directories(root, Path(BACKUPS).parent, chown)
+    path = root / BACKUPS
+    try:
+        path.mkdir(mode=BACKUP_DIR_MODE)
+    except FileExistsError:
+        if path.is_symlink() or not path.is_dir():
+            raise Refused(f"/{BACKUPS} is a link or not a directory") from None
+    os.chmod(path, BACKUP_DIR_MODE)
+    chown(str(path), BACKUP_UID, BACKUP_UID)
+
+
 def write_pending(root: Path, owed: list[str], chown: Chown) -> None:
     make_directories(root, Path(PENDING).parent, chown)
     tmp = root / f"{PENDING}.skiw-new"
@@ -316,7 +333,12 @@ def main(
         values, ban = host_values(args.env_file)
         items = plan(args.env_file, values, ban)
         jail = [*FAIL2BAN.values()]
-        untrusted(root, [*(dest for dest, _, _ in items), DOCKER_KEY, PENDING, *jail], owner)
+        dests = [*(dest for dest, _, _ in items), DOCKER_KEY, PENDING, BACKUPS, *jail]
+        untrusted(root, dests, owner)
+        if (root / BACKUPS).is_symlink() or (
+            (root / BACKUPS).exists() and not (root / BACKUPS).is_dir()
+        ):
+            raise Refused(f"/{BACKUPS} is a link or not a directory")
         trusted_file(root, PENDING, owner, required=False)
         docker_key(root, run, owner)
         precheck(items, run, chown)
@@ -328,6 +350,7 @@ def main(
         if owed:  # first, so a run that stops below still owes these reloads next time
             write_pending(root, owed, chown)
         install(root, todo, chown)
+        backup_directory(root, chown)
         for dest in retired:  # allowlist now: the fail2ban jail must not stay enabled
             (root / dest).unlink()
         converge(run, ban)

@@ -13,7 +13,7 @@ ALLOWED_HOSTS = env.csv("DJANGO_ALLOWED_HOSTS")
 if env.flag("DJANGO_BEHIND_CADDY"):
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-INSTALLED_APPS = ["procrastinate.contrib.django", "health", "shell", "jobs"]
+INSTALLED_APPS = ["procrastinate.contrib.django", "config", "health", "shell", "jobs"]
 MIDDLEWARE: list[str] = []
 
 TEMPLATES = [

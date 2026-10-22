@@ -168,6 +168,11 @@ def test_installs_rendered_files_root_owned_with_their_modes(rig: Rig) -> None:
     assert rig.read(apply.COMPOSE) == (HOST / "compose.yml").read_text()  # ./caddy/ next to it
     assert rig.read("srv/skiw/caddy/Caddyfile") == (HOST / "caddy/Caddyfile").read_text()
     assert {Path(dest).name for dest in modes} <= rig.chowns.keys()
+    backups = rig.chowns.pop("predeploy")  # the dump directory: the backup service's uid
+    assert (
+        backups == (10003, 10003)
+        and rig.root.joinpath(apply.BACKUPS).stat().st_mode & 0o777 == 0o700
+    )
     assert set(rig.chowns.values()) == {(0, 0)}  # root:root, the checked candidates too
     assert {f"{apply.LIB}/db/roles.sql", f"{apply.LIB}/nftables.conf"} <= modes.keys()
 
@@ -314,7 +319,7 @@ def test_a_matching_file_with_the_wrong_owner_or_group_is_repaired(rig: Rig) -> 
         assert rig.owners[module] == (0, 0)
     before = rig.tree()
     assert rig.run() == 0 and rig.tree() == before  # a compliant run changes nothing
-    assert all(owner == (0, 0) for owner in rig.owners.values())
+    assert all(o == (0, 0) for path, o in rig.owners.items() if path != apply.BACKUPS)
 
 
 def test_a_link_at_a_destination_is_replaced_not_followed(rig: Rig) -> None:
@@ -357,7 +362,7 @@ def test_new_directories_get_a_fixed_mode_whatever_the_umask(rig: Rig, umask: in
     old = os.umask(umask)
     try:
         assert rig.run() == 0
-        directories = [p for p in rig.root.rglob("*") if p.is_dir()]
+        directories = [p for p in rig.root.rglob("*") if p.is_dir() and p.name != "predeploy"]
         assert directories and all(p.stat().st_mode & 0o777 == 0o755 for p in directories)
         before = rig.tree()
         assert rig.run() == 0 and rig.tree() == before  # the safe tree it made is accepted again
@@ -547,3 +552,13 @@ def test_a_failed_fail2ban_start_is_retried_and_the_reloads_stay_owed(rig: Rig) 
     rig.fail = ""
     assert rig.run(**ban) == 0 and "fail2ban" in rig.active
     assert not (rig.root / apply.PENDING).exists()
+
+
+def test_the_dump_directory_belongs_to_the_backup_uid_and_is_never_a_link(rig: Rig) -> None:
+    (rig.root / "srv/skiw/backups").mkdir(parents=True)
+    (rig.root / apply.BACKUPS).symlink_to(rig.tmp)  # planted: never chowned or chmodded through
+    assert rig.run() == 2 and rig.tree() == {}  # refused before anything is installed
+    (rig.root / apply.BACKUPS).unlink()
+    (rig.root / apply.BACKUPS).mkdir(mode=apply.DIRECTORY)  # made by hand, 0755
+    assert rig.run() == 0 and rig.chowns["predeploy"] == (10003, 10003)
+    assert (rig.root / apply.BACKUPS).stat().st_mode & 0o777 == 0o700
