@@ -637,6 +637,8 @@ def main(
             raise Refused("rollback takes no run id")
         what = f"{args.action} {args.digest} key {args.key} run {args.run_id or 'none'}"
         cfg = host_config(d, args.key, args.action)
+        if cfg.fingerprint:  # production: the one owner key its authorized_keys line admits (H3 11)
+            what += f" fingerprint {cfg.fingerprint}"
         fd = lock(d)
         rollback = args.action == "rollback"
         result = deploy(d, alert, cfg, args.digest, args.run_id, rollback)

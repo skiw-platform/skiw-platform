@@ -676,6 +676,21 @@ def test_a_failed_accepted_line_after_a_healthy_deploy_exits_3_and_alerts(rig: R
     assert deploy.ACCEPTED_LINE.fullmatch(line) and line.startswith(f"digest={NEW} commit={COMMIT}")
 
 
+def test_a_record_hard_linked_while_the_deploy_runs_gets_no_line(rig: Rig) -> None:
+    rig.production()
+    rig.on_curl = lambda: os.link(rig.root / deploy.ACCEPTED, rig.root / "run/second-name")
+    assert rig.run("--key", "production", "deploy", NEW, "77") == 3
+    assert rig.accepted() == [] and "not a regular file owned by root" in rig.journal[0]
+
+
+def test_a_status_key_file_that_is_not_an_openssh_key_refuses_before_ssh(rig: Rig) -> None:
+    rig.production()
+    rig.put(deploy.STATUS_KEY_FILE, "not a key\n", hardening.SECRET_MODE)
+    assert rig.run("--key", "production", "deploy", NEW, "77") == 2
+    assert "is not an OpenSSH private key" in rig.journal[0]
+    assert not any(c[0] == "ssh" for c in rig.calls) and rig.accepted() == []
+
+
 def test_migrate_adds_the_image_contracts_to_the_applied_list(rig: Rig) -> None:
     rig.names[f"{REPO}@{NEW}"] = names(
         "jobs.0000_older", "jobs.0001_x", CONTRACT, contracts=(CONTRACT,)
@@ -700,6 +715,23 @@ def test_a_rollback_to_an_accepted_digest_skips_staging_and_migrate(rig: Rig) ->
     assert rig.running == f"{REPO}@{OLD}" and rig.state() == f"SKIW_IMAGE={REPO}@{OLD}\n"
     assert not any(c[0] == "ssh" or c[-1] in ("migrate", "--plan", "predeploy") for c in rig.calls)
     assert len(rig.accepted()) == 2 and rig.journal[0].endswith(f"rolled back; previous {NEW}")
+    assert rig.journal[0].startswith(
+        f"rollback {OLD} key production run none fingerprint {FINGERPRINT}: "
+    )
+
+
+def test_the_log_line_names_the_production_key_fingerprint_and_staging_only_its_role(
+    rig: Rig,
+) -> None:
+    assert rig.run("--key", "staging", "deploy", NEW) == 0
+    assert rig.journal[0].startswith(f"deploy {NEW} key staging run none: ")  # role only
+    assert "fingerprint" not in rig.journal[0]
+    rig.journal.clear()
+    rig.production()
+    assert rig.run("--key", "production", "deploy", NEW, "77") == 0
+    assert rig.journal[0].startswith(
+        f"deploy {NEW} key production run 77 fingerprint {FINGERPRINT}: "
+    )
 
 
 @pytest.mark.parametrize(

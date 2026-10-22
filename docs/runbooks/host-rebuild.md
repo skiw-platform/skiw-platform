@@ -220,6 +220,15 @@ Put staging's host key into production's host config: `SKIW_STAGING_HOST_KEY` is
 fields of staging's `/etc/ssh/ssh_host_ed25519_key.pub` (`awk '{print $1, $2}'` there). The key can
 only read the last staging status line (deploy.md). Rotate with the deploy keys.
 
+Staging must accept SSH from production. Under `SKIW_SSH_POLICY=allowlist` (G7), add production's
+outbound address as a CIDR (`<address>/32`, or `/128` for IPv6) to `SKIW_SSH_ALLOW` in staging's
+`infra/host/env/staging.env`, then re-run `sudo infra/host/apply --env-file
+infra/host/env/staging.env` on staging. Without it nftables drops the connection and every
+production deploy is refused with "the staging status call timed out". Under `fail2ban`, the jail
+has no `ignoreip` here: three failed status logins from production within 10 minutes (for example
+a wrong key on staging) ban production for an hour, and production deploys are refused until the
+ban ends (`sudo fail2ban-client set sshd unbanip <address>` on staging lifts it).
+
 ## Database roles (`bootstrap-db`, spec §8.4 H4, H6)
 
 Run it in this order on a new or rebuilt host. It needs root, for the same reason as

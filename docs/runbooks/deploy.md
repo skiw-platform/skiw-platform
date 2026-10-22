@@ -28,11 +28,15 @@ command `/etc/sudoers.d/skiw-deploy` allows (its arguments pinned by a regular e
   `<owner>`), `SKIW_HOSTNAME` (G9), `SKIW_DEPLOY_HEALTH_TIMEOUT_S` (60),
   `SKIW_DEPLOY_DUMP_TIMEOUT_S` (1800: the bound on the whole pre-migration dump run).
 - `/etc/skiw/secrets/ghcr_read_token` placed (host-rebuild.md), root, 0400.
-- Production also: `SKIW_STAGING_SSH` (staging `host:port`), `SKIW_STAGING_HOST_KEY` (staging's
+- Production also: `SKIW_STAGING_SSH` (staging's DNS name and SSH port as `<name>:<port>`; a DNS
+  name, not an IP address), `SKIW_STAGING_HOST_KEY` (staging's
   `ssh-ed25519 AAAA...` host key: the first two fields of `/etc/ssh/ssh_host_ed25519_key.pub`
   there), `SKIW_DEPLOY_KEY_FINGERPRINT` (the owner's production deploy key, from
   `ssh-keygen -lf <key>.pub` on the owner's machine: the `SHA256:...` field, G6), and
-  `staging_status_key` (host-rebuild.md). `/var/lib/skiw/accepted-digests` is made append-only
+  `staging_status_key` (host-rebuild.md). Staging must accept SSH from production: under
+  `allowlist`, staging's `SKIW_SSH_ALLOW` must hold production's outbound address (see
+  host-rebuild.md "Making `staging_status_key`"); otherwise every production deploy is refused with
+  "the staging status call timed out". `/var/lib/skiw/accepted-digests` is made append-only
   (`chattr +a`, checked with `lsattr -d`) by the first production deploy; a file system without
   that attribute is refused.
 - `SKIW_BACKUP_IMAGE` (the published predeploy image, by digest, M1h) and `SKIW_DUMP_RECIPIENTS`
@@ -122,11 +126,16 @@ Rollback: [rollback.md](rollback.md).
 `/readyz` and the worker are checked by the deploy itself; on staging the status line records the
 G12 checks. From production, with the values of `SKIW_STAGING_SSH` (`<host>:<port>`):
 ```
-sudo ssh -F /dev/null -i /etc/skiw/secrets/staging_status_key -p <port> \
-  -o IdentitiesOnly=yes skiw-deploy@<host> status
+known=$(mktemp)
+echo "skiw-staging <SKIW_STAGING_HOST_KEY>" > "$known"
+sudo ssh -F /dev/null -i /etc/skiw/secrets/staging_status_key -p <port> -o IdentitiesOnly=yes \
+  -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known" \
+  -o HostKeyAlias=skiw-staging -o HostKeyAlgorithms=ssh-ed25519 skiw-deploy@<host> status
+rm -f "$known"
 ```
-prints the one status line with `running=yes|no` (the first connection asks to confirm staging's
-host key: compare it with `SKIW_STAGING_HOST_KEY`).
+prints the one status line with `running=yes|no`. It pins staging's host key the same way the
+deploy does (replace `<SKIW_STAGING_HOST_KEY>` with that value, `ssh-ed25519 AAAA...`); a wrong key
+fails with exit 255 and nothing is stored.
 
 ## If it goes wrong
 - "RECOVERY FAILED": the state file already holds the previous content (or is removed on a first
@@ -140,7 +149,8 @@ host key: compare it with `SKIW_STAGING_HOST_KEY`).
   sudo tail -n 2 /var/lib/skiw/accepted-digests
   sudo lsattr -d /var/lib/skiw/accepted-digests
   ```
-  If the last line is cut short (it does not end in `key=SHA256:…`), remove it, keeping the file
+  If the last line already equals the logged line (the write landed and only its sync failed), stop
+  here: the record is complete. If the last line is cut short (it does not end in `key=SHA256:…`), remove it, keeping the file
   append-only otherwise: `sudo chattr -a /var/lib/skiw/accepted-digests && sudo sed -i '$d'
   /var/lib/skiw/accepted-digests && sudo chattr +a /var/lib/skiw/accepted-digests`. Then append the
   logged line (replace `<line>`):
