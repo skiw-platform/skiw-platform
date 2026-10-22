@@ -1,0 +1,12 @@
+approval-receipt: 1
+pr: 53
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: 457237be801c48d1cc30dac024b2231c79b7f656
+review-file: reviews/PR-53.md
+review-file-hash: e7e3a8b7605a8a60ec649fc513b0450f67c2350a
+review-log-branch-commit: aab2d0939d68f3e4c03f3d9fed8a146ee5d60872
+verdict: Approved (round 2)
+ci: checks, host, image, security all success on the reviewed head (run 39629772416)
+note: image path moved to ghcr.io/skiw-platform/skiw-platform, PROJECT.md remote, TEN-10 worker probe in the mapping, DECISIONS entry with the postgres vs skiw_readonly reason.
+written-at: 2026-10-22T01:58:00Z
+pr-state-at-write: OPEN, unmerged
