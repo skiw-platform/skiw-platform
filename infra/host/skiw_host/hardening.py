@@ -340,7 +340,9 @@ def secret_lines(host: Host) -> tuple[list[str], set[str], set[str]]:
         text = host.read(f"{SECRETS}/{name}", uid, SECRET_MODE).decode()
         lines = [line for line in text.splitlines() if line]
         if name == STATUS_KEY:  # the key body as one string; the armour lines are not secret
-            lines = ["".join(x for x in lines if not x.startswith("-----"))]
+            body = [x for x in lines if not x.startswith("-----")]
+            long |= {x for x in body if len(x) >= MIN_SECRET}  # one leaked body line is found too
+            lines = ["".join(body)]
         if not lines:
             problems.append(f"{name} is empty")
         for line in lines:

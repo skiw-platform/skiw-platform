@@ -787,3 +787,5 @@ def test_a_production_host_holds_the_status_key_searched_as_one_body(
     assert code == 0 and results["secret-store"] == results["container-env"] == "PASS"
     rig.out["docker inspect"] = (0, rig.inspect({"LEAK": f"{body}Q=="}))
     assert rig.run(capsys)[1]["container-env"] == "FAIL a secret value is in skiw-web-1 LEAK"
+    rig.out["docker inspect"] = (0, rig.inspect({"LEAK": f"x{body}y"}))  # one body line alone
+    assert rig.run(capsys)[1]["container-env"] == "FAIL a secret value is in skiw-web-1 LEAK"

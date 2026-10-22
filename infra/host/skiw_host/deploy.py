@@ -537,11 +537,12 @@ def deploy(  # the H3 steps in order, one recovery boundary
     names = migration_labels(d, image)
     if production and not rollback and not COMMIT.fullmatch(labels.get(COMMIT_LABEL, "")):
         raise Refused(f"the image has no commit label {COMMIT_LABEL}")
+    # A deploy of an older digest is a rollback too: neither may cross an applied contract.
+    if crossing := applied - set(names["migrations"]):
+        raise Refused(f"{len(crossing)} applied contract migrations are not in the target")
     if rollback:
         if labels.get(COMMIT_LABEL) not in commits:  # the record and the image must agree
             raise Refused("the image's commit label is not the one the accepted record holds")
-        if crossing := applied - set(names["migrations"]):
-            raise Refused(f"{len(crossing)} applied contract migrations are not in the target")
     else:
         if pending(d, image):
             pre_migration_dump(d, image, cfg.dump_timeout)

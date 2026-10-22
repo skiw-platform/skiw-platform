@@ -677,7 +677,9 @@ def test_a_failed_accepted_line_after_a_healthy_deploy_exits_3_and_alerts(rig: R
 
 
 def test_migrate_adds_the_image_contracts_to_the_applied_list(rig: Rig) -> None:
-    rig.names[f"{REPO}@{NEW}"] = names("jobs.0001_x", CONTRACT, contracts=(CONTRACT,))
+    rig.names[f"{REPO}@{NEW}"] = names(
+        "jobs.0000_older", "jobs.0001_x", CONTRACT, contracts=(CONTRACT,)
+    )
     rig.put(deploy.APPLIED, "jobs.0000_older\n")
     assert rig.run("--key", "staging", "deploy", NEW) == 0
     assert (rig.root / deploy.APPLIED).read_text() == f"jobs.0000_older\n{CONTRACT}\n"
@@ -789,6 +791,20 @@ def test_a_migrate_that_fails_halfway_has_its_contracts_recorded_first(rig: Rig)
     rig.names[f"{REPO}@{OLD}"] = names("jobs.0001_x")  # OLD does not ship the contract
     assert rig.run("--key", "production", "rollback", OLD) == 2
     assert "applied contract migrations are not in the target" in rig.journal[0]
+
+
+@pytest.mark.parametrize("key", ["staging", "production"])
+def test_a_deploy_of_an_older_digest_cannot_cross_an_applied_contract(rig: Rig, key: str) -> None:
+    if key == "production":
+        rig.production()
+        rig.green(OLD)  # staging runs OLD: the staging check alone would let it pass
+    rig.serve(f"{REPO}@{NEW}")
+    rig.put(deploy.APPLIED, f"{CONTRACT}\n")  # NEW's migrate applied a contract migration
+    rig.names[f"{REPO}@{OLD}"] = names("jobs.0001_x")  # OLD does not ship it
+    assert rig.run("--key", key, "deploy", OLD, "77") == 2
+    assert "applied contract migrations are not in the target" in rig.journal[0]
+    assert not any(c[-1] in ("migrate", "predeploy") or c[-2:] == ["up", "-d"] for c in rig.calls)
+    assert rig.running == f"{REPO}@{NEW}"
 
 
 @pytest.mark.parametrize(

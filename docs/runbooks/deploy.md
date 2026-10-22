@@ -68,7 +68,9 @@ command `/etc/sudoers.d/skiw-deploy` allows (its arguments pinned by a regular e
    with `docker rm --force` (if that fails too, the log line says so: run
    `sudo docker rm --force skiw-predeploy` before the next deploy, which otherwise fails on the
    name).
-4. The image's contract migrations join `/var/lib/skiw/applied-contracts` (synced), **before**
+4. A deploy of an image that does not ship every migration in `/var/lib/skiw/applied-contracts`
+   is refused (exit 2) before the dump, as a rollback would be: an older digest cannot be deployed
+   across a contract migration. The image's contract migrations join `/var/lib/skiw/applied-contracts` (synced), **before**
    `migrate`, because `migrate` may apply a contract migration and then fail on a later one. Then
    `migrate` as `skiw_migrator`. A failure stops the deploy; the old containers keep serving.
    Staging then removes its old status line, so a failed switch never leaves a stale

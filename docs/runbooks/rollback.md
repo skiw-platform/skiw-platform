@@ -18,7 +18,7 @@ the serving digest unchanged) with the staging key, for a digest that is not in 
 pulled image's commit label is not the commit the record holds for it, and when
 `/var/lib/skiw/applied-contracts` (the contract migrations of every image whose `migrate` was
 started on this host, written before `migrate` runs) names a migration the target image does not
-ship. There is no staging check (staging may already run something newer) and no `migrate`; the
+ship (a plain `deploy` of such an older digest is refused the same way). There is no staging check (staging may already run something newer) and no `migrate`; the
 target is pulled by digest, then steps 5–7 of [deploy.md](deploy.md) apply, including the automatic
 switch-back. A rollback adds no accepted-digest line; the journal and deploy log record it.
 
