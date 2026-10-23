@@ -5,6 +5,11 @@ then chunks of a 4-byte unsigned length in network byte order followed by that m
 zero-length chunk. The reply is one NUL-terminated record: `stream: OK`, `stream: <name> FOUND`, or
 an error such as `INSTREAM size limit exceeded. ERROR`. Anything other than the first two, a
 missing NUL, a closed socket or a passed deadline is a ScanError: never treated as clean.
+
+clamd stops scanning at its limits (MaxFileSize, MaxScanSize, MaxRecursion, MaxFiles) and, by
+default, still answers `stream: OK`. clamd must run with `AlertExceedsMax yes`, which turns a limit
+hit into `stream: Heuristics.Limits.Exceeded.<limit> FOUND`; that reply is an incomplete scan,
+never clean (DECISIONS 2026-10-23 M1i).
 """
 
 import re
@@ -17,6 +22,7 @@ from dataclasses import dataclass
 MAX_REPLY = 4096
 FOUND = re.compile(r"stream: ([\x21-\x7e]{1,200}) FOUND")
 VERSION = re.compile(r"ClamAV [\x20-\x7e]{1,200}")
+LIMITS = "Heuristics.Limits.Exceeded"
 
 
 class ScanError(RuntimeError):
@@ -25,8 +31,15 @@ class ScanError(RuntimeError):
 
 @dataclass(frozen=True)
 class Verdict:
+    """`incomplete`: clamd hit a scan limit, so part of the file was never scanned."""
+
     infected: bool
     signature: str | None = None
+    incomplete: bool = False
+
+    @property
+    def clean(self) -> bool:
+        return not self.infected and not self.incomplete
 
 
 class ClamdScanner:
@@ -54,6 +67,8 @@ class ClamdScanner:
         if reply == "stream: OK":
             return Verdict(infected=False)
         if match := FOUND.fullmatch(reply):
+            if match[1].startswith(LIMITS):
+                return Verdict(infected=False, signature=match[1], incomplete=True)
             return Verdict(infected=True, signature=match[1])
         raise ScanError("clamd gave no verdict")
 

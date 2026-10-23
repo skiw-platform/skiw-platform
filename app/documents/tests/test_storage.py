@@ -1,10 +1,12 @@
 """documents.storage without a database (spec §8.4 H5; FILE-01, FILE-02; plan §3 M1i)."""
 
+import dataclasses
 import hashlib
 import importlib
 import io
 import os
 import stat
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -15,7 +17,14 @@ from pytest_django import Settings
 
 from documents import storage
 from documents.clamd import ScanError
-from documents.storage import FileRow, Outcome, RefusedUpload, Status, StorageError
+from documents.storage import (
+    FileIntegrityError,
+    FileRow,
+    Outcome,
+    RefusedUpload,
+    Status,
+    StorageError,
+)
 
 from .conftest import PDF, FakeScanner, MemoryRows, files_under
 
@@ -153,6 +162,99 @@ def test_a_changed_quarantine_source_fails_the_row(files_root: Path) -> None:
     assert storage.publish_clean(rows, upload.id, FakeScanner(), len(PDF)) is Outcome.FAILED
     assert rows.status(upload.id) is Status.FAILED
     assert not (files_root / "clean").exists()
+
+
+def published(agency: uuid.UUID) -> tuple[MemoryRows, FileRow]:
+    rows, upload = MemoryRows(), storage.write_quarantine(agency, io.BytesIO(PDF), len(PDF))
+    rows.add(FileRow(upload.id, agency, Status.PENDING, upload.size, upload.sha256))
+    assert storage.publish_clean(rows, upload.id, FakeScanner(), len(PDF)) is Outcome.PUBLISHED
+    row = rows.load(upload.id)
+    assert row is not None and row.object_key == f"clean/{agency}/{upload.id}"
+    return rows, row
+
+
+def test_a_scan_limit_hit_is_never_published(files_root: Path) -> None:
+    """clamd with `AlertExceedsMax yes` reports a limit hit as Heuristics.Limits.Exceeded: the
+    file was not fully scanned, so it is `failed` (terminal), never clean."""
+    agency, rows = uuid.uuid4(), MemoryRows()
+    upload = storage.write_quarantine(agency, io.BytesIO(PDF), len(PDF))
+    rows.add(FileRow(upload.id, agency, Status.PENDING, upload.size, upload.sha256))
+    scanner = FakeScanner(max_file=len(PDF) - 1)
+    assert storage.publish_clean(rows, upload.id, scanner, len(PDF)) is Outcome.FAILED
+    assert rows.status(upload.id) is Status.FAILED
+    assert storage.publish_clean(rows, upload.id, FakeScanner(), len(PDF)) is Outcome.FAILED
+    assert files_under(files_root) == [f"quarantine/{agency}/{upload.id}"]
+
+
+def test_the_sweeper_keeps_every_source_that_is_still_needed(files_root: Path) -> None:
+    """H5: only a source whose row is absent (never committed) or `clean` (the post-commit
+    delete did not run) is removed; a `pending` source waiting for its scan, and `infected`,
+    `failed` and `integrity_failed` sources (retention, M16) stay however old they are."""
+    agency, rows, names = uuid.uuid4(), MemoryRows(), {}
+    for status in [None, *Status]:
+        upload = storage.write_quarantine(agency, io.BytesIO(PDF), len(PDF))
+        if status is not None:
+            rows.add(FileRow(upload.id, agency, status, upload.size, upload.sha256))
+        names[status] = f"quarantine/{agency}/{upload.id}"
+    assert storage.sweep_quarantine(rows, agency, time.time()) == 0  # younger than the sweep age
+    assert storage.sweep_quarantine(rows, agency, time.time() + 3601) == 2
+    kept = [Status.PENDING, Status.INFECTED, Status.FAILED, Status.INTEGRITY_FAILED]
+    assert files_under(files_root) == sorted(names[status] for status in kept)
+
+
+@pytest.mark.parametrize("key", ["other-agency", "other-document", "not-uuids"])
+def test_a_key_that_is_not_the_rows_own_is_refused_and_marked(files_root: Path, key: str) -> None:
+    """The clean file is `clean/<row agency>/<row id>` and nothing else: a key naming another
+    agency's or document's verified file is refused, and a malformed key is a failed check."""
+    agency = uuid.uuid4()
+    _, row = published(agency)
+    assert row.object_key is not None
+    wrong = {
+        "other-agency": dataclasses.replace(row, agency_id=uuid.uuid4()),
+        "other-document": dataclasses.replace(row, id=uuid.uuid4()),
+        "not-uuids": dataclasses.replace(row, object_key=f"clean/{agency}/{'-' * 36}"),
+    }[key]
+    rows = MemoryRows()
+    rows.add(wrong)
+    with pytest.raises(FileIntegrityError):
+        storage.open_verified(rows, wrong)
+    assert rows.status(wrong.id) is Status.INTEGRITY_FAILED
+    rows.add(wrong)
+    outcome = storage.publish_clean(rows, wrong.id, FakeScanner(), len(PDF))
+    assert outcome is Outcome.INTEGRITY_FAILED
+
+
+@pytest.mark.parametrize("status", [s for s in Status if s is not Status.CLEAN])
+def test_open_verified_refuses_a_row_that_is_not_clean(files_root: Path, status: Status) -> None:
+    rows, row = published(uuid.uuid4())
+    not_clean = dataclasses.replace(row, av_status=status)
+    rows.add(not_clean)
+    with pytest.raises(StorageError, match="only a clean"):
+        storage.open_verified(rows, not_clean)
+    assert rows.status(row.id) is status
+
+
+@pytest.mark.parametrize("bad", ["../escape", "a/b", "", "."])
+def test_an_id_that_is_not_a_uuid_never_becomes_a_path(files_root: Path, bad: str) -> None:
+    """mypy stops a str at the boundary; a caller that slips one past it is refused, not given
+    a directory outside its agency."""
+    calls: list[Callable[[], object]] = [
+        lambda: storage.write_quarantine(bad, io.BytesIO(PDF), len(PDF)),  # type: ignore[arg-type]
+        lambda: storage.discard_quarantine(bad, uuid.uuid4()),  # type: ignore[arg-type]
+        lambda: storage.discard_quarantine(uuid.uuid4(), bad),  # type: ignore[arg-type]
+        lambda: storage.sweep_quarantine(MemoryRows(), bad),  # type: ignore[arg-type]
+    ]
+    for call in calls:
+        with pytest.raises(StorageError, match="not a uuid"):
+            call()
+    assert files_under(files_root) == []
+    assert sorted(p.name for p in files_root.parent.iterdir()) == ["files"]
+
+
+def test_an_agency_id_is_used_in_its_canonical_form(files_root: Path) -> None:
+    agency = uuid.uuid4()
+    upload = storage.write_quarantine(str(agency).upper(), io.BytesIO(PDF), len(PDF))  # type: ignore[arg-type]
+    assert files_under(files_root) == [f"quarantine/{agency}/{upload.id}"]
 
 
 def test_failpoints_cannot_be_enabled_by_production_settings() -> None:

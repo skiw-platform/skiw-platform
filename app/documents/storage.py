@@ -4,7 +4,8 @@ Layout under `settings.FILES_ROOT` (one filesystem, so a rename is atomic): `tmp
 `tmp/<document>.<attempt>.part`, `quarantine/<agency_id>/<document>` and
 `clean/<agency_id>/<document>`.
 Every directory component is opened with O_NOFOLLOW and files are created with O_EXCL; each file is
-fsynced before its rename and the target directory after it, before success is reported.
+fsynced before its rename and the target directory after it, before success is reported. An agency
+or document id becomes a path component only in its canonical uuid form (`_part`).
 
 This module touches no database (TEN-10). Row access is the caller's `FileRows`, bound to the
 caller's open transaction: from M4/M16 the scan job's or request's `with_agency()` transaction
@@ -15,7 +16,6 @@ import contextlib
 import hashlib
 import logging
 import os
-import re
 import stat
 import time
 import uuid
@@ -40,7 +40,6 @@ MAGIC = (
 HEAD = max(len(prefix) for prefix, _ in MAGIC)
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 NEW_FILE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
-CLEAN_KEY = re.compile(r"clean/([0-9a-f-]{36})/([0-9a-f-]{36})")
 # Crash points for the H5 harness. Armed only when settings.FILES_FAILPOINTS is True, which no
 # settings module sets and no environment variable reaches (test_failpoints_cannot_be_enabled).
 FAILPOINTS = frozenset(
@@ -142,6 +141,7 @@ def write_quarantine(agency_id: uuid.UUID, stream: Reader, max_bytes: int) -> Up
     (`pending`, size, SHA-256) and enqueues the scan in one transaction (H5, EVT-01)."""
     if max_bytes <= 0:
         raise ValueError("max_bytes must be positive")
+    agency = _part(agency_id)
     doc_id, part = uuid.uuid4(), f"{uuid.uuid4()}.part"
     head = b""
     while len(head) < HEAD and (piece := stream.read(HEAD - len(head))):
@@ -165,7 +165,7 @@ def write_quarantine(agency_id: uuid.UUID, stream: Reader, max_bytes: int) -> Up
                     chunk = stream.read(CHUNK)
                 out.flush()
                 os.fsync(out.fileno())
-            with _dir("quarantine", str(agency_id)) as qdir:
+            with _dir("quarantine", agency) as qdir:
                 os.rename(part, str(doc_id), src_dir_fd=tmp, dst_dir_fd=qdir)
                 os.fsync(qdir)
         except Exception:
@@ -195,7 +195,7 @@ def publish_clean(
         return Outcome.ALREADY_CLEAN
     if row.av_status is not Status.PENDING:
         return Outcome(row.av_status.value)
-    agency, name = str(row.agency_id), str(row.id)
+    agency, name = _part(row.agency_id), _part(row.id)
     with _dir("quarantine", agency) as qdir:
         try:
             source = _open_file(name, qdir)
@@ -208,6 +208,8 @@ def publish_clean(
         verdict = scanner.scan(iter(lambda: source.read(CHUNK), b""))  # step 3
         if verdict.infected:
             return _mark(rows, row, Status.INFECTED, Outcome.INFECTED)
+        if not verdict.clean:  # a clamd limit was hit: never published; a retry hits it again
+            return _mark(rows, row, Status.FAILED, Outcome.FAILED)
         db_version = scanner.version()
         source.seek(0)
         part = f"{name}.{uuid.uuid4()}.part"
@@ -224,16 +226,23 @@ def publish_clean(
 def discard_quarantine(agency_id: uuid.UUID, document_id: uuid.UUID) -> None:
     """Delete the quarantine copy after the PUBLISHED commit; a leftover goes to the sweeper."""
     _failpoint("before_quarantine_delete")
-    with _dir("quarantine", str(agency_id)) as qdir:
+    name = _part(document_id)
+    with _dir("quarantine", _part(agency_id)) as qdir:
         with contextlib.suppress(FileNotFoundError):
-            os.unlink(str(document_id), dir_fd=qdir)
+            os.unlink(name, dir_fd=qdir)
         os.fsync(qdir)
 
 
 def open_verified(rows: FileRows, row: FileRow) -> BinaryIO:
     """The clean file of a committed `clean` row, checked against the row's size and SHA-256
-    before the first byte is returned (FILE-04, H5). On a mismatch the row is set to
-    `integrity_failed` (the caller commits it) and FileIntegrityError is raised."""
+    before the first byte is returned (FILE-04, H5). The row's `object_key` must be exactly
+    `clean/<its agency>/<its id>`.
+
+    On a mismatch, a missing file or a malformed key it calls `rows.set_status(integrity_failed)`
+    and THEN raises FileIntegrityError. The mark is only durable if the caller commits it: an
+    M16 download path that runs this inside `transaction.atomic()` (or `with_agency()`) and lets
+    the exception propagate rolls the mark back. The caller must catch FileIntegrityError and
+    commit the mark (as the harness's `download()` does) before it answers with an error."""
     if row.av_status is not Status.CLEAN:
         raise StorageError("only a clean document can be opened")
     handle = _verified(row)
@@ -261,7 +270,7 @@ def sweep_quarantine(rows: FileRows, agency_id: uuid.UUID, now: float | None = N
             return False
         return str(document_id) == name and rows.status(document_id) in (None, Status.CLEAN)
 
-    with _dir("quarantine", str(agency_id)) as qdir:
+    with _dir("quarantine", _part(agency_id)) as qdir:
         return _sweep(qdir, now, leftover)
 
 
@@ -321,13 +330,18 @@ def _copy_output(
 
 
 def _verified(row: FileRow) -> BinaryIO | None:
-    """An open handle at offset 0 if the row's clean file has its size and SHA-256, else None."""
-    match = CLEAN_KEY.fullmatch(row.object_key or "")
-    if match is None or match[1] != str(row.agency_id) or str(uuid.UUID(match[2])) != match[2]:
+    """An open handle at offset 0 if the row's clean file has its size and SHA-256, else None.
+    The key must be `clean/<row agency>/<row id>`: another agency's or document's file, or a key
+    that is not two canonical uuids, is a failed verification."""
+    try:
+        agency, name = _part(row.agency_id), _part(row.id)
+    except StorageError:
+        return None
+    if row.object_key != f"clean/{agency}/{name}":
         return None
     try:
-        with _dir("clean", match[1], create=False) as cdir:
-            handle = _open_file(match[2], cdir)
+        with _dir("clean", agency, create=False) as cdir:
+            handle = _open_file(name, cdir)
     except (OSError, StorageError):  # missing, a symlink (ELOOP) or not a regular file
         return None
     if os.fstat(handle.fileno()).st_size != row.clean_size or _measure(handle) != (
@@ -338,6 +352,15 @@ def _verified(row: FileRow) -> BinaryIO | None:
         return None
     handle.seek(0)
     return handle
+
+
+def _part(value: uuid.UUID) -> str:
+    """The canonical text of an id, the only form used as a path component. The type says uuid,
+    but a caller's string (for example `../other`) must never reach a directory name."""
+    try:
+        return str(uuid.UUID(str(value)))
+    except ValueError as exc:
+        raise StorageError("an agency or document id is not a uuid") from exc
 
 
 def _measure(handle: BinaryIO) -> tuple[int, str]:

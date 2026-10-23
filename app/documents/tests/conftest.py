@@ -24,17 +24,21 @@ def files_root(tmp_path: Path, settings: Settings) -> Path:
 
 
 class FakeScanner:
-    """Models clamd's rules the storage code relies on: a size limit that is an error (never a
-    verdict), a FOUND verdict for a signature, and the VERSION string."""
+    """Models clamd's rules the storage code relies on: the INSTREAM size limit is an error (never
+    a verdict); a file over a scan limit (MaxFileSize here) gives the `AlertExceedsMax yes` reply,
+    an incomplete verdict (clamd 1.5.4, probed 2026-10-23); a FOUND verdict for a signature; and
+    the VERSION string."""
 
-    def __init__(self, limit: int = 100 * 1024 * 1024) -> None:
-        self.limit, self.calls = limit, 0
+    def __init__(self, limit: int = 25 * 1024 * 1024, max_file: int = 20 * 1024 * 1024) -> None:
+        self.limit, self.max_file, self.calls = limit, max_file, 0
 
     def scan(self, chunks: Iterator[bytes]) -> Verdict:
         self.calls += 1
         data = b"".join(chunks)
         if len(data) > self.limit:
             raise ScanError("INSTREAM size limit exceeded")
+        if len(data) > self.max_file:
+            return Verdict(False, "Heuristics.Limits.Exceeded.MaxFileSize", incomplete=True)
         if INFECTED_MARKER in data:
             return Verdict(infected=True, signature="Fake-Test-Signature")
         return Verdict(infected=False)

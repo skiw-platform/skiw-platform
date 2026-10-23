@@ -284,6 +284,15 @@ def test_planted_violation_is_caught(
     assert check(planted) != []
 
 
+def test_clamav_reports_a_scan_cut_short_by_a_limit(config: Config) -> None:
+    """Without AlertExceedsMax clamd answers `stream: OK` for a file it stopped scanning at a limit
+    (spec H5 step 3, FILE-01; DECISIONS 2026-10-23 M1i)."""
+    environment = config["services"]["clamav"]["environment"]
+    assert environment["CLAMD_CONF_AlertExceedsMax"] == "yes"
+    limits = ("MaxFileSize", "MaxScanSize", "MaxRecursion", "MaxFiles")
+    assert not [key for key in environment if key.removeprefix("CLAMD_CONF_") in limits]
+
+
 def test_worker_runs_runworker_with_the_declared_stop_grace(config: Config) -> None:
     values = declared("ci.env")
     worker = config["services"]["worker"]

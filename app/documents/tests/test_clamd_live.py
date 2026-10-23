@@ -1,10 +1,12 @@
 """EICAR through a real clamd INSTREAM (FILE-01, spec §8.4 H5, T14; plan §3 M1i).
 
 Runs under `make host-test-live` (CI job `host`): one container from the clamav image pinned in
-infra/host/compose.yml, with that file's hardening, `CLAMAV_NO_FRESHCLAMD=true` (the image ships
-its signatures, so no download), clamd published on a loopback port chosen by Docker, removed
-afterwards. Skips locally without a Docker daemon; fails when CI=true. The EICAR test string is
-joined from two halves at run time, so no file in the repository holds it whole.
+infra/host/compose.yml, with that file's hardening and its `CLAMD_CONF_*` settings (so
+`AlertExceedsMax yes`), `CLAMAV_NO_FRESHCLAMD=true` (the image ships its signatures, so no
+download), and one limit pushed low for the test (`MaxFileSize` 1 MiB, so a 2 MiB stream crosses
+it), clamd published on a loopback port chosen by Docker, removed afterwards. Skips locally
+without a Docker daemon; fails when CI=true. The EICAR test string is joined from two halves at
+run time, so no file in the repository holds it whole.
 """
 
 import hashlib
@@ -17,6 +19,7 @@ import socket
 import subprocess
 import time
 import uuid
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -31,6 +34,9 @@ from .conftest import PDF, MemoryRows, files_under
 pytestmark = pytest.mark.host_live
 COMPOSE = Path(__file__).resolve().parents[3] / "infra" / "host" / "compose.yml"
 IMAGE = re.search(r"image: (clamav/clamav:\S+@sha256:[0-9a-f]{64})", COMPOSE.read_text())
+CONF = dict(re.findall(r'^ +(CLAMD_CONF_\w+): "([^"]*)"$', COMPOSE.read_text(), re.MULTILINE))
+# Test only: MaxFileSize 1M, so this 2 MiB PDF-like stream hits a limit.
+OVER_LIMIT = b"%PDF-1.7\n" + bytes(range(256)) * (2 * 4096)
 EICAR = ("X5O!P%@AP[4\\PZX54(P^)7CC)7}$" + "EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*").encode()
 STARTUP_S = 300
 
@@ -56,6 +62,7 @@ def pong(port: int) -> bool:
 @pytest.fixture(scope="module")
 def clamd() -> Iterator[ClamdScanner]:
     assert IMAGE, "the clamav image is not pinned by digest in compose.yml"
+    assert CONF.get("CLAMD_CONF_AlertExceedsMax") == "yes", CONF
     cli, name = docker(), f"skiw-clamd-{secrets.token_hex(4)}"
     # The pinned index has an amd64 image only, like the hosts and CI runners (emulated on arm64).
     platform = ["--platform", "linux/amd64"]
@@ -66,6 +73,8 @@ def clamd() -> Iterator[ClamdScanner]:
     for cap in ("CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"):
         run += ["--cap-add", cap]
     run += ["--memory", "1536m", "--pids-limit", "256", "-e", "CLAMAV_NO_FRESHCLAMD=true"]
+    for key, value in {**CONF, "CLAMD_CONF_MaxFileSize": "1M"}.items():
+        run += ["-e", f"{key}={value}"]
     subprocess.run([*run, IMAGE[1]], check=True, capture_output=True, timeout=60)
     try:
         published = subprocess.run(
@@ -110,3 +119,38 @@ def test_publish_marks_an_eicar_source_infected_and_publishes_nothing(
     assert rows.status(doc) is Status.INFECTED
     assert f"clean/{agency}/{doc}" not in files_under(files_root)
     assert f"clean/{agency}/{good.id}" in files_under(files_root)
+
+
+def nested_zip(depth: int) -> bytes:
+    data = b"nested " * 64
+    for level in range(depth):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(f"level{level}.bin", data)
+        data = buf.getvalue()
+    return data
+
+
+@pytest.mark.parametrize(
+    "body",
+    [OVER_LIMIT, nested_zip(25)],
+    ids=["max-file-size", "default-max-recursion"],
+)
+def test_a_stream_past_a_scan_limit_is_never_clean(clamd: ClamdScanner, body: bytes) -> None:
+    """With `AlertExceedsMax yes` clamd names the limit; without it, it answers `stream: OK`
+    (probed 2026-10-23). MaxRecursion keeps the image default here."""
+    verdict = clamd.scan(iter([body]))
+    assert not verdict.clean and verdict.incomplete and not verdict.infected
+    assert verdict.signature and verdict.signature.startswith("Heuristics.Limits.Exceeded.")
+
+
+def test_publish_fails_a_file_clamd_did_not_fully_scan(
+    clamd: ClamdScanner, files_root: Path
+) -> None:
+    agency, rows = uuid.uuid4(), MemoryRows()
+    body = OVER_LIMIT
+    upload = storage.write_quarantine(agency, io.BytesIO(body), len(body))
+    rows.add(FileRow(upload.id, agency, Status.PENDING, upload.size, upload.sha256))
+    assert storage.publish_clean(rows, upload.id, clamd, len(body)) is Outcome.FAILED
+    assert rows.status(upload.id) is Status.FAILED
+    assert files_under(files_root) == [f"quarantine/{agency}/{upload.id}"]
