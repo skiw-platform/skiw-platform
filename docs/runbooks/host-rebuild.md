@@ -23,8 +23,9 @@ It renders the templates from the env file, checks the nftables, sshd and sudoer
 `nft -c`, `sshd -t`, `visudo -c`, then installs, root-owned, only the
 files that differ: configs under `/etc` (0644), `/etc/sudoers.d/skiw-ops` and `skiw-deploy` (0440),
 the env file as `/etc/skiw/host.env`, the stack as `/srv/skiw/compose.yml` with `/srv/skiw/caddy/`
-(0644), `bootstrap-secrets`, `bootstrap-db`, `check-hardening`, `skiw-deploy` and `skiw-deploy-ssh`
-in `/usr/local/sbin` (0755), and
+(0644), `bootstrap-secrets`, `bootstrap-db`, `check-hardening`, `skiw-deploy`, `skiw-deploy-ssh`,
+`skiw-staging-status` and `skiw-health` in `/usr/local/sbin` (0755), the `skiw-health` and
+`skiw-hardening` service and timer units in `/etc/systemd/system` (0644), and
 `skiw_host/`, `db/` and the templates in `/usr/local/lib/skiw/`. It prints what it changed; a
 second run changes nothing. A file counts as unchanged only when its content, mode, owner and group
 all match and it is not a link; otherwise `apply` puts it back root-owned. It refuses (nothing
@@ -46,7 +47,9 @@ version, with `--allow-downgrades`, so a host with a newer Docker returns to the
 units are enabled, and under `fail2ban` the service is started if it is not active; ssh moves from `ssh.socket`
 to `ssh.service` (on 24.04 the socket would keep listening on 22). A service restarts only when
 its file changed: `nft -f /etc/nftables.conf` (never `systemctl reload nftables`: it flushes
-Docker's rules too), ssh, docker (`live-restore` keeps containers running), journald, fail2ban.
+Docker's rules too), ssh, docker (`live-restore` keeps containers running), journald, fail2ban;
+`systemctl daemon-reload` when a unit file changed. Last, `systemctl enable --now
+skiw-health.timer skiw-hardening.timer` (health-alerts.md).
 Reloads owed are written first to `/var/lib/skiw/apply.pending` and removed when all succeed, so
 after exit 1 run `apply` again and it redoes them. Under `allowlist`, a jail file left from
 `fail2ban` is removed (printed) and fail2ban restarted if it runs; the package and its Ubuntu
@@ -77,10 +80,12 @@ Files it reads must be regular files, not links, root-owned and not writable by 
 | `container-env` | no running container's environment (`docker inspect`) holds a secret value: a secret line, or the part after `v<n>:`, of 16 characters or more is searched inside every value; a shorter credential is compared whole and also FAILs as unsupported (it cannot be searched safely), as does an empty secret file; each container from `docker ps` must be described exactly once, with a `Config` and an `Env` that is null or a list of strings; a FAIL names the secret file, container and variable, never the value |
 | `role-set` | through the db socket as `postgres` (`docker compose exec db`, bootstrap-db's password file), the WHOLE role inventory: only the six roles of `roles.sql` (with their attributes, connection limits and settings), `postgres` (the bootstrap superuser, the only superuser) and PostgreSQL's predefined `pg_*` roles (made by initdb; none may log in, be superuser or bypass RLS); any other role, of any name, fails; memberships are exactly `roles.sql`'s grants (`skiw_backup` in `pg_read_all_data`) plus PostgreSQL 17.11's own after initdb (`pg_monitor` in `pg_read_all_settings`, `pg_read_all_stats` and `pg_stat_scan_tables`), each with its options (`admin_option` false, `inherit_option` true, `set_option` true); any other membership (also between `pg_*` roles, e.g. `pg_read_all_data` in `pg_write_all_data`), a missing one, one granted twice or changed options (`INHERIT FALSE`, `SET FALSE`, `ADMIN OPTION`) fails. A FAIL names only roles from that list and `roles.sql`'s settings; other roles are counted (find them with `\du`), and no setting value or database row is ever printed; fails while `/srv/skiw/compose.yml` (or `--compose-file`) or skiw-deploy's state file `/var/lib/skiw/deploy.env` (root, 0644) is missing or untrusted |
 | `pg-hba` | `/etc/skiw/db/pg_hba.conf` (root, 0444) equals the template rendered from the env file; after a subnet change run `bootstrap-db prepare` again |
+| `health-timers` | `skiw-health.timer` and `skiw-hardening.timer` are both `enabled` and `active` (a stopped timer alerts nothing; run `apply`) |
 
 On a FAIL, fix the cause (usually: run `apply` again; for `secret-store` and `pg-hba` the
 bootstrap steps below) and rerun the check. Before the secrets and the database exist, those four
-checks fail, as expected. The health timer runs it monthly from M1j.
+checks fail, as expected. `skiw-hardening.timer` runs it monthly and alerts a failure by check
+name (health-alerts.md).
 
 ## Secrets (`bootstrap-secrets`, spec §8.4 H4)
 

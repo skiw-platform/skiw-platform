@@ -109,6 +109,7 @@ class Rig:
             "nft -j": (0, live_table()),
             "unshare --net": (0, json.dumps(NFT)),
             "systemctl is-enabled": (0, "enabled\n"),
+            "systemctl is-active": (0, "active\n"),
             "apt-config dump": (0, APT),
             "docker info": (0, json.dumps(DOCKER_INFO)),
             "systemctl show": (0, EXEC_START),
@@ -218,6 +219,9 @@ def drop_rule(tables: list[dict[str, dict[str, object]]]) -> None:
         ("listening-sockets", "ss -H", (0, SS + "LISTEN 0 4096 garbage\n")),
         ("docker-group", "id skiw-ops", (0, "skiw-ops sudo docker\n")),
         ("docker-group", "id skiw-deploy", (1, "")),  # no such user
+        ("health-timers", "systemctl is-active", (3, "inactive\n")),  # M1j: no alert would run
+        ("health-timers", "systemctl is-active", (4, "")),  # systemctl gave no answer
+        ("health-timers", "systemctl is-enabled", (1, "disabled\n")),
     ],
 )
 def test_each_check_fails_on_a_bad_or_unreadable_answer(
@@ -226,7 +230,12 @@ def test_each_check_fails_on_a_bad_or_unreadable_answer(
     rig.out[key] = answer
     code, results = rig.run(capsys)
     assert code == 1 and results.pop(check).startswith("FAIL")
+    for other in SHARED.get(key, set()) - {check}:  # the rig gives every unit the same answer
+        assert results.pop(other).startswith("FAIL")
     assert set(results.values()) == {"PASS"}  # only that one
+
+
+SHARED = {"systemctl is-enabled": {"unattended-upgrades", "health-timers"}}
 
 
 def chmod(rel: str, mode: int) -> Callable[[Rig], None]:

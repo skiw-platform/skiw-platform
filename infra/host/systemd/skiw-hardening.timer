@@ -1,0 +1,11 @@
+# Runs skiw-hardening.service once a month (spec §8.4 H7; plan §3 M1j).
+[Unit]
+Description=SKIW monthly check-hardening
+
+[Timer]
+OnCalendar=monthly
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

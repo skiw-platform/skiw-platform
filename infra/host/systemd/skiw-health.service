@@ -1,0 +1,36 @@
+# Health checks every 5 minutes (spec §8.4 H7; plan §3 M1j; runbook health-alerts.md).
+# Started only by skiw-health.timer: no socket, path or HTTP trigger (UNI-19).
+# Root, because it reads the Docker socket, the 0700 dump directory of uid 10003 (hence
+# CAP_DAC_READ_SEARCH, the only capability kept) and the full journal, and writes its root-owned
+# state file; everything else is read-only to it.
+[Unit]
+Description=SKIW health checks and alerts
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/skiw-health
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+TimeoutStartSec=280
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+ProtectSystem=strict
+ReadWritePaths=/var/lib/skiw
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native

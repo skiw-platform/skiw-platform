@@ -531,6 +531,17 @@ def stale_files(host: Host) -> list[str]:
     return problems
 
 
+def health_timers(host: Host) -> list[str]:
+    """skiw-health's two timers (M1j) enabled and waiting; a stopped timer alerts nothing."""
+    problems = []
+    for timer in apply.TIMERS:
+        for verb, want in (("is-enabled", "enabled"), ("is-active", "active")):
+            done = host.run(["systemctl", verb, timer], b"")
+            if (state := done.stdout.decode("utf-8", "replace").strip()) != want:
+                problems.append(f"{timer} is {state if SAFE_NAME.fullmatch(state) else 'unknown'}")
+    return problems
+
+
 CHECKS: dict[str, Callable[[Host], list[str]]] = {
     "sshd": sshd,
     "nftables": nftables,
@@ -543,6 +554,7 @@ CHECKS: dict[str, Callable[[Host], list[str]]] = {
     "container-env": container_env,
     "role-set": role_set,
     "pg-hba": pg_hba,
+    "health-timers": health_timers,
 }
 
 

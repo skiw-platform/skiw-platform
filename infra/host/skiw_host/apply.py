@@ -3,9 +3,10 @@
 Installs this host's files from the repository. Every host value, Docker's apt key and each
 rendered file that has a checker (nftables, sshd, sudoers) is checked first: a refusal exits 2 with
 nothing changed. Then only the files that differ are installed, root-owned with fixed modes; the
-users are made (never in group `docker`), the pinned packages installed, the units enabled and the
-services of changed files reloaded. Reloads still owed are kept in a root-owned pending file until
-they succeed, so a run that failed (exit 1) can simply be repeated. A second run changes nothing.
+users are made (never in group `docker`), the pinned packages installed, the units enabled, the
+services of changed files reloaded and the health timers enabled and started (M1j). Reloads still
+owed are kept in a root-owned pending file until they succeed, so a run that failed (exit 1) can
+simply be repeated. A second run changes nothing.
 """
 
 import argparse
@@ -44,12 +45,16 @@ TEMPLATES = {  # rendered from host config: source under infra/host -> destinati
     "apt/skiw-docker.pref": "etc/apt/preferences.d/skiw-docker",
 }
 FAIL2BAN = {"fail2ban/jail.local": "etc/fail2ban/jail.d/skiw.local"}  # G7 (b) only
+SYSTEMD = "etc/systemd/system"
+TIMERS = ("skiw-health.timer", "skiw-hardening.timer")  # M1j; each starts its .service
+UNIT_FILES = (*TIMERS, *(timer.replace(".timer", ".service") for timer in TIMERS))
 VERBATIM = {  # copied as they are: the sudoers rule holds a regular expression with `$`
     "sudoers.d/skiw-deploy": "etc/sudoers.d/skiw-deploy",
     "compose.yml": COMPOSE,
     **{
         f"caddy/{n}": f"srv/skiw/caddy/{n}" for n in ("Caddyfile", "edge.caddy", "maintenance.html")
     },
+    **{f"systemd/{n}": f"{SYSTEMD}/{n}" for n in UNIT_FILES},
 }
 PROGRAMS = (
     "bootstrap-secrets",
@@ -58,6 +63,7 @@ PROGRAMS = (
     "skiw-deploy",
     "skiw-deploy-ssh",
     "skiw-staging-status",
+    "skiw-health",
 )
 CHECKERS = {  # run on each candidate before anything is installed
     "etc/nftables.conf": ("nft", "-c", "-f"),
@@ -73,6 +79,7 @@ RELOADS = {
     "etc/docker/daemon.json": ("systemctl", "restart", "docker"),
     "etc/systemd/journald.conf.d/skiw.conf": ("systemctl", "restart", "systemd-journald"),
     "etc/fail2ban/jail.d/skiw.local": ("systemctl", "try-restart", "fail2ban"),
+    **{f"{SYSTEMD}/{n}": ("systemctl", "daemon-reload") for n in UNIT_FILES},
 }
 BACKUPS = "srv/skiw/backups/predeploy"  # the pre-migration dumps, written by `backup` (uid 10003)
 BACKUP_DIR_MODE = stat.S_IRWXU  # 0700
@@ -357,6 +364,7 @@ def main(
         converge(run, ban)
         for command in dict.fromkeys(RELOADS[dest] for dest in owed):
             ok(run, list(command))
+        ok(run, ["systemctl", "enable", "--now", *TIMERS])  # after daemon-reload: units known
         (root / PENDING).unlink(missing_ok=True)
     except Refused as exc:
         print(f"apply: refused, nothing installed: {exc}", file=sys.stderr)
