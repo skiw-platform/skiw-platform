@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 59
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: 5405b5f69fc955069b02e8210ce35788684ea1b8
+review-file: reviews/PR-59.md
+review-file-hash: ad083a2dfa5dd59fd2372915ac93fb3af514f9c7
+review-log-branch-commit: e6a2685641dec556be32b010709ff3400c12ab39
+verdict: Approved (round 2; round 1 was Revision required)
+deferred-conditions: none. Optional: P3 the PR self-check table was not updated for the round 1 fix.
+ci: checks, host, image, security all success on the reviewed head (run 39971337096 5405b5f); publish and deploy-staging skipped on a pull request
+note: M1i file store harness (documents.storage, documents.clamd, files_probe harness, Semgrep and import-linter boundaries); round 1 fix adds storage safety tests, AlertExceedsMax so a limit hit is never clean, uuid checks on path parts. One PR by owner choice; G14 yes.
+written-at: 2026-10-23T15:20:27Z
+pr-state-at-write: OPEN, unmerged
