@@ -8,9 +8,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request cancels its older run; runs on main are never cancelled, so a
+# publish or a staging deploy is never cut off half way (DECISIONS 2026-10-23, M1h).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
@@ -90,7 +92,7 @@ jobs:
         # Anonymous: no login, no metrics (UNI-11). The custom rules in semgrep/ run in `make lint`.
         run: >-
           uvx semgrep==1.179.0 --config p/python --config p/django --config p/typescript
-          --config p/react --metrics=off --error app infra/host web/src
+          --config p/react --metrics=off --error app infra/host web/src scripts
 
   image:
     runs-on: ubuntu-24.04
@@ -127,3 +129,162 @@ jobs:
         # Builds the app image, runs caddy + web + db from infra/host/compose.yml with a CI-only
         # Caddyfile (internal CA), loopback ports and secrets generated per run; nothing is pushed.
         run: make host-test-live
+
+  # Push to main only, after every gate job (spec §8.4 H3 step 2; docs/runbooks/deploy.md). Builds
+  # the app image once, labels it from `migration_labels` run inside it (no network, no database),
+  # scans that exact image and pushes it with the job's own token; the pushed digest is the
+  # `image-digest` artifact that scripts/deploy-prod checks. The only job that can write packages.
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [checks, security, image, host]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    defaults:
+      run:
+        shell: bash # bash -eo pipefail: a failing command anywhere in a pipeline fails the step
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    env:
+      IMAGE: ghcr.io/skiw-platform/skiw-platform
+      PREDEPLOY_IMAGE: ghcr.io/skiw-platform/skiw-predeploy
+      # The pre-migration dump image is published only once the owner turns it on (deploy.md).
+      PUBLISH_PREDEPLOY: ${{ vars.SKIW_PUBLISH_PREDEPLOY == 'enabled' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build image
+        run: docker build -t skiw-platform:unlabelled .
+      - name: Label image (commit, migration head, contract migrations)
+        env:
+          # Tooling-only values: Django settings need them to start; nothing connects.
+          DJANGO_SECRET_KEY: tooling-only-not-a-secret
+          DATABASE_URL: postgres://labels@127.0.0.1:5432/none
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges -e DJANGO_SECRET_KEY -e DATABASE_URL \
+            skiw-platform:unlabelled python app/manage.py migration_labels \
+            > "$RUNNER_TEMP/migrations.json"
+          PYTHONPATH=infra/host python3 -m skiw_host.labels "$GITHUB_SHA" \
+            < "$RUNNER_TEMP/migrations.json" > "$RUNNER_TEMP/labels.txt"
+          labels=(--label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY")
+          while IFS= read -r label; do labels+=(--label "$label"); done < "$RUNNER_TEMP/labels.txt"
+          test "${#labels[@]}" -eq 8
+          # Same layers, labels added to the image config only: the image built above, not a rebuild.
+          echo "FROM skiw-platform:unlabelled" | docker build "${labels[@]}" -t "$IMAGE:$GITHUB_SHA" -
+          docker image inspect --format '{{.Id}}' "$IMAGE:$GITHUB_SHA" | tee "$RUNNER_TEMP/scanned.txt"
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          version: v0.75.0
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Build pre-migration dump image
+        if: env.PUBLISH_PREDEPLOY == 'true'
+        run: |
+          docker build -t "$PREDEPLOY_IMAGE:$GITHUB_SHA" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            infra/host/backup/predeploy
+          docker image inspect --format '{{.Id}}' "$PREDEPLOY_IMAGE:$GITHUB_SHA" \
+            | tee -a "$RUNNER_TEMP/scanned.txt"
+      - if: env.PUBLISH_PREDEPLOY == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.PREDEPLOY_IMAGE }}:${{ github.sha }}
+          version: v0.75.0
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Push by digest
+        id: push
+        env:
+          REGISTRY_LOGIN: ${{ github.token }}
+        run: |
+          export DOCKER_CONFIG="$RUNNER_TEMP/docker-config"
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          refs=("$IMAGE:$GITHUB_SHA")
+          if [ "$PUBLISH_PREDEPLOY" = true ]; then refs+=("$PREDEPLOY_IMAGE:$GITHUB_SHA"); fi
+          # The image IDs pushed are the ones Trivy scanned above, in the same order.
+          for ref in "${refs[@]}"; do docker image inspect --format '{{.Id}}' "$ref"; done \
+            | diff - "$RUNNER_TEMP/scanned.txt"
+          printf '%s\n' "$REGISTRY_LOGIN" \
+            | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          for ref in "${refs[@]}"; do
+            docker push "$ref"
+            repo="${ref%:*}"
+            # Exactly one repo digest of this repository, sha256: + 64 hex, nothing else.
+            mapfile -t found < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" \
+              | grep -E "^${repo//./\\.}@sha256:[0-9a-f]{64}\$")
+            test "${#found[@]}" -eq 1
+            name="${repo##*/}"
+            mkdir -p "$RUNNER_TEMP/$name"
+            printf '%s' "${found[0]#"$repo"@}" > "$RUNNER_TEMP/$name/digest.txt"
+            echo "pushed ${found[0]}" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+          docker logout ghcr.io
+          echo "digest=$(cat "$RUNNER_TEMP/skiw-platform/digest.txt")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-digest
+          path: ${{ runner.temp }}/skiw-platform/digest.txt
+          if-no-files-found: error
+          retention-days: 30
+      - if: env.PUBLISH_PREDEPLOY == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: predeploy-digest
+          path: ${{ runner.temp }}/skiw-predeploy/digest.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  # Deploys the published digest to staging with the staging key (T25), through the host's forced
+  # command. Skipped until the owner sets the repository variable SKIW_STAGING_DEPLOY to `enabled`
+  # (there is no staging host before M1k; deploy.md "Turn on the staging deploy"). Never production.
+  deploy-staging:
+    needs: publish
+    if: vars.SKIW_STAGING_DEPLOY == 'enabled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    permissions:
+      contents: read
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash # bash -eo pipefail: a failing command anywhere in a pipeline fails the step
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Deploy to staging
+        env:
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          STAGING_DEPLOY_KEY: ${{ secrets.STAGING_DEPLOY_KEY }}
+        run: |
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "publish gave no digest"; exit 1; }
+          test -n "$STAGING_DEPLOY_KEY" || { echo "secret STAGING_DEPLOY_KEY is not set"; exit 1; }
+          # Staging's own address and host key: public values in infra/host/env/staging.env.
+          address=$(grep -E '^SKIW_STAGING_SSH=' infra/host/env/staging.env | cut -d= -f2-)
+          host_key=$(grep -E '^SKIW_STAGING_HOST_KEY=' infra/host/env/staging.env | cut -d= -f2-)
+          name='([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}'
+          [[ "$address" =~ ^($name):([1-9][0-9]{0,4})$ ]] \
+            || { echo "SKIW_STAGING_SSH in staging.env is not <host>:<port>"; exit 1; }
+          host="${address%:*}" port="${address##*:}"
+          [[ "$host_key" =~ ^ssh-ed25519\ [A-Za-z0-9+/]{68}$ ]] \
+            || { echo "SKIW_STAGING_HOST_KEY in staging.env is not an ed25519 host key"; exit 1; }
+          umask 077
+          scratch=$(mktemp -d)
+          trap 'rm -rf "$scratch"' EXIT
+          printf '%s\n' "$STAGING_DEPLOY_KEY" > "$scratch/key"
+          chmod 600 "$scratch/key"
+          printf 'skiw-staging %s\n' "$host_key" > "$scratch/known_hosts"
+          timeout 3600 ssh -F /dev/null -i "$scratch/key" -p "$port" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$scratch/known_hosts" -o GlobalKnownHostsFile=/dev/null \
+            -o HostKeyAlias=skiw-staging -o HostKeyAlgorithms=ssh-ed25519 \
+            -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
+            -o RequestTTY=no "skiw-deploy@$host" deploy "$DIGEST" "$GITHUB_RUN_ID" < /dev/null

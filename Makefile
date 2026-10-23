@@ -22,7 +22,7 @@ lint: check-node
 	pnpm -C web lint
 
 typecheck: check-node
-	$(TOOL_ENV) uv run --locked mypy app infra/host
+	$(TOOL_ENV) uv run --locked mypy app infra/host scripts/deploy-prod
 	pnpm -C web typecheck
 
 test: check-node

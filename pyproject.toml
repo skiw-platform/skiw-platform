@@ -32,6 +32,8 @@ package = false
 line-length = 100
 target-version = "py312"
 src = ["app", "infra/host"]
+# The owner's deploy wrapper has no .py suffix (plan §3 M1h); ruff does not find it on its own.
+extend-include = ["scripts/deploy-prod"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "DJ", "C4", "SIM", "RUF"]

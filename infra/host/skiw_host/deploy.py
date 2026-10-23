@@ -92,6 +92,7 @@ LABELS += ["python", "app/manage.py", "migration_labels"]
 MIGRATION = re.compile(r"[a-z_][a-z0-9_]{0,99}\.[A-Za-z0-9_]{1,200}")
 COMMIT = re.compile(r"[0-9a-f]{40}")
 HEAD_LABEL, COMMIT_LABEL = "skiw.migration-head", "org.opencontainers.image.revision"
+CONTRACTS_LABEL = "skiw.contract-migrations"  # set by CI (skiw_host.labels); not read here
 ACCEPTED = "var/lib/skiw/accepted-digests"  # production only, append-only (chattr +a)
 APPLIED = "var/lib/skiw/applied-contracts"  # contract migrations whose `migrate` succeeded here
 STATUS = "var/lib/skiw/staging-status"  # staging only: the last deploy's check line (G12)
@@ -304,7 +305,12 @@ def image_labels(d: Deploy, image: str) -> dict[str, str]:
 
 def migration_labels(d: Deploy, image: str) -> dict[str, list[str]]:
     """`migration_labels` in the image itself (no database): head, contracts, migrations."""
-    found = json.loads(d.ok([*d.compose(image), *LABELS], "migration_labels"))
+    return parse_migration_labels(d.ok([*d.compose(image), *LABELS], "migration_labels"))
+
+
+def parse_migration_labels(text: str) -> dict[str, list[str]]:
+    """The one JSON object `migration_labels` prints, checked (also for CI: skiw_host.labels)."""
+    found = json.loads(text)
     keys = ("head", "contracts", "migrations")
     if not isinstance(found, dict) or sorted(found) != sorted(keys):
         raise Failed("migration_labels printed something else")
