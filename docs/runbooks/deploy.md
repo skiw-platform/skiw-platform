@@ -1,7 +1,8 @@
 # Runbook — deploy
 
-iCore VPS, spec §8.4 H3. Host side for staging and production (M1g); the CI trigger and the
-published predeploy image follow in M1h, measured outage in M1k. Nothing deploys before then.
+iCore VPS, spec §8.4 H3. Host side for staging and production (M1g); CI publish, the staging deploy
+job and the owner's `scripts/deploy-prod` (M1h); real hosts and the measured outage in M1k. Nothing
+deploys before then: the staging deploy job is off until the owner turns it on (below).
 
 ## How a deploy reaches the host
 Each deploy key's `authorized_keys` line for user `skiw-deploy` fixes its own role:
@@ -39,7 +40,8 @@ command `/etc/sudoers.d/skiw-deploy` allows (its arguments pinned by a regular e
   "the staging status call timed out". `/var/lib/skiw/accepted-digests` is made append-only
   (`chattr +a`, checked with `lsattr -d`) by the first production deploy; a file system without
   that attribute is refused.
-- `SKIW_BACKUP_IMAGE` (the published predeploy image, by digest, M1h) and `SKIW_DUMP_RECIPIENTS`
+- `SKIW_BACKUP_IMAGE` (the published predeploy image, by digest: "Publish the pre-migration dump
+  image" below; Compose refuses every command while it is empty) and `SKIW_DUMP_RECIPIENTS`
   (the owner's public age recipient(s) for dumps, G5) are set; `apply` made
   `/srv/skiw/backups/predeploy` (uid 10003, 0700).
 - First deploy only: `bootstrap-db prepare`, start `db` and `bootstrap-db apply` (host-rebuild.md,
@@ -113,13 +115,130 @@ Exit codes: 0 deployed; 1 failed (read the log line; the previous digest serves 
 says RECOVERY FAILED; fix and deploy again); 2 refused, nothing changed; 3 deployed but the
 accepted-digest or log line failed (record it by hand).
 
+## CI: publish and the staging deploy
+Workflow `.github/workflows/ci.yml` ([ci.md](ci.md)). On a push to `main`, after `checks`,
+`security`, `image` and `host` pass, job **`publish`** (the only job with `packages: write`):
+1. builds the app image once and runs `python app/manage.py migration_labels` inside it (no
+   network, no database). `skiw_host.labels` checks that answer exactly as skiw-deploy does and
+   gives the labels `org.opencontainers.image.revision=<commit>`,
+   `skiw.migration-head=<head, comma-joined>` and
+   `skiw.contract-migrations=<contracts, comma-joined, empty if none>`, which are added to the image
+   config (same layers, with `org.opencontainers.image.source`);
+2. runs Trivy (HIGH/CRITICAL, as the `image` job) on that exact image; the push step first checks
+   that the image ID is the one scanned;
+3. pushes `ghcr.io/skiw-platform/skiw-platform:<commit>` with the job's own token, reads the pushed
+   digest (exactly one `sha256:` repo digest of that repository), writes it to the job summary and
+   uploads the artifact **`image-digest`**: one file, `digest.txt`, holding exactly the digest
+   (kept 30 days). When the owner has turned it on (below), the same job also builds, scans and
+   pushes the pre-migration dump image `ghcr.io/skiw-platform/skiw-predeploy:<commit>` and uploads
+   **`predeploy-digest`** the same way. A Trivy finding in either image fails the job, and nothing
+   reaches staging.
+
+Job **`deploy-staging`** (`contents: read` only) is skipped unless the repository variable
+`SKIW_STAGING_DEPLOY` is `enabled`. It writes the secret `STAGING_DEPLOY_KEY` to a 0600 file in a
+temporary directory (removed after) and runs `ssh skiw-deploy@<staging> deploy <digest> <run id>`
+with `BatchMode`, `StrictHostKeyChecking=yes` and a known_hosts file that holds only
+`SKIW_STAGING_HOST_KEY` from `infra/host/env/staging.env` (the address is `SKIW_STAGING_SSH` there),
+bounded at 3600 s. Staging deploys run one at a time, and runs on `main` are never cancelled (a newer
+push waits). The host's exit code is the job's result; its one-line result is in the job log.
+
+### Turn on the staging deploy (owner, M1k)
+Needs the staging host built (host-rebuild.md) with its `ghcr_read_token`, `SKIW_BACKUP_IMAGE` set
+(next section) and `check-hardening` passing.
+1. **SSH from GitHub's runners.** GitHub-hosted runners connect from changing addresses, so staging
+   cannot use `SKIW_SSH_POLICY=allowlist` (G7) and still take CI deploys: set staging to `fail2ban`
+   (key-only from anywhere, the nftables rate limit and the fail2ban jail) and re-run `apply` there.
+   Under `allowlist` the job fails with a connection timeout.
+2. **The staging deploy key** (T25). On the owner's machine, in an empty directory:
+   ```
+   ssh-keygen -q -t ed25519 -N '' -C staging-deploy -f ./staging-deploy
+   gh secret set STAGING_DEPLOY_KEY --repo skiw-platform/skiw-platform < ./staging-deploy
+   cat ./staging-deploy.pub
+   rm ./staging-deploy ./staging-deploy.pub
+   ```
+   It has no passphrase because CI uses it unattended; it opens only the staging forced command.
+   On **staging**, add the copied line with the forced command in front (replace `<public line>`
+   with the whole `ssh-ed25519 AAAA... staging-deploy` line):
+   ```
+   sudo install -d -m 0700 -o skiw-deploy -g skiw-deploy /home/skiw-deploy/.ssh
+   printf '%s\n' 'restrict,command="/usr/local/sbin/skiw-deploy-ssh --key staging" <public line>' \
+     | sudo tee -a /home/skiw-deploy/.ssh/authorized_keys >/dev/null
+   sudo chown skiw-deploy:skiw-deploy /home/skiw-deploy/.ssh/authorized_keys
+   sudo chmod 0600 /home/skiw-deploy/.ssh/authorized_keys
+   ```
+3. **Staging's address and host key**, in a PR: in `infra/host/env/staging.env` set
+   `SKIW_STAGING_SSH=<staging DNS name>:<staging SKIW_SSH_PORT>` and `SKIW_STAGING_HOST_KEY=<the
+   first two fields of staging's /etc/ssh/ssh_host_ed25519_key.pub>` (`awk '{print $1, $2}'` on the
+   staging console, never `ssh-keyscan`). `production.env` holds the same two values; a test fails
+   if they differ.
+4. **Turn it on:** `gh variable set SKIW_STAGING_DEPLOY --body enabled --repo
+   skiw-platform/skiw-platform`. The next push to `main` deploys. Check it with
+   `gh run list --repo skiw-platform/skiw-platform --workflow ci --branch main --limit 1` and then
+   `gh run view <run id> --repo skiw-platform/skiw-platform --log | grep 'skiw-deploy:'`, which shows
+   the host's `... deployed; previous ...; staging checks passed` line.
+
+Turn it off: `gh variable delete SKIW_STAGING_DEPLOY --repo skiw-platform/skiw-platform`. Rotate the
+key yearly and on suspicion: repeat step 2 and remove the old line from staging's `authorized_keys`.
+No production credential is ever a secret or a variable (Q42): `gh secret list --repo
+skiw-platform/skiw-platform` shows only `STAGING_DEPLOY_KEY`, and
+`gh api repos/skiw-platform/skiw-platform/environments` shows no environment secret.
+
+### Publish the pre-migration dump image and set `SKIW_BACKUP_IMAGE` (owner)
+**Blocked today:** the image in `infra/host/backup/predeploy/` fails the Trivy gate (DECISIONS
+2026-10-23, M1h). Turning this on before that is fixed makes every `publish` on `main` fail.
+1. `gh variable set SKIW_PUBLISH_PREDEPLOY --body enabled --repo skiw-platform/skiw-platform`.
+2. After the next green push to `main`, read the digest (replace `<run id>`):
+   ```
+   d=$(mktemp -d)
+   gh run download <run id> --repo skiw-platform/skiw-platform -n predeploy-digest -D "$d"
+   cat "$d/digest.txt"; echo; rm -r "$d"
+   ```
+   The `publish` job summary shows the same `pushed ghcr.io/skiw-platform/skiw-predeploy@sha256:…`.
+3. In a PR, set `SKIW_BACKUP_IMAGE=ghcr.io/skiw-platform/skiw-predeploy@<that digest>` in
+   `infra/host/env/staging.env` and `production.env`, then install the env file on each host as
+   usual. The hosts' `ghcr_read_token` must be able to read this package too (G10; a new package
+   is private and is linked to the repository by its `org.opencontainers.image.source` label).
+
+A new dump image (a base or `age` update) is published the same way, and the value changed again.
+
 ## Production
-The owner, on the owner's machine, only for a digest staging reports as running with
-`checks=passed` (the host checks again), with the green `main` CI run id (M1h adds
-`scripts/deploy-prod`, which checks the run first):
+The owner deploys, on the owner's machine, only a digest that staging reports as running with
+`checks=passed` (the host checks again), through `scripts/deploy-prod` (Python 3.12 stdlib, the
+owner's own `gh` login; spec H3 step 8, PROJECT §11).
+
+One-time config, outside the repository, readable and writable by you only (replace each `<...>`):
 ```
-ssh -i <owner production key> -p <SKIW_SSH_PORT> skiw-deploy@<production host> deploy <digest> <run-id>
+mkdir -p ~/.config/skiw
+printf '%s\n' 'SKIW_PROD_SSH=<production DNS name or IPv4>:<production SKIW_SSH_PORT>' \
+  'SKIW_PROD_HOST_KEY=<first two fields of production /etc/ssh/ssh_host_ed25519_key.pub>' \
+  'SKIW_PROD_DEPLOY_KEY=<absolute path of your production deploy key>' \
+  > ~/.config/skiw/deploy-prod.env
+chmod 600 ~/.config/skiw/deploy-prod.env
 ```
+Read the host key on the production console (never with `ssh-keyscan`). The key file must be yours
+and not readable by group or others. Each deploy:
+1. Find the green `main` run of the digest that staging runs:
+   `gh run list --repo skiw-platform/skiw-platform --workflow ci --branch main --event push --status success --limit 5`.
+   Its digest is in the `publish` job summary, or:
+   `d=$(mktemp -d); gh run download <run id> --repo skiw-platform/skiw-platform -n image-digest -D "$d"; cat "$d/digest.txt"; echo; rm -r "$d"`.
+   Check staging with the smoke test below.
+2. From the repository root: `scripts/deploy-prod <digest> <run id>` (`--config <file>` for another
+   config file). It refuses (exit 2, nothing sent to production) unless `gh run view` shows that run
+   as `success`, `push`, `main`, workflow `ci`; the run's commit is on `main` (`gh api
+   .../compare/<commit>...main` answers `ahead` or `identical` with `behind_by` 0); the run has
+   exactly one unexpired `image-digest` artifact; and that artifact, downloaded into a fresh
+   temporary directory, holds only `digest.txt` with exactly that digest. Each `gh` call is bounded
+   (60 s; the download 120 s). A failure, a timeout or output it cannot read refuses, and `gh`'s
+   output is never shown: run the `gh` command it names by hand to see why.
+3. It then runs `ssh -i <key> -p <port> skiw-deploy@<host> deploy <digest> <run id>` with
+   production's host key pinned (`StrictHostKeyChecking=yes`, a temporary known_hosts, nothing else
+   trusted). ssh asks for the key's passphrase; the host's one result line is printed. Exit 0
+   deployed; 2 refused (by the script or the host: nothing changed); 1 failed (the host's exit 1;
+   the host's exit 3 "deployed but the accepted-digest line failed", see "If it goes wrong"; ssh
+   255: the connection or the host key). The call is bounded at 3600 s. After a timeout the deploy
+   may still run on the host: read `sudo journalctl -t skiw-deploy` there before trying again (a
+   second deploy meanwhile is refused by the deploy lock).
+
 Rollback: [rollback.md](rollback.md).
 
 ## Smoke tests

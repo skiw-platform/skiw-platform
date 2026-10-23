@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""scripts/deploy-prod <digest> <run-id> [--config <file>]: the owner's production deploy (spec §8.4
+H3 step 8, Q42; agents/PROJECT.md §11; docs/runbooks/deploy.md "Production").
+
+Runs on the owner's machine, Python 3.12 stdlib, with the owner's own `gh` login and the owner's
+production deploy key (never in GitHub). Before anything reaches production it checks, and refuses
+(exit 2) on any failure, timeout, or output it cannot parse:
+  1. the digest is `sha256:` + 64 lowercase hex and the run id is digits;
+  2. `gh run view`: conclusion success, event push, branch main, workflow `ci`, a 40-hex head SHA;
+  3. `gh api .../compare/<headSha>...main`: status `ahead` or `identical` with `behind_by` 0, so
+     the head SHA is main or an ancestor of main (GitHub compares base...head);
+  4. the run's artifact list holds exactly one artifact named `image-digest`, not expired, of this
+     run and head SHA (`gh run download -n` silently takes only the first of two with one name);
+  5. `gh run download -n image-digest` into a fresh temporary directory gives exactly one regular
+     file, `digest.txt`, holding exactly that one digest (one trailing newline allowed), equal to
+     the digest argument.
+Then it runs `ssh skiw-deploy@<host> deploy <digest> <run-id>` with the owner's key, the host key
+pinned from the config file, no other host trust; the host checks the rest (staging status, key).
+Tool output is never printed; the host's own one-line result reaches the terminal through ssh.
+Every call is bounded. Exit 0 deployed, 1 failed (the host's exit 1 or 3, ssh failed or timed out),
+2 refused (by this script or by the host: nothing changed on production).
+
+Config (not in the repo; default ~/.config/skiw/deploy-prod.env, owner-only, not group- or
+world-writable): exactly these three lines, `#` comments and blank lines allowed:
+  SKIW_PROD_SSH=<production DNS name or IPv4>:<SKIW_SSH_PORT>
+  SKIW_PROD_HOST_KEY=ssh-ed25519 AAAA...      (production's host key, public)
+  SKIW_PROD_DEPLOY_KEY=/absolute/path/to/the/owner/production/deploy/key
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any  # parsed JSON only; every field is type-checked where it is read (UNI-01)
+
+REPO = "skiw-platform/skiw-platform"
+ARTIFACT = "image-digest"
+DIGEST_FILE = "digest.txt"
+DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+DIGEST_BYTES = re.compile(rb"sha256:[0-9a-f]{64}\n?")
+RUN_ID = re.compile(r"[1-9][0-9]{0,19}")
+COMMIT = re.compile(r"[0-9a-f]{40}")
+NAME = r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}|(?:[0-9]{1,3}\.){3}[0-9]{1,3}"
+PROD_SSH = re.compile(rf"({NAME}):([1-9][0-9]{{0,4}})")
+HOST_KEY = re.compile(r"ssh-ed25519 [A-Za-z0-9+/]{68}")
+CONFIG_KEYS = ("SKIW_PROD_SSH", "SKIW_PROD_HOST_KEY", "SKIW_PROD_DEPLOY_KEY")
+DEFAULT_CONFIG = Path("~/.config/skiw/deploy-prod.env")
+HOST_ALIAS = "skiw-production"  # the known_hosts name of the pinned key, whatever the address
+RUN_FIELDS = "conclusion,event,headBranch,headSha,workflowName"
+WANT_RUN = {"conclusion": "success", "event": "push", "headBranch": "main", "workflowName": "ci"}
+GH_S = 60  # bound on one `gh run view` or `gh api` call
+DOWNLOAD_S = 120  # bound on `gh run download`
+DEPLOY_S = 3600  # bound on the ssh deploy: pull 900 s + dump 1800 s + switch 300 s + checks
+MAX_DIGEST_FILE = 128  # bytes
+OTHERS = stat.S_IWGRP | stat.S_IWOTH
+PRIVATE = stat.S_IRWXG | stat.S_IRWXO
+
+
+class Refused(Exception):
+    """A check failed before anything reached production (exit 2)."""
+
+
+def tool(name: str) -> str:
+    found = shutil.which(name)
+    if not found:
+        raise Refused(f"`{name}` is not on PATH")
+    return found
+
+
+def gh_env() -> dict[str, str]:
+    """The owner's environment with gh pinned to github.com, no prompt, no pager, no notices."""
+    env = {k: v for k, v in os.environ.items() if k not in ("GH_REPO", "GH_HOST")}
+    env |= {"GH_HOST": "github.com", "GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1"}
+    return env | {"GH_PAGER": "cat", "NO_COLOR": "1"}
+
+
+def gh(args: list[str], label: str, bound: float | None = None) -> bytes:
+    """stdout of a gh call that exited 0 in time (GH_S unless `bound`); never shown."""
+    bound = GH_S if bound is None else bound
+    argv = [tool("gh"), *args]
+    try:
+        done = subprocess.run(  # noqa: S603 - argv built here, no shell
+            argv, capture_output=True, stdin=subprocess.DEVNULL, timeout=bound, env=gh_env()
+        )
+    except subprocess.TimeoutExpired:
+        raise Refused(f"`{label}` timed out after {bound} s") from None
+    if done.returncode != 0:
+        raise Refused(f"`{label}` exited {done.returncode} (run it by hand to see why)")
+    return done.stdout
+
+
+def json_object(data: bytes, label: str) -> dict[str, Any]:
+    try:
+        found = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise Refused(f"`{label}` printed something that is not JSON") from None
+    if not isinstance(found, dict):
+        raise Refused(f"`{label}` printed something that is not a JSON object")
+    return found
+
+
+def read_config(path: Path) -> tuple[str, str, str, Path]:
+    """host, port, host key and private key path; the file is the owner's and only the owner's."""
+    try:
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & OTHERS:
+            raise Refused(f"{path} must be a regular file of yours, not writable by others")
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise Refused(f"{path} cannot be read ({type(exc).__name__})") from None
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        key, sep, value = line.partition("=")
+        if not sep or key not in CONFIG_KEYS or key in values:
+            raise Refused(f"{path}: a line is not one of {', '.join(CONFIG_KEYS)} (once each)")
+        values[key] = value
+    if sorted(values) != sorted(CONFIG_KEYS):
+        raise Refused(f"{path} must set {', '.join(CONFIG_KEYS)}")
+    address = PROD_SSH.fullmatch(values["SKIW_PROD_SSH"])
+    if not address or int(address[2]) > 65535:
+        raise Refused("SKIW_PROD_SSH is not <host>:<port>")
+    if not HOST_KEY.fullmatch(values["SKIW_PROD_HOST_KEY"]):
+        raise Refused("SKIW_PROD_HOST_KEY is not an `ssh-ed25519 AAAA...` host key")
+    private = Path(values["SKIW_PROD_DEPLOY_KEY"])
+    try:
+        found = private.lstat() if private.is_absolute() else None
+    except OSError:
+        found = None
+    if found is None or not stat.S_ISREG(found.st_mode) or found.st_uid != os.getuid():
+        raise Refused("SKIW_PROD_DEPLOY_KEY is not an absolute path to a regular file of yours")
+    if found.st_mode & PRIVATE:
+        raise Refused("SKIW_PROD_DEPLOY_KEY must not be readable by group or others")
+    return address[1], address[2], values["SKIW_PROD_HOST_KEY"], private
+
+
+def check_run(run_id: str) -> str:
+    """The run is a green push to main of the `ci` workflow; returns its head SHA."""
+    args = ["run", "view", run_id, "--repo", REPO, "--json", RUN_FIELDS]
+    found = json_object(gh(args, "gh run view"), "gh run view")
+    if sorted(found) != sorted(RUN_FIELDS.split(",")):
+        raise Refused("`gh run view` printed other fields than the ones asked for")
+    for field, want in WANT_RUN.items():
+        if found[field] != want:
+            raise Refused(f"run {run_id}: {field} is not {want}")
+    head = found["headSha"]
+    if not isinstance(head, str) or not COMMIT.fullmatch(head):
+        raise Refused(f"run {run_id}: headSha is not a 40-hex commit")
+    return head
+
+
+def check_on_main(head: str) -> None:
+    path = f"repos/{REPO}/compare/{head}...main"
+    found = json_object(gh(["api", "--hostname", "github.com", path], "gh api compare"), "compare")
+    base = found.get("base_commit")
+    behind = found.get("behind_by")
+    if not isinstance(base, dict) or base.get("sha") != head:
+        raise Refused("the compare answer is not about the run's head SHA")
+    if found.get("status") not in ("ahead", "identical") or type(behind) is not int or behind:
+        raise Refused(f"commit {head} is not on main")
+
+
+def check_artifact_list(run_id: str, head: str) -> None:
+    path = f"repos/{REPO}/actions/runs/{run_id}/artifacts?name={ARTIFACT}"
+    found = json_object(gh(["api", "--hostname", "github.com", path], "gh api artifacts"), "list")
+    items = found.get("artifacts")
+    if found.get("total_count") != 1 or not isinstance(items, list) or len(items) != 1:
+        raise Refused(f"run {run_id} does not hold exactly one `{ARTIFACT}` artifact")
+    item = items[0] if isinstance(items[0], dict) else {}
+    run = item.get("workflow_run")
+    if item.get("name") != ARTIFACT or item.get("expired") is not False:
+        raise Refused(f"the `{ARTIFACT}` artifact of run {run_id} is expired or not that artifact")
+    if not isinstance(run, dict) or run.get("id") != int(run_id) or run.get("head_sha") != head:
+        raise Refused(f"the `{ARTIFACT}` artifact is not from run {run_id} at {head}")
+
+
+def artifact_digest(run_id: str) -> str:
+    """The one digest in the run's `image-digest` artifact, from a fresh temporary directory."""
+    scratch = Path(tempfile.mkdtemp(prefix="deploy-prod-"))  # 0700, removed below
+    try:
+        out = scratch / "artifact"
+        args = ["run", "download", run_id, "--repo", REPO, "-n", ARTIFACT, "-D", str(out)]
+        gh(args, "gh run download", DOWNLOAD_S)
+        names = sorted(os.listdir(out)) if out.is_dir() and not out.is_symlink() else []
+        if names != [DIGEST_FILE]:
+            raise Refused(f"the `{ARTIFACT}` artifact does not hold exactly one {DIGEST_FILE}")
+        info = (out / DIGEST_FILE).lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_DIGEST_FILE:
+            raise Refused(f"{DIGEST_FILE} is not a small regular file")
+        data = (out / DIGEST_FILE).read_bytes()
+    except OSError as exc:
+        raise Refused(f"the downloaded artifact cannot be read ({type(exc).__name__})") from None
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    if not DIGEST_BYTES.fullmatch(data):
+        raise Refused(f"{DIGEST_FILE} is not exactly one sha256 digest")
+    return data.decode("ascii").removesuffix("\n")
+
+
+def deploy(host: str, port: str, host_key: str, key: Path, digest: str, run_id: str) -> int:
+    """ssh to the forced command; the host's exit code decides ours."""
+    ssh = tool("ssh")
+    scratch = Path(tempfile.mkdtemp(prefix="deploy-prod-"))  # 0700, removed below
+    try:
+        known = scratch / "known_hosts"
+        known.write_text(f"{HOST_ALIAS} {host_key}\n", encoding="ascii")
+        options = ["IdentitiesOnly=yes", "StrictHostKeyChecking=yes", "PasswordAuthentication=no"]
+        options += [f"UserKnownHostsFile={known}", "GlobalKnownHostsFile=/dev/null"]
+        options += [f"HostKeyAlias={HOST_ALIAS}", "HostKeyAlgorithms=ssh-ed25519"]
+        options += ["KbdInteractiveAuthentication=no", "ConnectTimeout=15", "RequestTTY=no"]
+        options += ["ServerAliveInterval=30", "ServerAliveCountMax=4", "ForwardAgent=no"]
+        argv = [ssh, "-F", "/dev/null", "-i", str(key), "-p", port]
+        argv += [x for o in options for x in ("-o", o)]
+        argv += [f"skiw-deploy@{host}", "deploy", digest, run_id]
+        # No BatchMode: ssh asks for the key's passphrase on the terminal. stderr is the
+        # terminal: the host's one result line (no secret, no tool output) and ssh's own errors.
+        try:
+            done = subprocess.run(  # noqa: S603 - argv built here, no shell
+                argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=DEPLOY_S
+            )
+        except subprocess.TimeoutExpired:
+            say(
+                f"failed: ssh timed out after {DEPLOY_S} s; the deploy may still run on the host:"
+                " read `journalctl -t skiw-deploy` there before trying again"
+            )
+            return 1
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    if done.returncode == 0:
+        say(f"deployed {digest} (run {run_id})")
+        return 0
+    if done.returncode == 2:
+        say("refused by the host; nothing changed on production")
+        return 2
+    if done.returncode == 3:
+        say("deployed, but the host's accepted-digest or log line failed: see deploy.md, exit 3")
+        return 1
+    say(f"failed: ssh exited {done.returncode} (255: connection or host key; 1: the host failed)")
+    return 1
+
+
+def say(message: str) -> None:
+    print(f"deploy-prod: {message}", file=sys.stderr)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="deploy-prod", description=__doc__)
+    parser.add_argument("digest")
+    parser.add_argument("run_id")
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    args = parser.parse_args(argv)
+    try:
+        if not DIGEST.fullmatch(args.digest) or not RUN_ID.fullmatch(args.run_id):
+            raise Refused("the digest is not sha256: + 64 lowercase hex, or the run id not digits")
+        host, port, host_key, key = read_config(args.config.expanduser())
+        head = check_run(args.run_id)
+        check_on_main(head)
+        check_artifact_list(args.run_id, head)
+        if artifact_digest(args.run_id) != args.digest:
+            raise Refused(f"run {args.run_id} published another digest than {args.digest}")
+    except Refused as exc:
+        say(f"refused: {exc}")
+        return 2
+    say(f"run {args.run_id} is green on main at {head} and published {args.digest}")
+    return deploy(host, port, host_key, key, args.digest, args.run_id)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
