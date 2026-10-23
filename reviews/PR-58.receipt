@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 58
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: a9e97284e137f22840e71eb48c5c978e8525d73f
+review-file: reviews/PR-58.md
+review-file-hash: a14f6268414de85755f61288c3fec8ef7d51f434
+review-log-branch-commit: 9754af2af75d6a94136fa06ab8703d82825f517a
+verdict: Approved (round 1)
+deferred-conditions: none. Optional: P3 no test for the bootstrap mains' switch to say(); P3 the build check imports a fixed module list, not predeploy.py.
+ci: checks, host, image (with the dump image Trivy scan), security all success on the reviewed head (run 39942227650); publish and deploy-staging skipped on a pull request
+note: Dump image passes the Trivy gate (postgres 17.11 alpine, Python copied from python 3.12.15 alpine, age v1.3.2 from checksummed source, all bases by digest; scanned on every PR); record() writes journal and deploy log before stderr (PR 57 P2); PR 57 P3s.
+written-at: 2026-10-23T11:15:49Z
+pr-state-at-write: OPEN, unmerged
