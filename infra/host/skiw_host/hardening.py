@@ -21,9 +21,18 @@ from string import Template
 from typing import Any
 
 from skiw_host import apply
-from skiw_host.bootstrap_db import DB, HBA, HBA_MODE, Runner, psql_script, render_hba, run_command
+from skiw_host.bootstrap_db import (
+    DB,
+    HBA,
+    HBA_MODE,
+    Runner,
+    psql_script,
+    render_hba,
+    run_command,
+    settings,
+)
 from skiw_host.bootstrap_secrets import DIR_MODE, MARKER, Refused
-from skiw_host.secrets import OWNER
+from skiw_host.secrets import OWNER, STATUS_KEY, held
 
 APT_LINE = re.compile(r'(\S+) "(.*)";')
 ORIGINS = ("Unattended-Upgrade::Allowed-Origins", "Unattended-Upgrade::Origins-Pattern")
@@ -90,6 +99,9 @@ class Host:
         self.compose: Path | None = args.compose_file or args.root / apply.COMPOSE
         self.env_text = env_text
         self.values, self.ban = apply.host_values(self.env_file, env_text)
+        self.environment = settings(self.env_file, env_text).get("SKIW_ENVIRONMENT", "")
+        if self.environment not in ("production", "staging"):
+            raise Refused(f"SKIW_ENVIRONMENT in {self.env_file} is not production or staging")
 
     def tool(self, argv: list[str], stdin: bytes = b"") -> str:
         done = self.run(argv, stdin)
@@ -305,11 +317,14 @@ def secret_store(host: Host) -> list[str]:
         return [f"/{SECRETS} is not a directory owned by root:root"]  # never listed through a link
     problems = [] if mode == DIR_MODE else [f"/{SECRETS} has mode {mode:04o}, want 0700"]
     names = sorted(os.listdir(host.root / SECRETS))
-    problems += [f"{name} is missing" for name in sorted(OWNER.keys() - set(names))]
+    wanted = held(host.environment)
+    problems += [f"{name} is missing" for name in sorted(wanted.keys() - set(names))]
     for name in names:
         if name not in OWNER and name != MARKER:
             problems.append(f"{name} is not in the inventory")
             continue
+        if name in OWNER and name not in wanted:
+            problems.append(f"{name} is not held on {host.environment}")
         try:
             host.read(f"{SECRETS}/{name}", OWNER.get(name, 0), SECRET_MODE)
         except (Bad, OSError) as exc:
@@ -321,9 +336,13 @@ def secret_lines(host: Host) -> tuple[list[str], set[str], set[str]]:
     """Problems, the strings searched as substrings (16+ characters: a whole line, or the part
     after `v<n>:`) and the shorter ones, only compared whole; named by file, never shown."""
     problems, long, short = [], set(), set()
-    for name in sorted(OWNER):
-        text = host.read(f"{SECRETS}/{name}", OWNER[name], SECRET_MODE).decode()
+    for name, uid in sorted(held(host.environment).items()):
+        text = host.read(f"{SECRETS}/{name}", uid, SECRET_MODE).decode()
         lines = [line for line in text.splitlines() if line]
+        if name == STATUS_KEY:  # the key body as one string; the armour lines are not secret
+            body = [x for x in lines if not x.startswith("-----")]
+            long |= {x for x in body if len(x) >= MIN_SECRET}  # one leaked body line is found too
+            lines = ["".join(body)]
         if not lines:
             problems.append(f"{name} is empty")
         for line in lines:

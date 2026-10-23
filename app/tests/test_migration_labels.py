@@ -68,13 +68,14 @@ def test_the_flag_rule_and_the_contract_list_on_fixture_migrations() -> None:
     }
 
 
-# The five contract operations, each built as an own migration would write it.
+# The six contract operations, each built as an own migration would write it.
 CONTRACT = {
     "RemoveField": migrations.RemoveField("thing", "old"),
     "DeleteModel": migrations.DeleteModel("Thing"),
     "RenameField": migrations.RenameField("thing", "old", "new"),
     "RenameModel": migrations.RenameModel("Thing", "Item"),
     "AlterField": migrations.AlterField("thing", "name", models.TextField()),
+    "AlterModelTable": migrations.AlterModelTable("Thing", "x_thing_renamed"),  # a table rename
 }
 
 

@@ -15,7 +15,9 @@ proven restorable. pg_restore may stop reading before the end of the stream; tha
 and its exit code, never its pipe, is the verdict.
 
 Bounds: Python holds one 64 KiB copy chunk and one 1 MiB hash block; pg_restore holds one data
-block; no copy of the archive goes to disk except the encrypted output itself.
+block; no copy of the archive goes to disk except the encrypted output itself. pg_dump waits at most
+LOCK_WAIT_MS for a table lock (`--lock-wait-timeout`), else exits non-zero and the dump fails;
+skiw-deploy bounds the whole run (SKIW_DEPLOY_DUMP_TIMEOUT_S).
 
 Writes /srv/skiw/backups/predeploy/<UTC time>.dump.age (0400) and <name>.sha256 (0400), syncs both
 files and the directory to disk, and only then prints exactly `predeploy <name> <sha256>`. On any
@@ -48,6 +50,9 @@ DUMP_MODE = stat.S_IRUSR  # 0400: the dump and its checksum, read by the owner's
 MAGIC = b"PGDMP"  # the first bytes of every pg_dump custom-format archive
 CHUNK = 1 << 16  # pipe copy
 HASH_BLOCK = 1 << 20  # checksum read
+# pg_dump waits at most this long for each table's ACCESS SHARE lock (a migration or a long
+# transaction may hold a conflicting one), then exits non-zero: the dump fails, never waits forever.
+LOCK_WAIT_MS = 30_000
 PATH = "/usr/local/bin:/usr/lib/postgresql/17/bin:/usr/bin:/bin"
 VALIDATE = ["pg_restore", "-f", "/dev/null"]
 
@@ -129,7 +134,8 @@ def write_dump(
         handle.write(f"db:5432:{db}:skiw_backup:{escaped}\n")
     dump_env = {"PATH": PATH, "PGPASSFILE": str(passfile), "PGCONNECT_TIMEOUT": "10"}
     excluded = [f"--exclude-table-data={table}" for table in EXCLUDE]  # no error when absent
-    dump_argv = ["pg_dump", "-Fc", "--no-password", "-h", "db", "-U", "skiw_backup", "-d", db]
+    dump_argv = ["pg_dump", "-Fc", "--no-password", f"--lock-wait-timeout={LOCK_WAIT_MS}"]
+    dump_argv += ["-h", "db", "-U", "skiw_backup", "-d", db]
     age_argv = ["age", *(x for r in recipients for x in ("-r", r)), "-o", str(tmp)]
     quiet, piped, env = subprocess.DEVNULL, subprocess.PIPE, {"PATH": PATH}
     started: list[Child] = []  # tool output may quote data: never shown

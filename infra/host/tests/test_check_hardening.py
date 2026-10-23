@@ -21,7 +21,7 @@ import pytest
 from skiw_host import apply, hardening
 from skiw_host.bootstrap_db import HBA, HBA_MODE, render_hba
 from skiw_host.bootstrap_secrets import DIR_MODE
-from skiw_host.secrets import INVENTORY, OWNER, Kind
+from skiw_host.secrets import INVENTORY, OWNER, STATUS_KEY, Kind
 
 HOST = Path(__file__).resolve().parents[1]
 CI_ENV = HOST / "env" / "ci.env"
@@ -96,6 +96,8 @@ class Rig:
         self.put(apply.STATE, f"SKIW_IMAGE=ghcr.io/skiw-platform/skiw-platform@sha256:{'3' * 64}\n")
         self.values = []  # generated per run; must never be printed
         for secret in INVENTORY:
+            if "staging" not in secret.environments:  # env/ci.env is a staging host
+                continue
             value = token_urlsafe(32)
             line = f"v1:{value}" if secret.kind is Kind.APP_KEY else value
             self.put(f"{hardening.SECRETS}/{secret.name}", f"{line}\n", hardening.SECRET_MODE)
@@ -488,6 +490,12 @@ KEY = f"{hardening.SECRETS}/field_kek"
             lambda rig: rig.put(f"{hardening.SECRETS}/old_key", "x\n", hardening.SECRET_MODE),
         ),
         ("secret-store", lambda rig: (rig.root / f"{hardening.SECRETS}/ghcr_read_token").unlink()),
+        (  # production's status key on a staging host (G11 (b))
+            "secret-store",
+            lambda rig: rig.put(
+                f"{hardening.SECRETS}/{STATUS_KEY}", "x" * 40, hardening.SECRET_MODE
+            ),
+        ),
         ("secret-store", link(KEY)),
         ("secret-store", link(hardening.SECRETS)),
         ("container-env", link(KEY)),  # never read through a link
@@ -764,3 +772,20 @@ def test_clean_container_environments_pass(
 ) -> None:
     rig.out["docker inspect"] = (0, json.dumps([item(), db_item(Config={"Env": env})]))
     assert rig.run(capsys)[1]["container-env"] == "PASS"
+
+
+def test_a_production_host_holds_the_status_key_searched_as_one_body(
+    rig: Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rig.put(apply.ENV, CI_ENV.read_text() + "SKIW_ENVIRONMENT=production\n")
+    assert rig.run(capsys)[1]["secret-store"] == f"FAIL {STATUS_KEY} is missing"
+    body = token_urlsafe(60)
+    rig.values.append(body)  # never printed
+    armour = "-----BEGIN OPENSSH PRIVATE KEY-----\n{}\n{}\n-----END OPENSSH PRIVATE KEY-----\n"
+    rig.put(f"{hardening.SECRETS}/{STATUS_KEY}", armour.format(body, "Q=="), hardening.SECRET_MODE)
+    code, results = rig.run(capsys)  # a short last body line is no "too short" failure
+    assert code == 0 and results["secret-store"] == results["container-env"] == "PASS"
+    rig.out["docker inspect"] = (0, rig.inspect({"LEAK": f"{body}Q=="}))
+    assert rig.run(capsys)[1]["container-env"] == "FAIL a secret value is in skiw-web-1 LEAK"
+    rig.out["docker inspect"] = (0, rig.inspect({"LEAK": f"x{body}y"}))  # one body line alone
+    assert rig.run(capsys)[1]["container-env"] == "FAIL a secret value is in skiw-web-1 LEAK"

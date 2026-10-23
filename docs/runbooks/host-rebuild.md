@@ -92,10 +92,11 @@ service that reads it, mode 0400. The inventory, with readers and owners, is
 |---|---|---|---|
 | App keys (`v<n>:<base64>` lines, 32 random bytes each) | `django_secret_key`, `tenant_token_key`, `approval_mac_key`, `lookup_decoy_key`, `tenant_source_key`, `login_blob_key`, `audit_mac_key`, `field_kek`, `blind_index_key`, `crm_jar_kek` | `bootstrap-secrets init`, or `restore` from the escrow bundle | yes |
 | DB passwords | `skiw_app_password`, `skiw_migrator_password`, `skiw_backup_password`, `postgres_password`, `skiw_readonly_password` | `bootstrap-db` (M1e), newly set on every rebuild | no |
-| Owner-supplied | `ghcr_read_token` (G10) | the owner, by hand (below) | no |
+| Owner-supplied | `ghcr_read_token` (G10); production only: `staging_status_key` (G11 (b)) | the owner, by hand (below) | no |
 
-**Not escrowed, re-issued on recovery:** DB passwords, deploy SSH keys, the GHCR token. The
-staging-check secret (G11) is not in the inventory until its mechanism is decided.
+**Not escrowed, re-issued on recovery:** DB passwords, deploy SSH keys, the staging status key, the
+GHCR token. `check-hardening` expects `staging_status_key` on production and fails if staging holds
+it.
 
 ### Before you start
 - `age` v1.3.2 at `/usr/local/bin/age`, installed from `age-v1.3.2-linux-amd64.tar.gz` after
@@ -196,6 +197,37 @@ sudo bash -c 'umask 077; t=/etc/skiw/secrets/.ghcr_read_token.tmp; \
 ```
 Paste the token, press Enter. Owner and group stay root (only `skiw-deploy`, as root, reads it).
 Rotate yearly and on suspicion (H3 step 11).
+
+### Making `staging_status_key` (owner, production only)
+On **production**, make the key, copy its public line, then keep only the private half (0400):
+```
+sudo ssh-keygen -q -t ed25519 -N '' -C production-status -f /etc/skiw/secrets/staging_status_key
+sudo cat /etc/skiw/secrets/staging_status_key.pub
+sudo rm /etc/skiw/secrets/staging_status_key.pub
+sudo chmod 0400 /etc/skiw/secrets/staging_status_key
+```
+(`check-hardening` fails while the `.pub` file is left in the secret store.) On **staging**, add the
+copied line with the forced command in front (replace `<public line>` with the whole
+`ssh-ed25519 AAAA... production-status` line):
+```
+sudo install -d -m 0700 -o skiw-deploy -g skiw-deploy /home/skiw-deploy/.ssh
+printf '%s\n' 'restrict,command="/usr/local/sbin/skiw-staging-status" <public line>' \
+  | sudo tee -a /home/skiw-deploy/.ssh/authorized_keys >/dev/null
+sudo chown skiw-deploy:skiw-deploy /home/skiw-deploy/.ssh/authorized_keys
+sudo chmod 0600 /home/skiw-deploy/.ssh/authorized_keys
+```
+Put staging's host key into production's host config: `SKIW_STAGING_HOST_KEY` is the first two
+fields of staging's `/etc/ssh/ssh_host_ed25519_key.pub` (`awk '{print $1, $2}'` there). The key can
+only read the last staging status line (deploy.md). Rotate with the deploy keys.
+
+Staging must accept SSH from production. Under `SKIW_SSH_POLICY=allowlist` (G7), add production's
+outbound address as a CIDR (`<address>/32`, or `/128` for IPv6) to `SKIW_SSH_ALLOW` in staging's
+`infra/host/env/staging.env`, then re-run `sudo infra/host/apply --env-file
+infra/host/env/staging.env` on staging. Without it nftables drops the connection and every
+production deploy is refused with "the staging status call timed out". Under `fail2ban`, the jail
+has no `ignoreip` here: three failed status logins from production within 10 minutes (for example
+a wrong key on staging) ban production for an hour, and production deploys are refused until the
+ban ends (`sudo fail2ban-client set sshd unbanip <address>` on staging lifts it).
 
 ## Database roles (`bootstrap-db`, spec §8.4 H4, H6)
 

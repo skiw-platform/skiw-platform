@@ -62,6 +62,13 @@ class Process:
     def __init__(self, tools: "Tools", argv: list[str], **kwargs: object) -> None:
         self.argv, self.kwargs, self.code = argv, kwargs, tools.codes.get(argv[0], 0)
         self.stdout = io.BytesIO(tools.archive) if argv[0] == "pg_dump" else None
+        if tools.lock_held and argv[0] == "pg_dump":  # a table lock it cannot take
+            # Real pg_dump 17.11 (probed): without --lock-wait-timeout it waits forever; with it,
+            # it gives up after the bound before writing a byte and exits 1.
+            assert any(a.startswith("--lock-wait-timeout=") for a in argv), "waits forever"
+            self.stdout, self.code = io.BytesIO(b""), 1
+        if tools.lock_held and argv[0] == "pg_restore":  # an empty stream is not an archive
+            self.code = 1
         limit = {"pg_restore": tools.toc, "age": tools.age_reads}.get(argv[0])
         self.stdin = Pipe(limit) if kwargs.get("stdin") is subprocess.PIPE else None
         self.done, self.killed = False, False
@@ -95,6 +102,7 @@ class Tools:
         self.toc: int | None = TOC
         self.age_reads: int | None = None
         self.started: list[Process] = []
+        self.lock_held = False  # a migration or long transaction holds a conflicting table lock
         self.passfile, self.passmode = "", 0
 
     def spawn(self, argv: list[str], **kwargs: object) -> Process:
@@ -208,6 +216,20 @@ def test_any_failure_keeps_nothing_and_prints_no_value(
     printed = capsys.readouterr()
     assert printed.out == "" and printed.err.startswith("predeploy: failed, nothing kept:")
     assert value not in printed.err and "AGE-SECRET-KEY" not in printed.err
+    assert all(p.done or p.killed for p in tools.started)  # no child left running
+
+
+def test_a_held_table_lock_fails_the_dump_after_the_lock_wait_bound(
+    rig: Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tools, out, _, _ = rig
+    tools.lock_held = True
+    assert run(rig) == 1
+    [dump] = [p.argv for p in tools.started if p.argv[0] == "pg_dump"]
+    assert f"--lock-wait-timeout={predeploy.LOCK_WAIT_MS}" in dump
+    assert 0 < predeploy.LOCK_WAIT_MS <= 60_000  # well inside skiw-deploy's own dump bound
+    assert list(out.iterdir()) == []
+    assert capsys.readouterr().err.startswith("predeploy: failed, nothing kept:")
     assert all(p.done or p.killed for p in tools.started)  # no child left running
 
 

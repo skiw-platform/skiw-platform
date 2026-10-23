@@ -1,0 +1,12 @@
+#!/usr/bin/python3 -I
+"""skiw-staging-status (spec §8.4 H3 step 3; G11 (b)). docs/runbooks/deploy.md."""
+
+import sys
+from pathlib import Path
+
+# Installed: /usr/local/sbin + /usr/local/lib/skiw/skiw_host (plan §1); in the repo: next to this file.
+sys.path[:0] = ["/usr/local/lib/skiw", str(Path(__file__).resolve().parent)]
+
+from skiw_host.deploy import status_main  # noqa: E402
+
+sys.exit(status_main())
