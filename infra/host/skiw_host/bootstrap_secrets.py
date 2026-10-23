@@ -11,6 +11,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import io
 import json
 import os
 import re
@@ -178,10 +179,29 @@ def install(host: Host, keys: dict[str, list[str]], to: list[str], age: Path, ma
     return path
 
 
+def say(text: str) -> None:
+    """One line to stderr, which may be gone: under the forced command it is the SSH channel, and a
+    closed channel raises BrokenPipeError (Python ignores SIGPIPE). A lost line changes nothing: the
+    journal and the deploy log are the record, and the exit code stays the one the run earned."""
+    try:
+        print(text, file=sys.stderr, flush=True)
+    except (OSError, ValueError):  # ValueError: stderr already closed
+        # The unwritten bytes stay in the old stream's buffer, and the interpreter's exit flush of
+        # sys.stderr would fail again and turn any exit code into 120; this stream has none.
+        sys.stderr = io.StringIO()
+
+
 def record(host: Host, journal: Journal, message: str, prog: str = "bootstrap-secrets") -> None:
-    """One line to stderr, the journal and the deploy log; callers pass names only, no value."""
+    """One line to the journal, the deploy log and then stderr; callers pass names only, no value.
+    The durable copies come first, so a closed stderr (a dropped SSH session) never loses them."""
     line = f"{datetime.now(UTC).isoformat()} {prog}: {message}"
-    print(line, file=sys.stderr)
+    try:
+        append_log(host, journal, message, line)
+    finally:
+        say(line)
+
+
+def append_log(host: Host, journal: Journal, message: str, line: str) -> None:
     journal(message)
     host.deploy_log.parent.mkdir(mode=LOG_DIR_MODE, parents=True, exist_ok=True)
     mine = os.geteuid()  # root on a host: the log and its directory must be ours, never writable
@@ -230,13 +250,10 @@ def main(
                 lines.append(mint(max(map(version, lines), default=0) + 1))
         path = install(host, keys, to, args.age, mark=args.mode == "restore")
     except (Refused, escrow.EscrowError) as exc:
-        print(f"bootstrap-secrets: refused, nothing written: {exc}", file=sys.stderr)
+        say(f"bootstrap-secrets: refused, nothing written: {exc}")
         return 2
     except OSError as exc:
-        print(
-            f"bootstrap-secrets: failed, nothing left: {exc.strerror} {exc.filename}",
-            file=sys.stderr,
-        )
+        say(f"bootstrap-secrets: failed, nothing left: {exc.strerror} {exc.filename}")
         return 1
     minted = [f"{name} v{version(keys[name][-1])}" for name in new]
     try:
@@ -244,13 +261,12 @@ def main(
             record(host, journal, f"restore minted {line} (--allow-new-key-version)")
         record(host, journal, f"{args.mode}: {len(keys)} key files installed, escrow bundle {path}")
     except OSError as exc:
-        print(  # the run is committed here: report it, never roll back or retry
+        say(  # the run is committed here: report it, never roll back or retry
             "bootstrap-secrets: the key files and the escrow bundle are installed"
             f"{' with the .restored marker' if args.mode == 'restore' else ''}, but writing "
             f"the log failed: {exc.strerror} {exc.filename}. "
             f"{''.join(f'Minted by override: {line}. ' for line in minted)}"
-            f"Do not run {args.mode} again; see the runbook.",
-            file=sys.stderr,
+            f"Do not run {args.mode} again; see the runbook."
         )
         return 3
     return 0

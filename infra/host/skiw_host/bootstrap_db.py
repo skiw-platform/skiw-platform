@@ -18,13 +18,21 @@ import secrets
 import shutil
 import stat
 import subprocess
-import sys
 from collections.abc import Callable, Sequence
 from functools import partial
 from pathlib import Path
 from string import Template
 
-from skiw_host.bootstrap_secrets import Chown, Host, Journal, Refused, record, to_journal, write
+from skiw_host.bootstrap_secrets import (
+    Chown,
+    Host,
+    Journal,
+    Refused,
+    record,
+    say,
+    to_journal,
+    write,
+)
 from skiw_host.secrets import INVENTORY, OWNER, Kind
 
 DB = Path(__file__).resolve().parents[1] / "db"
@@ -170,21 +178,20 @@ def main(
             count = apply([*compose, "--env-file", str(args.env_file)], run, host)
             done = f"role set applied; {count} role passwords set from their files"
     except Refused as exc:
-        print(f"bootstrap-db: refused, nothing changed: {exc}", file=sys.stderr)
+        say(f"bootstrap-db: refused, nothing changed: {exc}")
         return 2
     except Failed as exc:
-        print(f"bootstrap-db: failed: {exc}", file=sys.stderr)
+        say(f"bootstrap-db: failed: {exc}")
         return 1
     except OSError as exc:
-        print(f"bootstrap-db: failed: {exc.strerror} {exc.filename}", file=sys.stderr)
+        say(f"bootstrap-db: failed: {exc.strerror} {exc.filename}")
         return 1
     try:
         record(host, journal, f"{args.mode}: {done}", "bootstrap-db")
     except OSError as exc:  # the run is committed here: report it, never roll back
-        print(
+        say(
             f"bootstrap-db: {args.mode} is done ({done}), but writing the log failed: "
-            f"{exc.strerror} {exc.filename}. Record the run by hand; see the runbook.",
-            file=sys.stderr,
+            f"{exc.strerror} {exc.filename}. Record the run by hand; see the runbook."
         )
         return 3
     return 0

@@ -139,8 +139,11 @@ Job **`deploy-staging`** (`contents: read` only) is skipped unless the repositor
 temporary directory (removed after) and runs `ssh skiw-deploy@<staging> deploy <digest> <run id>`
 with `BatchMode`, `StrictHostKeyChecking=yes` and a known_hosts file that holds only
 `SKIW_STAGING_HOST_KEY` from `infra/host/env/staging.env` (the address is `SKIW_STAGING_SSH` there),
-bounded at 3600 s. Staging deploys run one at a time, and runs on `main` are never cancelled (a newer
-push waits). The host's exit code is the job's result; its one-line result is in the job log.
+bounded at 3600 s. Staging deploys run one at a time. A running publish or deploy is never
+cancelled; a waiting run is replaced by a newer push, so that commit gets no image (the wrapper
+refuses a run that did not succeed). The host's exit code is the job's result; its one-line result
+is in the job log. If the job is cut (timeout or cancel) while the host deploy runs on, the host
+still writes its journal and deploy-log line: `journalctl -t skiw-deploy` on staging.
 
 ### Turn on the staging deploy (owner, M1k)
 Needs the staging host built (host-rebuild.md) with its `ghcr_read_token`, `SKIW_BACKUP_IMAGE` set
@@ -184,8 +187,10 @@ skiw-platform/skiw-platform` shows only `STAGING_DEPLOY_KEY`, and
 `gh api repos/skiw-platform/skiw-platform/environments` shows no environment secret.
 
 ### Publish the pre-migration dump image and set `SKIW_BACKUP_IMAGE` (owner)
-**Blocked today:** the image in `infra/host/backup/predeploy/` fails the Trivy gate (DECISIONS
-2026-10-23, M1h). Turning this on before that is fixed makes every `publish` on `main` fail.
+The image in `infra/host/backup/predeploy/` passes the Trivy gate (DECISIONS 2026-10-23, "Dump
+image passes the Trivy gate"); the `image` job scans it on every PR, so a new finding fails there
+first. Do these in order, once that fix is merged: first `SKIW_PUBLISH_PREDEPLOY`, then
+`SKIW_BACKUP_IMAGE` (no deploy runs while it is empty).
 1. `gh variable set SKIW_PUBLISH_PREDEPLOY --body enabled --repo skiw-platform/skiw-platform`.
 2. After the next green push to `main`, read the digest (replace `<run id>`):
    ```

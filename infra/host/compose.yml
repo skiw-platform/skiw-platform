@@ -139,8 +139,9 @@ services:
 
   backup:
     <<: *hardened
-    # infra/host/backup/predeploy (FROM the db's postgres digest + pinned age), published by CI by
-    # digest (M1h). skiw-deploy runs `run --rm -T backup predeploy` before a migration (H3 step 4).
+    # infra/host/backup/predeploy (postgres 17.11 alpine by digest, the db's version; age built from
+    # checked source), published by CI by digest (M1h). skiw-deploy runs
+    # `run --rm -T backup predeploy` before a migration (H3 step 4).
     image: ${SKIW_BACKUP_IMAGE:?SKIW_BACKUP_IMAGE must be the predeploy image by digest}
     profiles: [ops]
     restart: "no"

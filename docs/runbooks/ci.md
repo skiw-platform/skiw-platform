@@ -5,15 +5,17 @@ Workflow: `.github/workflows/ci.yml`, on every pull request and on pushes to `ma
 SHA with its version in a comment. No cloud credentials, no OIDC. One secret, `STAGING_DEPLOY_KEY`,
 read only by `deploy-staging`; only `publish` has `packages: write` (with the job's own
 `github.token`); no production credential exists in GitHub (Q42). A newer push to a pull request
-cancels its older run; runs on `main` are never cancelled. `infra/host/tests/test_workflows.py`
-asserts these rules.
+cancels its older run. On `main` a running publish or deploy is never cancelled; a waiting run is
+replaced by a newer push (GitHub keeps one pending run per concurrency group), so that commit gets
+no image, and `scripts/deploy-prod` refuses its run because it did not succeed.
+`infra/host/tests/test_workflows.py` asserts these rules.
 
 ## Jobs (the gates run in parallel)
 | Job | What it runs | Run it locally |
 |---|---|---|
 | `checks` | install, `make lint`, `make typecheck`, `make test`, `make test-live`, Playwright (`make e2e`) | the same `make` targets |
 | `security` | gitleaks over full history, the gitleaks rule test, `pip-audit --strict`, `pnpm audit --audit-level high`, Semgrep registry rulesets | `make audit` and `make secrets-test` (need gitleaks); Semgrep below |
-| `image` | `docker build` (web stage + manifest check), Trivy HIGH/CRITICAL, no push | `make image-scan` (needs trivy) |
+| `image` | `docker build` (web stage + manifest check), Trivy HIGH/CRITICAL; then the same for the pre-migration dump image (`infra/host/backup/predeploy`), on every PR whatever `SKIW_PUBLISH_PREDEPLOY` says; no push | `make image-scan` (needs trivy); the dump image: `docker build -t skiw-predeploy:ci infra/host/backup/predeploy`, then `trivy image --severity HIGH,CRITICAL --exit-code 1 skiw-predeploy:ci` |
 | `host` | host tooling unit tests and Compose config tests (`infra/host/tests`, spec §8.4), then the live edge tests through Caddy (builds the app image, Docker on the runner, no host, secrets generated per run) | `make host-test`, `make host-test-live` |
 | `publish` | push to `main` only, after the four gates: build the app image once, label it from `migration_labels`, Trivy HIGH/CRITICAL on that image, push `ghcr.io/skiw-platform/skiw-platform:<commit>`, artifact `image-digest` (`digest.txt`, 30 days); with variable `SKIW_PUBLISH_PREDEPLOY=enabled` also the dump image `ghcr.io/skiw-platform/skiw-predeploy` and artifact `predeploy-digest` | build and label steps: `docker build`, then [deploy.md](deploy.md) "CI: publish"; no local push |
 | `deploy-staging` | after `publish`, only with variable `SKIW_STAGING_DEPLOY=enabled`: `ssh skiw-deploy@<staging> deploy <digest> <run id>` with the staging key, host key pinned from `infra/host/env/staging.env` | not run locally; [deploy.md](deploy.md) "Turn on the staging deploy" |

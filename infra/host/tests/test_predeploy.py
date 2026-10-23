@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import io
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -25,6 +26,7 @@ import pytest
 
 HOST = Path(__file__).resolve().parents[1]
 SOURCE = HOST / "backup/predeploy/predeploy.py"
+DOCKERFILE = HOST / "backup/predeploy/Dockerfile"
 RECIPIENT = "age1" + "q" * 58
 NOW = datetime(2026, 10, 22, 10, 15, tzinfo=UTC)
 NAME = "20261022T101500Z.dump.age"
@@ -328,3 +330,82 @@ def test_no_app_module_refers_to_the_backup_tooling() -> None:
         p for p in app.rglob("*.py") if "predeploy" in p.read_text() or "backup.predeploy" in str(p)
     ]
     assert hits == []
+
+
+def instructions(text: str) -> list[tuple[str, str]]:
+    """The Dockerfile's instructions, continuation lines joined, comments dropped."""
+    joined = re.sub(r"\s*\\\n\s*", " ", text)
+    lines = [x.strip() for x in joined.splitlines() if x.strip() and not x.lstrip().startswith("#")]
+    return [(x.split()[0].upper(), x.partition(" ")[2]) for x in lines]
+
+
+def bases(text: str) -> dict[str, str]:
+    """Each FROM image by name; fails unless it is `name:tag@sha256:<64 hex>`."""
+    found = {}
+    for kind, value in instructions(text):
+        if kind == "FROM":
+            image = value.split()[0]
+            assert re.fullmatch(r"[a-z]+:[0-9a-z.-]+@sha256:[0-9a-f]{64}", image), image
+            found[image.partition(":")[0]] = image.partition("@")[0]
+    return found
+
+
+def check_dockerfile(text: str) -> None:
+    """The dump image's build rules (DECISIONS 2026-10-23, "Dump image passes the Trivy gate")."""
+    steps = instructions(text)
+    found = bases(text)
+    assert set(found) == {"golang", "python", "postgres"}
+    alpine = {re.sub(r".*-alpine", "alpine", tag) for tag in found.values()}
+    assert len(alpine) == 1 and re.fullmatch(r"alpine3\.[0-9]+", alpine.pop())  # one musl, libssl
+    server = re.search(r"image: (postgres:[0-9.]+)@sha256:", (HOST / "compose.yml").read_text())
+    assert server and found["postgres"].startswith(f"{server[1]}-alpine3.")  # same major.minor
+    adds = [value for kind, value in steps if kind == "ADD"]
+    assert len(adds) == 1 and re.fullmatch(
+        r"--checksum=sha256:[0-9a-f]{64} https://github\.com/FiloSottile/age/archive/refs/tags/"
+        r"v1\.3\.2\.tar\.gz /src/age\.tar\.gz",
+        adds[0],
+    ), adds
+    runs = " ".join(value for kind, value in steps if kind == "RUN")
+    assert not re.search(r"\b(curl|wget|apk|go get|go install)\b|@latest", runs)  # unchecked input
+    env = " ".join(value for kind, value in steps if kind == "ENV").split()
+    assert {"CGO_ENABLED=0", "GOFLAGS=-mod=readonly", "GOTOOLCHAIN=local"} <= set(env)
+    assert not [x for x in env if x.startswith(("GONOSUMDB", "GONOSUMCHECK", "GOSUMDB", "GOPROXY"))]
+    assert "go build -trimpath " in runs and '-X main.Version=v1.3.2"' in runs
+    assert "rm /usr/local/bin/gosu" in runs
+    for tool, version in (("pg_dump", "PostgreSQL) 17.11"), ("pg_restore", "PostgreSQL) 17.11")):
+        assert f'test "$({tool} --version)" = "{tool} ({version}"' in runs
+    assert 'test "$(age --version)" = "v1.3.2"' in runs
+    final = steps[max(i for i, (kind, _) in enumerate(steps) if kind == "FROM") :]
+    assert ("USER", "10003:10003") in final
+    assert steps[-1] == ("ENTRYPOINT", '["python3", "-I", "/usr/local/lib/skiw/predeploy.py"]')
+
+
+def test_the_dump_image_pins_every_input() -> None:
+    check_dockerfile(DOCKERFILE.read_text())
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (r"(golang:[^@\s]+)@sha256:[0-9a-f]{64}", r"\1"),  # an unpinned base
+        (r"(python:[^@\s]+)@sha256:[0-9a-f]{64}", r"\1"),
+        (r"(postgres:[^@\s]+)@sha256:[0-9a-f]{64}", r"\1"),
+        (r"postgres:17\.11-", "postgres:17.10-"),  # another client than the server's
+        (r"python:3\.12\.15-alpine3\.\d+", "python:3.12.15-slim-trixie"),
+        (r"ADD --checksum=sha256:[0-9a-f]{64} ", "ADD "),  # an unchecked download
+        (r"GOFLAGS=-mod=readonly ", ""),
+        (r"GOTOOLCHAIN=local", "GOTOOLCHAIN=auto"),
+        (r"CGO_ENABLED=0 ", ""),
+        (r"-trimpath ", ""),
+        (r"rm /usr/local/bin/gosu \\\n    && ", ""),
+        (r"USER 10003:10003", "USER root"),
+        (r"(RUN tar)", r"ENV GONOSUMDB=*\n\1"),
+        (r"(RUN rm)", r"RUN wget -O /tmp/x https://example.invalid/x\n\1"),
+    ],
+)
+def test_the_pin_check_fails_on_a_weakened_dockerfile(old: str, new: str) -> None:
+    text = DOCKERFILE.read_text()
+    weakened = re.sub(old, new, text, count=1)
+    assert weakened != text, old
+    with pytest.raises(AssertionError):
+        check_dockerfile(weakened)
