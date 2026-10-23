@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 55
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: 79825b9b41fb161c72ad98ff9a7cef31b98b0254
+review-file: reviews/PR-55.md
+review-file-hash: 8801064186d988f3d42bd0a7e056d85af500a37c
+review-log-branch-commit: c99bbe7ad8c3c6fec67a73fe666751122ff28e53
+verdict: Approved (round 2)
+deferred-conditions: none
+ci: checks, host, image, security all success on the reviewed head (run 39813472521)
+note: M1g-2b, production deploy with the G11 (b) staging check, G12 status line, accepted-digest record, rollback and applied-contract refusal; carries the PR 54 conditions (AlterModelTable, pg_dump lock wait). One PR by owner choice.
+written-at: 2026-10-23T06:13:03Z
+pr-state-at-write: OPEN, unmerged
