@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from . import env
@@ -33,6 +34,12 @@ DATABASES = {"default": env.database(require_tls=env.flag("DJANGO_REQUIRE_DB_TLS
 
 # skiw_app has no DELETE on procrastinate_jobs (spec §4.1); "never" is also the library default.
 PROCRASTINATE_WORKER_DEFAULTS = {"delete_jobs": "never"}
+
+# The files volume (spec §8.4 H5): only documents.storage uses this setting (Semgrep rule
+# files-volume-only-storage). Empty means no files volume; storage then refuses every call.
+FILES_ROOT = os.environ.get("SKIW_FILES_ROOT", "")
+# Age after which the sweeper removes tmp/*.part and quarantine leftovers (spec §8.4 H5 [A]).
+FILES_SWEEP_AGE_S = 3600
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 TIME_ZONE = "Asia/Kuala_Lumpur"

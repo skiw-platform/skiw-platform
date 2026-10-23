@@ -1,0 +1,38 @@
+rules:
+  - id: files-volume-only-storage
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only documents.storage reads or writes the files volume (spec §8.4 H5, UNI-04, PROJECT.md
+      §9). Do not use settings.FILES_ROOT, the SKIW_FILES_ROOT variable or a /srv/files path
+      elsewhere: call documents.storage. config/settings.py defines the setting; the storage
+      harness tests inspect the volume they create.
+    paths:
+      exclude:
+        - /app/documents/storage.py
+        - /app/documents/tests/
+        - /app/config/settings.py
+    pattern-either:
+      - pattern: $SETTINGS.FILES_ROOT
+      - pattern: getattr($SETTINGS, "FILES_ROOT", ...)
+      - pattern: '"SKIW_FILES_ROOT"'
+      - patterns:
+          - pattern: '"$PATH"'
+          - metavariable-regex:
+              metavariable: $PATH
+              regex: ^/srv/files(/|$)
+  - id: documents-storage-no-db
+    languages: [python]
+    severity: ERROR
+    message: >-
+      documents.storage and documents.clamd touch no database (TEN-10): row access is the
+      caller's FileRows, inside the caller's transaction (with_agency() from M4/M16). import-linter
+      already forbids psycopg and procrastinate here; it cannot name django.db.
+    paths:
+      include:
+        - /app/documents/storage.py
+        - /app/documents/clamd.py
+        - /semgrep/files-volume-only-storage.py
+    # Semgrep matches import patterns semantically: this one also catches `from django import db`,
+    # `from django.db import x` and `import django.db.x` (each form is in the fixture).
+    pattern: import django.db
