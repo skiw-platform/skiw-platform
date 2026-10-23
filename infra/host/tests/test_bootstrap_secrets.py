@@ -8,6 +8,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 import re
 import secrets as token
 import subprocess
@@ -430,3 +431,37 @@ def test_executable_runs_the_module() -> None:
         check=False,
     )
     assert result.returncode == 0 and "--allow-new-key-version" in result.stdout
+
+
+# The installed programs run as `python3 -I` (their shebang) with stderr on the SSH channel.
+CLOSED_STDERR = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from skiw_host.bootstrap_secrets import Host, record
+root = Path(sys.argv[2])
+journal = lambda message: (root / "journal").write_text(message)
+record(Host(root, lambda p, u, g: None), journal, "deploy x key staging: done", "skiw-deploy")
+sys.exit(int(sys.argv[3]))
+"""
+
+
+@pytest.mark.parametrize("code", [0, 1, 2])
+def test_a_closed_stderr_loses_no_record_and_keeps_the_exit_code(tmp_path: Path, code: int) -> None:
+    read, write = os.pipe()
+    os.close(read)  # the SSH client is gone: every write to stderr fails with EPIPE
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", CLOSED_STDERR, str(HOST), str(tmp_path), str(code)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=write,
+            timeout=60,
+            check=False,
+        )
+    finally:
+        os.close(write)
+    assert result.returncode == code  # not 1 (an uncaught error) or 120 (a failed exit flush)
+    assert (tmp_path / "journal").read_text() == "deploy x key staging: done"
+    [line] = (tmp_path / "var/log/skiw/deploy.log").read_text().splitlines()
+    assert line.endswith(" skiw-deploy: deploy x key staging: done")

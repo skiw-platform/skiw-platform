@@ -17,7 +17,8 @@ Every tool call is bounded (subprocess timeout) except `migrate`: killing its cl
 the migration running in its container while the lock is released. Every file written is synced,
 with its directory, before success is reported. Tool output and secret values are never printed.
 Exit 0 done, 1 failed (the old digest still serves), 2 refused (nothing changed), 3 done but the
-accepted-digest or log line failed.
+accepted-digest or log line failed. The journal and deploy-log line is written before the stderr
+copy; a stderr that is gone (a dropped SSH session) changes neither the line nor the exit code.
 """
 
 import argparse
@@ -47,6 +48,7 @@ from skiw_host.bootstrap_secrets import (
     Journal,
     Refused,
     record,
+    say,
     sync_dir,
     to_journal,
 )
@@ -665,9 +667,7 @@ def main(
     try:
         record(Host(args.root, chown), journal, f"{what}: {result}", "skiw-deploy")
     except OSError as exc:
-        print(
-            f"skiw-deploy: writing the log failed: {exc.strerror} {exc.filename}", file=sys.stderr
-        )
+        say(f"skiw-deploy: writing the log failed: {exc.strerror} {exc.filename}")
         return 3 if code == 0 else code
     return code
 

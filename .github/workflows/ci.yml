@@ -8,8 +8,9 @@ on:
 permissions:
   contents: read
 
-# A newer push to a pull request cancels its older run; runs on main are never cancelled, so a
-# publish or a staging deploy is never cut off half way (DECISIONS 2026-10-23, M1h).
+# A newer push to a pull request cancels its older run. On main a running publish or staging deploy
+# is never cancelled; a run still waiting in the group is replaced by a newer push (DECISIONS
+# 2026-10-23, M1h and "Dump image passes the Trivy gate").
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -107,6 +108,16 @@ jobs:
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: skiw-platform:ci
+          version: v0.75.0
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Build pre-migration dump image
+        # The `backup` image publish builds from the same directory; scanned here on every PR so a
+        # finding fails before merge, whether or not SKIW_PUBLISH_PREDEPLOY is on. Nothing is pushed.
+        run: docker build -t skiw-predeploy:ci infra/host/backup/predeploy
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: skiw-predeploy:ci
           version: v0.75.0
           severity: HIGH,CRITICAL
           exit-code: "1"

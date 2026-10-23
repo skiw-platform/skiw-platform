@@ -502,6 +502,61 @@ def test_a_failed_log_line_after_a_deploy_exits_3(rig: Rig) -> None:
     assert deploy.main(argv, journal=rig.journal.append, alert=rig.alerts.append, d=d) == 3
 
 
+class ClosedChannel:
+    """stderr under the forced command once the SSH client is gone: every write raises EPIPE
+    (Python ignores SIGPIPE). Notes what the journal and the deploy log held at the first write."""
+
+    def __init__(self, rig: Rig) -> None:
+        self.rig = rig
+        self.seen: tuple[list[str], str] | None = None
+
+    def write(self, text: str) -> int:
+        if self.seen is None:
+            log = self.rig.root / "var/log/skiw/deploy.log"
+            self.seen = (list(self.rig.journal), log.read_text() if log.exists() else "")
+        raise BrokenPipeError(errno.EPIPE, "Broken pipe")
+
+    def flush(self) -> None:
+        raise BrokenPipeError(errno.EPIPE, "Broken pipe")
+
+
+@pytest.mark.parametrize(
+    ("case", "code", "result"),
+    [
+        ("deployed", 0, "deployed; previous"),
+        ("failed", 1, "failed: "),
+        ("refused", 2, "refused: "),
+    ],
+)
+def test_a_dropped_ssh_session_still_logs_the_line_and_keeps_the_exit_code(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, case: str, code: int, result: str
+) -> None:
+    rig.put(apply.STATE, f"SKIW_IMAGE={REPO}@{OLD}\n")
+    if case == "failed":
+        rig.out["migrate"] = (1, "")
+    channel = ClosedChannel(rig)
+    monkeypatch.setattr(sys, "stderr", channel)
+    key = "production" if case == "refused" else "staging"  # production refuses: no host config
+    assert rig.run("--key", key, "deploy", NEW, "42") == code
+    monkeypatch.undo()
+    [line] = (rig.root / "var/log/skiw/deploy.log").read_text().splitlines()
+    assert f"skiw-deploy: deploy {NEW} key {key} run 42" in line and result in line
+    assert len(rig.journal) == 1 and result in rig.journal[0]
+    assert channel.seen == (rig.journal, f"{line}\n")  # both written before stderr was tried
+
+
+def test_a_dropped_ssh_session_and_a_failed_log_still_exit_3(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rig.put("var/log/skiw", "not a directory\n")
+    monkeypatch.setattr(sys, "stderr", ClosedChannel(rig))
+    d = deploy.Deploy(rig.root, rig.runner, lambda p, i: (0, 0), lambda p, u, g: None)
+    d.clock, d.sleep, d.timed = lambda: rig.now, rig.tick, rig.timed
+    argv = ["--key", "staging", "deploy", NEW, "--root", str(rig.root)]
+    assert deploy.main(argv, journal=rig.journal.append, alert=rig.alerts.append, d=d) == 3
+    assert len(rig.journal) == 1 and "deployed" in rig.journal[0]
+
+
 @pytest.mark.parametrize(
     "command",
     [

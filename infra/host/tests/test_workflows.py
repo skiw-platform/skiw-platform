@@ -7,7 +7,8 @@ the only secret any workflow references is STAGING_DEPLOY_KEY, in deploy-staging
 the production host, its env file or a production key; only `publish` can write packages; every
 action is pinned by a full commit SHA with a version comment; the digest artifact is uploaded only
 in `publish`, as plan §3 M1h says; deploy-staging runs only after publish and only when the owner
-has turned it on, and pins staging's host key from staging.env. (`scripts/` holding only
+has turned it on, and pins staging's host key from staging.env; the `image` gate builds and
+Trivy-scans both the app image and the dump image on every PR. (`scripts/` holding only
 `deploy-prod` is test_layout.py.)
 """
 
@@ -204,6 +205,36 @@ def test_publish_runs_after_every_gate_on_a_push_to_main(
     text = job_text(publish)
     assert text.count("aquasecurity/trivy-action@") == 2  # app image, and the dump image
     assert 'exit-code: "1"' in text and "severity: HIGH,CRITICAL" in text
+
+
+TRIVY = "aquasecurity/trivy-action@"
+SCAN = {"version": "v0.75.0", "severity": "HIGH,CRITICAL", "exit-code": '"1"'}
+
+
+def test_every_pr_builds_and_scans_both_images_with_the_same_gate(
+    ci: dict[str, dict[str, tuple[str, Block]]],
+) -> None:
+    assert "if" not in ci["image"]  # a gate job: every pull request and every push
+    found = steps(ci["image"])
+    builds = [s["run"][0] for s in found if "run" in s]
+    assert builds == [
+        "docker build -t skiw-platform:ci .",
+        "docker build -t skiw-predeploy:ci infra/host/backup/predeploy",
+    ]
+    scans = [s for s in found if TRIVY in s.get("uses", ("", []))[0]]
+    refs = []
+    for scan in scans:
+        assert "if" not in scan  # never skipped, whatever SKIW_PUBLISH_PREDEPLOY says
+        options = {k: v for k, (v, _) in mapping(scan["with"][1], 10).items()}
+        refs.append(options.pop("image-ref"))
+        assert options == SCAN  # no ignore-unfixed, no skip, no ignore file
+    assert refs == ["skiw-platform:ci", "skiw-predeploy:ci"]
+    assert found.index(scans[1]) > [i for i, s in enumerate(found) if "run" in s][1]
+    publish = [s for s in steps(ci["publish"]) if TRIVY in s.get("uses", ("", []))[0]]
+    for scan in publish:
+        options = {k: v for k, (v, _) in mapping(scan["with"][1], 10).items()}
+        options.pop("image-ref")
+        assert options == SCAN
 
 
 def test_deploy_staging_is_gated_and_pins_the_staging_host_key(

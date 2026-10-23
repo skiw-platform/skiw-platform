@@ -53,7 +53,7 @@ HASH_BLOCK = 1 << 20  # checksum read
 # pg_dump waits at most this long for each table's ACCESS SHARE lock (a migration or a long
 # transaction may hold a conflicting one), then exits non-zero: the dump fails, never waits forever.
 LOCK_WAIT_MS = 30_000
-PATH = "/usr/local/bin:/usr/lib/postgresql/17/bin:/usr/bin:/bin"
+PATH = "/usr/local/bin:/usr/bin:/bin"  # pg_dump, pg_restore, age and python3 (Dockerfile)
 VALIDATE = ["pg_restore", "-f", "/dev/null"]
 
 

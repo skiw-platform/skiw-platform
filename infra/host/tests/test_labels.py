@@ -59,3 +59,15 @@ def test_anything_else_prints_no_label(
 ) -> None:
     code, out = run(argv, text, capsys)
     assert code == 1 and out == ""
+
+
+@pytest.mark.parametrize(("size", "code"), [(labels.MAX_INPUT, 0), (labels.MAX_INPUT + 1, 1)])
+def test_well_formed_input_over_one_mib_is_refused(
+    size: int, code: int, capsys: pytest.CaptureFixture[str]
+) -> None:
+    text = json.dumps(NAMES)
+    text += " " * (size - len(text))  # still valid JSON: only its size differs
+    assert labels.MAX_INPUT == 1 << 20 and len(text) == size
+    assert labels.main([COMMIT], io.StringIO(text)) == code
+    printed = capsys.readouterr()
+    assert ("at most 1 MiB" in printed.err) == (code == 1) and (printed.out == "") == (code == 1)
