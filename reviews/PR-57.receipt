@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 57
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: 68106df9ecec9754669ad7c18e736a6bc387b3ae
+review-file: reviews/PR-57.md
+review-file-hash: 39b562bff1da52b1d0e732d8185dddf51e4fe82b
+review-log-branch-commit: 545ee54b04765cf65149deddfffab2aca13c97b9
+verdict: Approved with conditions (round 1)
+deferred-conditions: P2 lost journal and deploy-log line on a dropped SSH session (record() prints to stderr before the journal and deploy log) -> the next PR (dump image fix), before any deploy can run. Optional: P3 "never cancelled" wording; P3 test for the labels 1 MiB input bound.
+ci: checks, host, image, security all success on the reviewed head (run 39929903286); publish and deploy-staging skipped on a pull request
+note: M1h, CI publish by digest with labels and Trivy gate, image-digest artifact, deploy-staging job gated by SKIW_STAGING_DEPLOY (off), dump image publish gated by SKIW_PUBLISH_PREDEPLOY (off, image fails Trivy), scripts/deploy-prod green-main run check. One PR by owner choice.
+written-at: 2026-10-23T09:37:36Z
+pr-state-at-write: OPEN, unmerged
