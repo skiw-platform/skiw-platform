@@ -131,8 +131,14 @@ services:
     # clamd and freshclam run as `clamav`; these five capabilities are the minimum it starts with.
     read_only: false
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    # The root entrypoint (/init) writes each CLAMD_CONF_<Name> into /etc/clamav/clamd.conf.
+    # AlertExceedsMax: a file that hits a scan limit (MaxFileSize, MaxScanSize, MaxRecursion,
+    # MaxFiles) is reported as Heuristics.Limits.Exceeded.<limit> instead of `stream: OK`, and
+    # documents.clamd treats that as an incomplete scan, never clean (M1i). A mounted clamd.conf
+    # (non-root clamav, still open) must keep `AlertExceedsMax yes`.
     environment:
       CLAMD_CONF_ConcurrentDatabaseReload: "no"
+      CLAMD_CONF_AlertExceedsMax: "yes"
     networks: [app, egress]
     mem_limit: ${SKIW_MEM_CLAMAV:?}
     pids_limit: 256

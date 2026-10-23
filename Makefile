@@ -40,10 +40,10 @@ host-test:
 	$(TOOL_ENV) uv run --locked pytest infra/host/tests
 
 # Live host stack tests (needs a Docker daemon; skips locally without one, fails when CI=true):
-# the edge through Caddy (M1c), the db role set and per-role network rules (M1e). Builds the app
-# image; a throwaway Compose project per run.
+# the edge through Caddy (M1c), the db role set and per-role network rules (M1e), EICAR through
+# the pinned clamav image (M1i). Builds the app image; a throwaway Compose project per run.
 host-test-live:
-	$(TOOL_ENV) uv run --locked pytest -m host_live infra/host/tests
+	$(TOOL_ENV) uv run --locked pytest -m host_live infra/host/tests app/documents/tests
 
 # Proves .gitleaks.toml flags each secret key name (generated values, temp dir). Needs gitleaks;
 # skips locally without it, fails in CI (CI=true). CI runs it in the `security` job.

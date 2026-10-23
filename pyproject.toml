@@ -66,13 +66,13 @@ markers = [
 ]
 
 [tool.importlinter]
-root_packages = ["config", "health", "shell", "jobs", "skiw_host"]
+root_packages = ["config", "health", "shell", "jobs", "documents", "skiw_host"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Apps do not reach into config internals"
 type = "forbidden"
-source_modules = ["health", "shell", "jobs"]
+source_modules = ["health", "shell", "jobs", "documents"]
 forbidden_modules = ["config"]
 
 [[tool.importlinter.contracts]]
@@ -84,27 +84,44 @@ forbidden_modules = ["psycopg"]
 [[tool.importlinter.contracts]]
 name = "Apps other than jobs do not import Procrastinate (spec D5)"
 type = "forbidden"
-source_modules = ["health", "shell"]
+source_modules = ["health", "shell", "documents"]
 forbidden_modules = ["procrastinate"]
 
 [[tool.importlinter.contracts]]
 name = "config sits above the apps"
 type = "layers"
-layers = ["config", "health | shell | jobs"]
+layers = ["config", "health | shell | jobs | documents"]
 
 [[tool.importlinter.contracts]]
 name = "App modules are independent of each other"
 type = "independence"
-modules = ["health", "shell", "jobs"]
+modules = ["health", "shell", "jobs", "documents"]
 
 [[tool.importlinter.contracts]]
 name = "Host tooling imports no app package or app dependency (UNI-04; stdlib only)"
 type = "forbidden"
 source_modules = ["skiw_host"]
-forbidden_modules = ["config", "health", "shell", "jobs", "django", "psycopg", "procrastinate"]
+forbidden_modules = [
+    "config", "health", "shell", "jobs", "documents", "django", "psycopg", "procrastinate",
+]
 
 [[tool.importlinter.contracts]]
 name = "App packages do not import host tooling (UNI-04)"
 type = "forbidden"
-source_modules = ["config", "health", "shell", "jobs"]
+source_modules = ["config", "health", "shell", "jobs", "documents"]
 forbidden_modules = ["skiw_host"]
+
+# The files volume (spec §8.4 H5, UNI-04). import-linter sees imports, not setting use: the
+# Semgrep rule files-volume-only-storage rejects FILES_ROOT, SKIW_FILES_ROOT and /srv/files
+# outside documents.storage, and documents-storage-no-db rejects django.db there.
+[[tool.importlinter.contracts]]
+name = "Only documents may import documents.storage, the files volume module (UNI-04)"
+type = "forbidden"
+source_modules = ["config", "health", "shell", "jobs", "skiw_host"]
+forbidden_modules = ["documents.storage"]
+
+[[tool.importlinter.contracts]]
+name = "documents.storage and documents.clamd touch no database (TEN-10)"
+type = "forbidden"
+source_modules = ["documents.storage", "documents.clamd"]
+forbidden_modules = ["psycopg", "procrastinate"]
