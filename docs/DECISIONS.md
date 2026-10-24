@@ -333,3 +333,12 @@
 - **Still OPEN (owner):** G8, the Q20 channel (mail via the agency provider, or a Telegram bot), and its UNI-11 record as an external service outside Malaysia (D17, D19); M1j-2 (the transports) follows. The M6 dump-age threshold (Q34). **Unproven until M1k:** on a real host, the unit sandboxing with the real docker CLI, `apt-get` and `journalctl`, the `apt-get --simulate` line format and the journal cursor across rotation; delivery off the host after M1j-2 and G8.
 - **Exception to a rule?** no
 - **Decided by:** builder, within plan M1j (thresholds not set by the spec or plan, flapping rule, the extra service unit); the split by the owner; owner open items above
+
+## 2026-10-24 — zod 4.6.5 to 4.6.7 and undici 8.11.2 to 8.12.3 for two high advisories
+- **Decision:** The lockfile moves two transitive dev packages to patched versions: `zod` 4.6.5 to 4.6.7 (GHSA-mrhx-c7xc-m3w5, fixed from 4.6.6; path `eslint-plugin-react-hooks`) and `undici` 8.11.2 to 8.12.3 (denial of service on excessive content-encodings, fixed from 8.12.2; path `jsdom`). `pnpm update -r zod undici` also moved `@babel/runtime` 7.29.7 to 7.29.10 because `zod`'s dependants share it. Only `pnpm-lock.yaml` changes; no range in `web/package.json` changes. The `security` job on `main` (run 40068411894, merge of PR 60) failed on these two findings; PR 60 changed no web file.
+- **Why:** UNI-14 (patched versions); the CI rule that any high finding fails stays unchanged and was not suppressed. Both versions passed pnpm's release-age gate.
+- **Alternatives rejected:** a `pnpm.overrides` entry (a permanent pin for a one-time bump); an audit ignore; waiting for Dependabot (`main` stays red until it merges).
+- **Scope / affects:** `pnpm-lock.yaml`; CI `security` job; every open branch.
+- **Versions:** `zod` 4.6.7, `undici` 8.12.3, `@babel/runtime` 7.29.10. Checked: `pnpm audit --audit-level high` reports no known vulnerabilities; lint, typecheck, pytest 862, vitest 3 and `pnpm build` pass; Semgrep 0.
+- **Exception to a rule?** no
+- **Decided by:** owner (open the bump as its own PR); builder (version choice)
