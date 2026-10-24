@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 60
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: 330aecdb37a91a957d6e82604bfc8510930c36b0
+review-file: reviews/PR-60.md
+review-file-hash: a74d9c39e3518cf19583efec1690437481febd23
+review-log-branch-commit: 0bcb24d88ba029f3a802fb9e5191491a67e13ec1
+verdict: Approved with conditions (round 1)
+deferred-conditions: P2 monthly check-hardening alert retried only monthly -> M1j-2. P2 security-updates blind to stale package lists -> M1j-2. Optional: two P3 items.
+ci: checks, host, image, security all success on the reviewed head; publish and deploy-staging skipped on a pull request
+note: M1j-1 health checks, journal-only alert sender, systemd timers. No transport; M1j-2 waits for G8 and UNI-11.
+written-at: 2026-10-24T05:45:57Z
+pr-state-at-write: OPEN, unmerged
