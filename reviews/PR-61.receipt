@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 61
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: c557a313bd2311b39257dd96cf2c3a43ab4a5b86
+review-file: reviews/PR-61.md
+review-file-hash: 4bd96203cb7ec024b3910bc04c7ac7060f771545
+review-log-branch-commit: 54fb7cb4d7160c201ed551e2456bad745b5698ac
+verdict: Approved (round 1)
+deferred-conditions: none. Optional: P3 the DECISIONS reason for the @babel/runtime move is wrong.
+ci: checks, host, image, security all success on the reviewed head; publish and deploy-staging skipped on a pull request
+note: Lockfile bump zod 4.6.7 and undici 8.12.3 (and @babel/runtime 7.29.10) to clear two high pnpm audit findings that turned main red after PR 60.
+written-at: 2026-10-24T10:11:33Z
+pr-state-at-write: OPEN, unmerged
