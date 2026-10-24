@@ -1,0 +1,12 @@
+#!/usr/bin/python3 -I
+"""skiw-health (spec §8.4 H7). Run as root by its timers; docs/runbooks/health-alerts.md."""
+
+import sys
+from pathlib import Path
+
+# Installed: /usr/local/sbin + /usr/local/lib/skiw/skiw_host (plan §1); in the repo: next to this file.
+sys.path[:0] = ["/usr/local/lib/skiw", str(Path(__file__).resolve().parent)]
+
+from skiw_host.health import main  # noqa: E402
+
+sys.exit(main())

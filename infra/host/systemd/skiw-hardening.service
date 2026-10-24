@@ -1,0 +1,24 @@
+# check-hardening once a month, its failure alerted (spec §8.4 H2, H7; plan §3 M1j; runbook
+# health-alerts.md). Started only by skiw-hardening.timer (UNI-19).
+# Root with every capability: check-hardening runs `unshare --net` (a network namespace), `sshd -T`,
+# `nft`, docker and psql through `docker compose exec`. It changes nothing on the host; this unit
+# writes only its state file under /var/lib/skiw.
+[Unit]
+Description=SKIW monthly check-hardening
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/skiw-health --hardening
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+TimeoutStartSec=900
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native

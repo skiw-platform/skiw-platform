@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from skiw_host import health
 from skiw_host.secrets import INVENTORY, OWNER
 
 HOST = Path(__file__).resolve().parents[1]
@@ -331,3 +332,8 @@ def test_host_env_files_refuse_to_render_until_complete(name: str) -> None:
     }
     filled = load(ENV / name, **gaps)  # M4 plan sets the worker values
     assert [problem for check in CHECKS for problem in check(filled)] == []
+
+
+def test_skiw_health_watches_every_service_that_always_runs(config: Config) -> None:
+    always = sorted(n for n, s in services(config) if not s.get("profiles"))
+    assert always == sorted(health.SERVICES) and config["name"] == health.PROJECT  # plan §3 M1j

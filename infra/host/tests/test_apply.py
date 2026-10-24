@@ -84,7 +84,9 @@ class Rig:
             self.active.add(unit)
         elif verb == "disable" and "--now" in args:
             self.active.discard(unit)
-        # enable starts nothing; try-restart leaves a stopped unit stopped
+        elif verb == "enable" and "--now" in args:  # enable alone starts nothing
+            self.active |= {a for a in args[1:] if not a.startswith("-")}
+        # try-restart leaves a stopped unit stopped
 
     def apt_install(self, wanted: list[str], argv: list[str]) -> int:
         """apt's rule: without --allow-downgrades an install that lowers a version fails (100)."""
@@ -163,8 +165,10 @@ def test_installs_rendered_files_root_owned_with_their_modes(rig: Rig) -> None:
     modes = {dest: (rig.root / dest).stat().st_mode & 0o777 for dest, _, _ in items}
     assert modes["etc/sudoers.d/skiw-ops"] == modes["etc/sudoers.d/skiw-deploy"] == 0o440
     assert {modes[f"usr/local/sbin/{n}"] for n in apply.PROGRAMS} == {0o755}
-    assert len(apply.PROGRAMS) == 6 and "skiw-staging-status" in apply.PROGRAMS
-    assert list(modes.values()).count(0o644) == len(modes) - 8  # all others: 0644
+    assert len(apply.PROGRAMS) == 7 and {"skiw-staging-status", "skiw-health"} <= set(
+        apply.PROGRAMS
+    )
+    assert list(modes.values()).count(0o644) == len(modes) - 9  # all others: 0644
     assert rig.read(apply.COMPOSE) == (HOST / "compose.yml").read_text()  # ./caddy/ next to it
     assert rig.read("srv/skiw/caddy/Caddyfile") == (HOST / "caddy/Caddyfile").read_text()
     assert {Path(dest).name for dest in modes} <= rig.chowns.keys()
@@ -430,8 +434,17 @@ def test_units_are_enabled_and_only_changed_files_reload(rig: Rig) -> None:
     ]
     assert ["systemctl", "disable", "--now", "ssh.socket"] in rig.calls
     assert ["systemctl", "enable", *apply.UNITS] in rig.calls  # allowlist: no fail2ban
+    daemon_reload = ["systemctl", "daemon-reload"]
+    timers = ["systemctl", "enable", "--now", *apply.TIMERS]
+    assert rig.calls.count(daemon_reload) == 1  # once for the four new unit files
+    assert rig.calls.index(daemon_reload) < rig.calls.index(timers)
+    assert set(apply.TIMERS) <= rig.active
     rig.calls = []
     assert rig.run() == 0 and rig.reloads() == []  # a second run reloads nothing
+    assert daemon_reload not in rig.calls and timers in rig.calls  # enable --now: no change
+    (rig.root / "etc/systemd/system/skiw-health.service").write_text("[Service]\n")
+    rig.calls = []
+    assert rig.run() == 0 and rig.calls.count(daemon_reload) == 1
     (rig.root / "etc/docker/daemon.json").write_text("{}")
     assert rig.run() == 0 and rig.reloads() == ["systemctl restart docker"]
 
@@ -440,7 +453,7 @@ def test_a_reload_that_failed_is_owed_until_a_run_succeeds(rig: Rig) -> None:
     rig.fail = "systemctl restart docker"
     assert rig.run() == 1
     pending = rig.root / apply.PENDING
-    assert pending.read_text().split() == list(apply.RELOADS)[:4]
+    assert pending.read_text().split() == [d for d in apply.RELOADS if "fail2ban" not in d]
     assert pending.stat().st_mode & 0o777 == 0o644 and rig.owners[apply.PENDING] == (0, 0)
     rig.fail, rig.calls = "", []
     assert rig.run() == 0  # no file changed now, yet every owed reload runs once
