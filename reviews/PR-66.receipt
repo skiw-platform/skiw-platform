@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 66
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: ecf85e00c00d4d444148cf52395bd4de88dc8ba9
+review-file: reviews/PR-66.md
+review-file-hash: 94aa8a1e25d1464bd79ebc941fad0c61127268c5
+review-log-branch-commit: ce2f6eeda8fc34cbe8bfbf3e7fa6ac060ea0834b
+verdict: Approved (round 1)
+deferred-conditions: none. Optional: one P3 (the approved Hostinger spec quotes words the owner did not type; DECISIONS holds the real words).
+ci: checks, host, image, security all success on the reviewed head; publish and deploy-staging skipped on a pull request
+note: S1 docs PR: Hostinger replaces iCore as the VPS vendor (main spec v1.20, amendment v1.2 hash 2ef0bb3a, M1 plan, runbooks, DECISIONS). Owner asked to merge after reading item (9).
+written-at: 2026-10-25T13:12:25Z
+pr-state-at-write: OPEN, unmerged
