@@ -32,7 +32,7 @@ from skiw_host.bootstrap_db import (
     settings,
 )
 from skiw_host.bootstrap_secrets import DIR_MODE, MARKER, Refused
-from skiw_host.secrets import OWNER, STATUS_KEY, held
+from skiw_host.secrets import ALERT_CHANNEL, ALERT_CREDENTIAL, OWNER, STATUS_KEY, held
 
 APT_LINE = re.compile(r'(\S+) "(.*)";')
 ORIGINS = ("Unattended-Upgrade::Allowed-Origins", "Unattended-Upgrade::Origins-Pattern")
@@ -99,7 +99,9 @@ class Host:
         self.compose: Path | None = args.compose_file or args.root / apply.COMPOSE
         self.env_text = env_text
         self.values, self.ban = apply.host_values(self.env_file, env_text)
-        self.environment = settings(self.env_file, env_text).get("SKIW_ENVIRONMENT", "")
+        found = settings(self.env_file, env_text)
+        self.environment = found.get("SKIW_ENVIRONMENT", "")
+        self.channel = found.get("SKIW_ALERT_CHANNEL", "")  # the alert token is held only with it
         if self.environment not in ("production", "staging"):
             raise Refused(f"SKIW_ENVIRONMENT in {self.env_file} is not production or staging")
 
@@ -317,13 +319,15 @@ def secret_store(host: Host) -> list[str]:
         return [f"/{SECRETS} is not a directory owned by root:root"]  # never listed through a link
     problems = [] if mode == DIR_MODE else [f"/{SECRETS} has mode {mode:04o}, want 0700"]
     names = sorted(os.listdir(host.root / SECRETS))
-    wanted = held(host.environment)
+    wanted = held(host.environment, host.channel)
     problems += [f"{name} is missing" for name in sorted(wanted.keys() - set(names))]
     for name in names:
         if name not in OWNER and name != MARKER:
             problems.append(f"{name} is not in the inventory")
             continue
-        if name in OWNER and name not in wanted:
+        if name == ALERT_CREDENTIAL and name not in wanted:  # decision 13 of the alert amendment
+            problems.append(f"{name} is present, but SKIW_ALERT_CHANNEL is not {ALERT_CHANNEL}")
+        elif name in OWNER and name not in wanted:
             problems.append(f"{name} is not held on {host.environment}")
         try:
             host.read(f"{SECRETS}/{name}", OWNER.get(name, 0), SECRET_MODE)
@@ -336,7 +340,7 @@ def secret_lines(host: Host) -> tuple[list[str], set[str], set[str]]:
     """Problems, the strings searched as substrings (16+ characters: a whole line, or the part
     after `v<n>:`) and the shorter ones, only compared whole; named by file, never shown."""
     problems, long, short = [], set(), set()
-    for name, uid in sorted(held(host.environment).items()):
+    for name, uid in sorted(held(host.environment, host.channel).items()):
         text = host.read(f"{SECRETS}/{name}", uid, SECRET_MODE).decode()
         lines = [line for line in text.splitlines() if line]
         if name == STATUS_KEY:  # the key body as one string; the armour lines are not secret

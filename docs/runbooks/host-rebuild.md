@@ -76,7 +76,7 @@ Files it reads must be regular files, not links, root-owned and not writable by 
 | `listening-sockets` | `ss -tlnp` shows nothing on a non-loopback address except 80, 443 and the SSH port, and `dockerd` listens on no TCP address at all, loopback included |
 | `docker-group` | neither `skiw-deploy` nor `skiw-ops` is in group `docker` |
 | `stale-files` | no fail2ban jail under `allowlist`, no `/etc/sudoers.d/skiw*` but `skiw-ops` and `skiw-deploy`, no sshd drop-in sorting before `00-skiw.conf` that sets a checked key, no `/var/lib/skiw/apply.pending` (run `apply`) |
-| `secret-store` | `/etc/skiw/secrets` is a root:root 0700 directory, not a link; it holds every inventory name (`skiw_host/secrets.py`) and nothing else but `.restored`; each file is a regular file, mode 0400, owned by its inventory uid, group root |
+| `secret-store` | `/etc/skiw/secrets` is a root:root 0700 directory, not a link; it holds every inventory name (`skiw_host/secrets.py`) and nothing else but `.restored`; `alert_credential` if and only if `SKIW_ALERT_CHANNEL` is `telegram` (missing with the channel on, or present with it off, fails); each file is a regular file, mode 0400, owned by its inventory uid, group root |
 | `container-env` | no running container's environment (`docker inspect`) holds a secret value: a secret line, or the part after `v<n>:`, of 16 characters or more is searched inside every value; a shorter credential is compared whole and also FAILs as unsupported (it cannot be searched safely), as does an empty secret file; each container from `docker ps` must be described exactly once, with a `Config` and an `Env` that is null or a list of strings; a FAIL names the secret file, container and variable, never the value |
 | `role-set` | through the db socket as `postgres` (`docker compose exec db`, bootstrap-db's password file), the WHOLE role inventory: only the six roles of `roles.sql` (with their attributes, connection limits and settings), `postgres` (the bootstrap superuser, the only superuser) and PostgreSQL's predefined `pg_*` roles (made by initdb; none may log in, be superuser or bypass RLS); any other role, of any name, fails; memberships are exactly `roles.sql`'s grants (`skiw_backup` in `pg_read_all_data`) plus PostgreSQL 17.11's own after initdb (`pg_monitor` in `pg_read_all_settings`, `pg_read_all_stats` and `pg_stat_scan_tables`), each with its options (`admin_option` false, `inherit_option` true, `set_option` true); any other membership (also between `pg_*` roles, e.g. `pg_read_all_data` in `pg_write_all_data`), a missing one, one granted twice or changed options (`INHERIT FALSE`, `SET FALSE`, `ADMIN OPTION`) fails. A FAIL names only roles from that list and `roles.sql`'s settings; other roles are counted (find them with `\du`), and no setting value or database row is ever printed; fails while `/srv/skiw/compose.yml` (or `--compose-file`) or skiw-deploy's state file `/var/lib/skiw/deploy.env` (root, 0644) is missing or untrusted |
 | `pg-hba` | `/etc/skiw/db/pg_hba.conf` (root, 0444) equals the template rendered from the env file; after a subnet change run `bootstrap-db prepare` again |
@@ -84,8 +84,8 @@ Files it reads must be regular files, not links, root-owned and not writable by 
 
 On a FAIL, fix the cause (usually: run `apply` again; for `secret-store` and `pg-hba` the
 bootstrap steps below) and rerun the check. Before the secrets and the database exist, those four
-checks fail, as expected. `skiw-hardening.timer` runs it monthly and alerts a failure by check
-name (health-alerts.md).
+checks fail, as expected. `skiw-hardening.timer` runs it monthly and `skiw-health` alerts a
+failure by check name (health-alerts.md).
 
 ## Secrets (`bootstrap-secrets`, spec §8.4 H4)
 
@@ -97,10 +97,10 @@ service that reads it, mode 0400. The inventory, with readers and owners, is
 |---|---|---|---|
 | App keys (`v<n>:<base64>` lines, 32 random bytes each) | `django_secret_key`, `tenant_token_key`, `approval_mac_key`, `lookup_decoy_key`, `tenant_source_key`, `login_blob_key`, `audit_mac_key`, `field_kek`, `blind_index_key`, `crm_jar_kek` | `bootstrap-secrets init`, or `restore` from the escrow bundle | yes |
 | DB passwords | `skiw_app_password`, `skiw_migrator_password`, `skiw_backup_password`, `postgres_password`, `skiw_readonly_password` | `bootstrap-db` (M1e), newly set on every rebuild | no |
-| Owner-supplied | `ghcr_read_token` (G10); production only: `staging_status_key` (G11 (b)) | the owner, by hand (below) | no |
+| Owner-supplied | `ghcr_read_token` (G10); production only: `staging_status_key` (G11 (b)); while `SKIW_ALERT_CHANNEL` is `telegram`: `alert_credential` (the environment's own Telegram bot token, read by `skiw-health` as root) | the owner, by hand (below; `alert_credential`: health-alerts.md "Turning on the alert channel") | no |
 
 **Not escrowed, re-issued on recovery:** DB passwords, deploy SSH keys, the staging status key, the
-GHCR token. `check-hardening` expects `staging_status_key` on production and fails if staging holds
+GHCR token, the alert bot token (BotFather `/token`, health-alerts.md "Rotating the token"). `check-hardening` expects `staging_status_key` on production and fails if staging holds
 it.
 
 ### Before you start

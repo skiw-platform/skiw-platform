@@ -5,6 +5,8 @@ those services run as. A file no service mounts is read on the host by root only
 config test checks readers and uids against compose.yml.
 G11 (b): `staging_status_key` is production's private SSH key for the staging status forced command
 (skiw-staging-status); only production holds it.
+M1j-2: `alert_credential` is the alert channel's Telegram bot token, read by skiw-health as root;
+a host holds it while its SKIW_ALERT_CHANNEL is `telegram`, and only then.
 """
 
 from dataclasses import dataclass
@@ -53,12 +55,21 @@ INVENTORY: tuple[Secret, ...] = (
     Secret("skiw_readonly_password", Kind.DB_PASSWORD, (), ROOT_UID),  # socket only (M1e)
     Secret("ghcr_read_token", Kind.OWNER_SUPPLIED, (), ROOT_UID),  # skiw-deploy, as root (M1g)
     Secret("staging_status_key", Kind.OWNER_SUPPLIED, (), ROOT_UID, ("production",)),  # G11 (b)
+    Secret("alert_credential", Kind.OWNER_SUPPLIED, (), ROOT_UID),  # skiw-health, as root (M1j-2)
 )
 STATUS_KEY = "staging_status_key"  # an OpenSSH private key: searched as its joined body
+ALERT_CREDENTIAL = "alert_credential"  # the Telegram bot token, one per environment
+ALERT_CHANNEL = "telegram"  # the SKIW_ALERT_CHANNEL value that needs ALERT_CREDENTIAL
 APP_KEYS = tuple(secret.name for secret in INVENTORY if secret.kind is Kind.APP_KEY)
 OWNER = {secret.name: secret.uid for secret in INVENTORY}
 
 
-def held(environment: str) -> dict[str, int]:
-    """name -> owner uid of the secrets a host of this environment holds."""
-    return {s.name: s.uid for s in INVENTORY if environment in s.environments}
+def held(environment: str, channel: str) -> dict[str, int]:
+    """name -> owner uid of the secrets a host of this environment holds; the alert token if and
+    only if SKIW_ALERT_CHANNEL is `telegram` (amendment 2026-10-24, decision 13)."""
+    return {
+        s.name: s.uid
+        for s in INVENTORY
+        if environment in s.environments
+        and (s.name != ALERT_CREDENTIAL or channel == ALERT_CHANNEL)
+    }
