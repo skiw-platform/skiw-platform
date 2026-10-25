@@ -26,13 +26,13 @@ setup leaves no double braces anywhere in this file.
 | What | Path | Wins over |
 |---|---|---|
 | Product spec / proposal (latest) | docs/specs/2026-10-05-skiw-platform-stack-design.md | everything except the owner |
-| Spec hash at last reconcile | 0edfb3cdc514e1d5bbd3ae3d34875cd16c037644 <!-- git hash-object of the spec (v1.18, review Round 21 Approved, PR 22 merged 2026-10-12) when setup last filled this file; previous reconcile v1.13 e3141585 --> | |
+| Spec hash at last reconcile | 75ac19f61466445c35e4ff9341a0d0984a55249f <!-- git hash-object of the spec (v1.19, review Round 22 Approved, PR 63 merged 2026-10-25) when setup last filled this file; previous reconcile v1.18 0edfb3cd (Round 21), v1.13 e3141585 --> | |
 | Decisions log (committed) | docs/DECISIONS.md | handoff, chat history |
 | Durable notes (other lasting facts) | none <!-- owner decision 2026-10-05: spec and decisions log hold lasting facts; add a notes file only when a distinct need appears --> | handoff, chat history |
 | Review files | `.agent/reviews/` (reviewer writes, builder reads; local only — the final round is copied into each PR log) | |
 | In-flight task state (handoff) | .agent/handoff.md | nothing — repo wins for code state |
 | Extra frontend standard (on top of `guardrails/frontend.md`) | none <!-- spec v1.8 D2: Fernly layout as visual reference only, SK iWealth navy #001C30 and gold #FFB300 (skiwealth.com); tokens live in web/src/styles.css (FE-13); no separate design-system file --> | |
-| Other standards | none | |
+| Other standards | `docs/specs/2026-10-24-alert-channel-and-uptime-ping.md` (v1.2, amendment to the main spec: Telegram alert channel, UptimeRobot ping, weekly heartbeat, `alert_credential`; load it for M1j-2 and for any alert or health change) | |
 | Notes the reviewer must always load | none | |
 | Extra in-flight files (checklists, cutover plans) | none | |
 
