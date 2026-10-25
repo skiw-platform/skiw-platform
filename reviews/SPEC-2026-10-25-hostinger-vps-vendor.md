@@ -1,5 +1,46 @@
 # Review — 2026-10-25-hostinger-vps-vendor
 
+## Round 3 — 2026-10-25 · scope: slice (vendor amendment v1.2)
+
+- **Spec review:** `docs/specs/2026-10-25-hostinger-vps-vendor.md` · version 1.2 · hash
+  `2ef0bb3aaf6509025c324058f4a3b0dee8e950d6` (working file, untracked in the main checkout).
+- **Amends:** v1.19, hash `75ac19f61466445c35e4ff9341a0d0984a55249f` (unchanged). `main` =
+  `origin/main` = `550b622`.
+- **Mode:** read only; no file written except this one.
+- **Model used:** Claude Opus 5.5. **Switch model next step?** No.
+
+**Verdict:** Approved
+
+This approval covers the amendment text at hash `2ef0bb3a…` only. It is not an approval of the
+v1.20 docs PR (S1), of the main spec v1.20, or of a purchase. The owner still makes Q43 and Q44.
+
+### Round 2 resolution audit (re-read in v1.2)
+| Round 2 finding | Status | Evidence in v1.2 |
+|---|---|---|
+| P2 S1 test fails on the v1.20 changelog and the new DECISIONS entry | resolved | S1: "changelog entries v1.14 to v1.20 (v1.20 says what Hostinger replaces)" and "`docs/DECISIONS.md` entries dated 2026-10-25 or before (this includes the new entry …)"; the §7 "stale iCore line" row says the same |
+| P3 env change against §2 | resolved | §2 "One conditional exception": the staging caps drop by at least 256 MiB only if staging is KVM 1, in their own PR with the Compose config tests |
+| P3 which caps | resolved | Decision 3: `SKIW_MEM_CLAMAV` stays 1280m [A]; the 256 MiB comes from `SKIW_MEM_WEB` or `SKIW_MEM_DB` |
+| P3 deploy peak | resolved | Decision 3 "Deploy peak": 8192 MiB during a deploy is allowed because the numbers are caps; M1k measures the real peak on one staging and one production deploy |
+
+I re-read the whole file. Outside the header, §2, decision 3, the §7 stale-line row and S1, the text
+reads as in v1.1 (I did not keep a v1.1 copy, so this is a read, not a byte diff). The Round 1 facts
+still hold: no web page was re-read in this round.
+
+### Findings
+
+No P0, P1, P2 or P3.
+
+### Notes for S1 (not findings)
+- Decision 10 says "entries dated before 2026-10-25 stay as history"; S1 allows hits in entries dated
+  2026-10-25 or before. Both hold: the new entry is new, not history.
+- The S1 DECISIONS entry must carry the owner's own words and confirmation (decision 11, PDPA rule (a)
+  for the account data). The reviewer checks it in the S1 PR.
+- The [A] items (the city, CPU sharing, backups default, Ubuntu 24.04 image, 2FA, static IPv4,
+  contracting entity) stay open until the G-VENDOR answers.
+
+### Required before approval
+- none
+
 ## Round 2 — 2026-10-25 · scope: slice (vendor amendment v1.1)
 
 - **Spec review:** `docs/specs/2026-10-25-hostinger-vps-vendor.md` · version 1.1 · hash
