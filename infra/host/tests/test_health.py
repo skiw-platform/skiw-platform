@@ -3,13 +3,15 @@
 A temporary root stands in for the host: the host env file, /proc files, the dump directory and the
 state file are real files there; a recording owner, chown, clock, statvfs and tool runner stand in
 for the rest. The tool fakes answer as the tools do: a non-zero exit, a timeout, unparsable output.
-The /readyz request runs against a local TLS fake (conftest `tls_server`) in its own tests.
+The /readyz request and the Telegram channel run against a local TLS fake (conftest
+`tls_server`) in their own tests.
 """
 
 import hashlib
 import json
 import os
 import secrets
+import socket
 import ssl
 import subprocess
 import time
@@ -47,8 +49,11 @@ def container(service: str, **state: Any) -> dict[str, Any]:
 
 
 class Fake:
+    """The channel; the weekly heartbeats are kept apart (`beats`) from every other message."""
+
     def __init__(self) -> None:
         self.sent: list[Alert] = []
+        self.beats: list[Alert] = []
         self.error: Exception | None = None
         self.tries = 0
 
@@ -56,7 +61,7 @@ class Fake:
         self.tries += 1
         if self.error:
             raise self.error
-        self.sent.append(message)
+        (self.beats if message.check == "heartbeat" else self.sent).append(message)
 
 
 class Rig:
@@ -67,6 +72,9 @@ class Rig:
         (self.root / "var/lib/skiw").mkdir(parents=True)
         (self.root / "run").mkdir()
         (self.root / "proc").mkdir()
+        (self.root / health.LISTS_STAMP).parent.mkdir(parents=True)
+        (self.root / health.LISTS_STAMP).write_text("")
+        self.lists_age = 0.0  # seconds since the last successful `apt-get update`
         dumps = self.root / apply.BACKUPS
         dumps.mkdir(parents=True, mode=0o700)
         dumps.chmod(0o700)  # mkdir mode is masked by the umask
@@ -86,7 +94,7 @@ class Rig:
         self.answer: tuple[int, float] | Exception = (200, START + 60 * 86400)
         self.cpus: int | None = 2
         self.fake: Fake | None = None
-        monkeypatch.setattr(alert, "channel", lambda values: self.fake)
+        monkeypatch.setattr(alert, "channel", lambda values, token, context: self.fake)
 
     def meminfo(self, total: int = 1000, available: int = 50, swap: int = 0, free: int = 0) -> None:
         text = MEMINFO.format(total * 1000, total * 10 * available, swap, free)  # available: %
@@ -133,6 +141,9 @@ class Rig:
         return self.answer
 
     def wire(self, p: Probe) -> None:
+        stamp = self.clock - self.lists_age
+        if (self.root / health.LISTS_STAMP).exists():
+            os.utime(self.root / health.LISTS_STAMP, (stamp, stamp))
         p.timed, p.now, p.statvfs = self.timed, lambda: self.clock, self.statvfs
         p.cpus, p.request = lambda: self.cpus, self.request
 
@@ -144,7 +155,7 @@ class Rig:
     def check(self, name: str) -> Result:
         return health.judge(self.probe(), CHECKS[name][0])
 
-    def run(self, *extra: str) -> int:
+    def run(self, *extra: str, context: alert.Context = ssl.create_default_context) -> int:
         argv = ["--env-file", str(self.root / apply.ENV), "--root", str(self.root), *extra]
         return health.main(
             argv,
@@ -153,7 +164,27 @@ class Rig:
             self.chown,
             self.journal.append,
             self.wire,
+            context,
         )
+
+    def alerts(self) -> list[str]:
+        """The journal without the weekly heartbeat's lines."""
+        return [line for line in self.journal if not line.startswith("heartbeat")]
+
+    def alerting(self, channel: str, chat: str) -> None:
+        """The host env file's alert settings (the last line of a key wins)."""
+        with (self.root / apply.ENV).open("a") as env:
+            env.write(f"SKIW_ALERT_CHANNEL={channel}\nSKIW_ALERT_TO={chat}\n")
+
+    def place_token(self, mode: int = 0o400) -> str:
+        """A bot token made now, placed as the owner places it (runbook health-alerts.md)."""
+        token = f"{secrets.randbelow(9 * 10**9) + 10**9}:{secrets.token_urlsafe(27)}"
+        store = self.root / hardening.SECRETS
+        store.mkdir(mode=0o700, exist_ok=True)
+        store.chmod(0o700)
+        (self.root / alert.CREDENTIAL).write_text(f"{token}\n")
+        (self.root / alert.CREDENTIAL).chmod(mode)
+        return token
 
     def state(self) -> dict[str, Any]:
         doc: dict[str, Any] = json.loads((self.root / health.STATE).read_text())
@@ -170,12 +201,14 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Rig:
     return Rig(tmp_path, monkeypatch)
 
 
-def test_a_healthy_host_exits_0_sends_nothing_and_writes_its_state(
+def test_a_healthy_host_exits_0_sends_only_its_heartbeat_and_writes_its_state(
     rig: Rig, capsys: pytest.CaptureFixture[str]
 ) -> None:
     rig.fake = Fake()
     assert rig.run() == 0
-    assert rig.fake.sent == [] and rig.journal == []
+    assert rig.fake.sent == [] and rig.alerts() == []
+    assert [(a.check, a.value) for a in rig.fake.beats] == [("heartbeat", "12 checks, 0 bad")]
+    assert len(CHECKS) == 12 and rig.state()["heartbeat"] == health.week(START)
     lines = capsys.readouterr().out.splitlines()
     assert [line.split(":")[0] for line in lines] == [f"OK {name}" for name in CHECKS]
     state = rig.root / health.STATE
@@ -249,6 +282,8 @@ PAIR = ((DUMP_NAME, 0.0), (f"{DUMP_NAME}.sha256", 0.0))
         ("dump", lambda r: r.owners.pop(apply.BACKUPS), True),  # owned by root, not the backup uid
         ("security-updates", security(SECURITY), True),
         ("security-updates", security(UPDATES), False),
+        ("security-updates", lambda r: setattr(r, "lists_age", 48 * 3600 + 1), True),  # LISTS_S
+        ("security-updates", lambda r: setattr(r, "lists_age", 48 * 3600), False),
         ("reboot", lambda r: (r.root / "run/reboot-required").write_text(""), True),
     ],
 )
@@ -277,6 +312,11 @@ def remove(rel: str) -> Callable[[Rig], None]:
     return lambda r: (r.root / rel).unlink()
 
 
+def stamp_directory(r: Rig) -> None:
+    (r.root / health.LISTS_STAMP).unlink()
+    (r.root / health.LISTS_STAMP).mkdir()
+
+
 @pytest.mark.parametrize(
     ("name", "change"),
     [
@@ -290,6 +330,9 @@ def remove(rel: str) -> Callable[[Rig], None]:
         ("security-updates", lambda r: r.out.__setitem__("apt-get", (100, ""))),
         ("security-updates", lambda r: r.out.__setitem__("apt-get", "timeout")),
         ("security-updates", security(f"W: {PLANTED}")),
+        ("security-updates", remove(health.LISTS_STAMP)),  # no stamp: not known to be fresh
+        ("security-updates", stamp_directory),
+        ("check-hardening", lambda r: (r.root / health.HARDENING_STATE).write_text(PLANTED)),
         ("deploy-alert", lambda r: r.out.__setitem__("journalctl", (1, ""))),
         ("deploy-alert", lambda r: r.out.__setitem__("journalctl", (0, f"{PLANTED}\n"))),
         ("deploy-alert", lambda r: r.out.__setitem__("journalctl", (0, '{"__CURSOR": "a b"}\n'))),
@@ -314,6 +357,7 @@ def test_each_check_fails_closed_without_echoing_tool_output(
 
 
 def test_every_tool_call_is_bounded(rig: Rig) -> None:
+    rig.fake = Fake()
     assert rig.run() == 0
     assert rig.bounds and set(rig.bounds) == {30}  # TOOL_S, as the runbook and the unit budget say
     assert (health.PROBE_S, health.HARDENING_S) == (10, 600)  # the runbook's /readyz and monthly
@@ -336,6 +380,81 @@ def test_pending_security_updates_alert_after_48_hours(rig: Rig) -> None:
     assert [(a.check, a.value) for a in rig.fake.sent] == [
         ("security-updates", "1 security updates pending")
     ]
+
+
+def test_package_lists_not_updated_alert_without_running_apt(rig: Rig) -> None:
+    """PR-60 P2: stale lists cannot show a new security update, so they are bad themselves."""
+    rig.fake = Fake()
+    rig.lists_age = 72 * 3600
+    assert rig.check("security-updates") == Result(True, "package lists not updated for 72 h")
+    assert rig.calls == []  # apt-get is not asked
+    assert rig.run() == 1
+    rig.clock += health.UPDATES_S
+    assert rig.run() == 1
+    assert [(a.check, a.value) for a in rig.fake.sent] == [
+        ("security-updates", "package lists not updated for 72 h")
+    ]
+
+
+MONDAY = datetime(2026, 10, 26, tzinfo=UTC).timestamp()  # 00:00 UTC, ISO week 2026-W44
+
+
+def test_the_heartbeat_week_starts_on_monday_0000_utc() -> None:
+    assert (health.HEARTBEAT_WEEKDAY, health.HEARTBEAT_HOUR) == (0, 0)  # 08:00 in Kuala Lumpur
+    assert health.week(MONDAY - 1) == "2026-W43"
+    assert health.week(MONDAY) == health.week(MONDAY + 7 * 86400 - 1) == "2026-W44"
+    assert health.week(datetime(2027, 1, 3, tzinfo=UTC).timestamp()) == "2026-W53"
+
+
+def test_the_heartbeat_is_sent_on_the_first_run_of_each_week(rig: Rig) -> None:
+    rig.fake = Fake()
+    rig.clock = MONDAY - 300  # Sunday 23:55
+    assert rig.run() == 0 and len(rig.fake.beats) == 1  # the first run ever
+    rig.clock = MONDAY
+    assert rig.run() == 0 and len(rig.fake.beats) == 2  # a new week
+    for _ in range(3):
+        rig.clock += 2 * 86400
+        assert rig.run() == 0
+    assert len(rig.fake.beats) == 2 and rig.state()["heartbeat"] == "2026-W44"
+    rig.disks["var/log"] = 95
+    rig.clock = MONDAY + 7 * 86400
+    assert rig.run() == 1
+    assert [b.value for b in rig.fake.beats] == ["12 checks, 0 bad"] * 2 + ["12 checks, 1 bad"]
+    assert rig.fake.beats[-1].payload() == {
+        "check": "heartbeat",
+        "host": rig.fake.beats[-1].host,
+        "value": "12 checks, 1 bad",
+    }
+
+
+def test_an_undelivered_heartbeat_is_due_on_every_run_until_delivered(rig: Rig) -> None:
+    rig.fake = Fake()
+    rig.clock = MONDAY
+    rig.fake.error = ConnectionRefusedError()
+    for _ in range(2):
+        assert rig.run() == 3 and rig.state()["heartbeat"] == ""  # not marked sent
+        rig.clock += 300
+    assert rig.fake.tries == 2 and rig.state()["owed"] == []  # never queued
+    rig.fake.error = None
+    assert rig.run() == 0 and len(rig.fake.beats) == 1 and rig.state()["heartbeat"] == "2026-W44"
+    rig.clock += 300
+    assert rig.run() == 0 and len(rig.fake.beats) == 1
+
+
+def test_a_week_old_undelivered_heartbeat_is_replaced_by_the_new_weeks(rig: Rig) -> None:
+    rig.fake = Fake()
+    rig.clock = MONDAY
+    assert rig.run() == 0
+    rig.fake.error = ConnectionRefusedError()
+    rig.clock = MONDAY + 7 * 86400  # W45's heartbeat fails all week
+    for _ in range(3):
+        assert rig.run() == 3
+        rig.clock += 2 * 86400
+    rig.fake.error = None
+    rig.clock = MONDAY + 14 * 86400 + 600  # W46
+    assert rig.run() == 0
+    assert len(rig.fake.beats) == 2 and rig.state()["heartbeat"] == "2026-W46"
+    assert rig.run() == 0 and len(rig.fake.beats) == 2  # W45's is not sent late
 
 
 class Sender:
@@ -445,15 +564,15 @@ def test_an_undelivered_event_is_owed_until_delivered_and_owed_events_are_capped
 
 def test_without_a_channel_a_due_alert_goes_to_the_journal_and_exits_3(rig: Rig) -> None:
     (rig.root / "run/reboot-required").write_text("")
-    assert rig.run() == 3  # G8 open: nothing leaves the host
+    assert rig.run() == 3  # SKIW_ALERT_CHANNEL empty: nothing leaves the host
     host = rig.journal[0].split()[1]
-    assert rig.journal == [
+    assert rig.alerts() == [
         f"reboot {host} reboot required",
-        "reboot: not sent off the host: no alert channel (G8 open)",
+        "reboot: not sent off the host: no alert channel",
     ]
     assert host.startswith("staging:")
     assert rig.state()["tracks"]["reboot"]["announced"] is False  # due again next run
-    assert rig.run() == 3 and len(rig.journal) == 4
+    assert rig.run() == 3 and len(rig.journal) == 4  # no heartbeat without a channel
 
 
 def test_a_failing_channel_is_tried_once_per_run(rig: Rig) -> None:
@@ -462,7 +581,7 @@ def test_a_failing_channel_is_tried_once_per_run(rig: Rig) -> None:
     (rig.root / "run/reboot-required").write_text("")
     rig.disks["var/log"] = 95
     assert rig.run() == 3 and rig.fake.tries == 1
-    assert sum("not sent off the host" in line for line in rig.journal) == 2
+    assert sum("not sent off the host" in line for line in rig.journal) == 3  # and the heartbeat
 
 
 def test_a_bad_check_with_its_alert_delivered_exits_1(rig: Rig) -> None:
@@ -603,6 +722,7 @@ def test_the_state_file_is_synced_with_its_directory(
         real_fsync(fd)
 
     monkeypatch.setattr(os, "fsync", fsync)
+    rig.fake = Fake()
     assert rig.run() == 0
     assert synced == ["file", str(rig.root / "var/lib/skiw")]
 
@@ -627,17 +747,44 @@ def test_a_bad_host_config_refuses_before_any_check(
     assert rig.journal[0].startswith("refused, nothing checked:")
 
 
-def test_any_alert_setting_refuses_until_a_transport_is_built(
-    rig: Rig, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("channel", "chat"),
+    [
+        ("smtp", "42"),  # SMTP was not built (amendment 2026-10-24)
+        ("Telegram", "42"),
+        ("", "42"),
+        ("telegram", ""),
+        ("telegram", "@skiw_alerts"),  # a username: the chat id only
+        ("telegram", "42/../x"),
+        ("telegram", "1" * 17),
+    ],
+)
+def test_a_bad_alert_setting_refuses_before_any_check(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, channel: str, chat: str
 ) -> None:
     monkeypatch.undo()  # the real alert.channel
-    with (rig.root / apply.ENV).open("a") as env:
-        env.write("SKIW_ALERT_CHANNEL=telegram\nSKIW_ALERT_TO=42\n")
+    rig.alerting(channel, chat)
     assert rig.run() == 2 and rig.calls == []
-    assert rig.journal == [
-        "refused, nothing checked: SKIW_ALERT_* is set, but no alert transport is built yet"
-        " (G8 open, M1j-2)"
-    ]
+    assert rig.journal[0].startswith("refused, nothing checked: SKIW_ALERT_")
+
+
+def test_without_a_channel_a_healthy_host_sends_no_heartbeat_and_exits_0(rig: Rig) -> None:
+    """Owner decision 2026-10-25: the heartbeat starts when the channel is turned on."""
+    rig.clock = MONDAY
+    for _ in range(3):
+        assert rig.run() == 0
+        rig.clock += 7 * 86400
+    assert rig.journal == [] and rig.state()["heartbeat"] == ""
+
+
+def test_a_telegram_channel_without_its_token_runs_the_checks_and_exits_3(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.undo()  # the real alert.channel; the token is read only when a message is sent
+    rig.alerting("telegram", "-1001234567890")
+    assert rig.run() == 3 and rig.calls
+    assert rig.journal[-1] == "heartbeat: not sent off the host (FileNotFoundError)"
+    assert rig.state()["heartbeat"] == ""  # due again next run
 
 
 def test_it_refuses_unless_root(rig: Rig, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -666,18 +813,72 @@ def test_the_test_flag_sends_one_alert_and_checks_nothing(rig: Rig) -> None:
         ("timeout", "timed out"),
     ],
 )
-def test_the_monthly_run_alerts_check_hardening_failures_by_name(
+def test_the_monthly_run_writes_its_result_and_the_five_minute_run_alerts_it(
     rig: Rig, answer: tuple[int, str] | str, value: str
 ) -> None:
     rig.fake = Fake()
     rig.out[health.CHECK_HARDENING] = answer
     assert rig.run("--hardening") == 1
-    assert [(a.check, a.value) for a in rig.fake.sent] == [("check-hardening", value)]
+    assert rig.fake.tries == 0  # the monthly run sends nothing itself
     assert rig.calls == [[health.CHECK_HARDENING]] and rig.bounds == [health.HARDENING_S]
-    assert (rig.root / health.HARDENING_STATE).exists() and not (rig.root / health.STATE).exists()
+    assert (rig.root / health.HARDENING_STATE).stat().st_mode & 0o777 == 0o644
+    assert not (rig.root / health.STATE).exists()
+    assert rig.run() == 1
+    assert [(a.check, a.value) for a in rig.fake.sent] == [("check-hardening", value)]
+    assert rig.calls.count([health.CHECK_HARDENING]) == 1  # the 5-minute run only reads it
+    assert PLANTED not in (rig.root / health.HARDENING_STATE).read_text()
     rig.out[health.CHECK_HARDENING] = (0, "")
-    assert rig.run("--hardening") == 0  # next month: recovered at once
+    rig.clock += 30 * 86400
+    assert rig.run("--hardening") == 0  # next month
+    for _ in range(2):  # ok on two runs: recovered
+        rig.clock += 300
+        assert rig.run() == 0
     assert rig.fake.sent[-1].value == "recovered: every check passed"
+
+
+def test_an_undelivered_monthly_alert_is_tried_every_five_minutes_not_next_month(
+    rig: Rig,
+) -> None:
+    """PR-60 P2: the monthly run's result is alerted by the 5-minute run, owed like any check."""
+    rig.fake = Fake()
+    rig.out[health.CHECK_HARDENING] = (1, "FAIL sshd: x\n")
+    assert rig.run("--hardening") == 1
+    rig.fake.error = TimeoutError()
+    for _ in range(3):
+        assert rig.run() == 3 and rig.fake.sent == []
+        rig.clock += 300
+    rig.fake.error = None
+    assert rig.run() == 1
+    assert [(a.check, a.value) for a in rig.fake.sent] == [("check-hardening", "failed: sshd")]
+    assert rig.calls.count([health.CHECK_HARDENING]) == 1  # run once, by --hardening
+
+
+def test_the_monthly_result_is_judged_by_its_age_and_read_safely(rig: Rig) -> None:
+    assert rig.check("check-hardening") == Result(False, "no monthly run yet")
+    rig.out[health.CHECK_HARDENING] = (0, "")
+    assert rig.run("--hardening") == 0
+    rig.clock += health.HARDENING_AGE_S
+    assert rig.check("check-hardening") == Result(False, "every check passed")
+    rig.clock += 1  # the monthly timer stopped
+    assert rig.check("check-hardening") == Result(True, "the last monthly run is 33 days old")
+    result = rig.root / health.HARDENING_STATE
+    for doc in (
+        {"bad": "no", "value": "every check passed", "at": START},
+        {"bad": False, "value": f"x/{PLANTED}", "at": START},
+        {"bad": False, "value": "ok", "at": START, "more": 1},
+        {"bad": False, "value": "ok", "at": float("nan")},
+    ):
+        result.write_text(json.dumps(doc))
+        assert rig.check("check-hardening") == Result(True, "cannot read the monthly result")
+    result.chmod(0o666)
+    assert rig.check("check-hardening").value.endswith("is not a root:root 0644 file with one link")
+
+
+def test_a_monthly_result_that_cannot_be_written_exits_3(rig: Rig) -> None:
+    rig.out[health.CHECK_HARDENING] = (0, "")
+    (rig.root / "var/lib/skiw").chmod(0o777)
+    assert rig.run("--hardening") == 3
+    assert rig.journal == [f"/{health.HARDENING_STATE} not written (Failed)"]
 
 
 def test_only_read_only_tools_run_and_no_http_but_readyz(rig: Rig) -> None:
@@ -772,3 +973,98 @@ def test_a_certificate_that_does_not_verify_fails_both_checks(tls_server: Server
     for check in (health.readyz, health.certificate):
         assert health.judge(p, check) == Result(True, "cannot read (SSLCertVerificationError)")
     assert seen == []  # the request is never sent over an unverified connection
+
+
+# --- the Telegram channel, end to end against a local TLS fake standing in for the Bot API ----
+
+CHAT = "-1001234567890"
+OK = b'HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n{"ok":true}'
+UNAUTHORIZED = b'HTTP/1.1 401 Unauthorized\r\nContent-Length: 12\r\n\r\n{"ok":false}'
+
+
+def bot_api(
+    server: Server, monkeypatch: pytest.MonkeyPatch, rig: Rig, replies: list[bytes | None]
+) -> list[tuple[bytes, list[str]]]:
+    """api.telegram.org:443 reaches the fake (any other address is refused), which answers with
+    `replies[0]` (None: never). Each request is kept with the journal as it was then."""
+    real = socket.create_connection
+
+    def connect(address: Any, *args: Any, **kwargs: Any) -> socket.socket:
+        if tuple(address) != ("api.telegram.org", 443):
+            raise ConnectionRefusedError(f"not routed in tests: {address}")
+        return real(("127.0.0.1", server.port), *args, **kwargs)
+
+    monkeypatch.setattr(socket, "create_connection", connect)
+    seen: list[tuple[bytes, list[str]]] = []
+
+    def handle(tls: ssl.SSLSocket) -> None:
+        data = b""
+        while b"\r\n\r\n" not in data and (chunk := tls.recv(65536)):
+            data += chunk
+        head, _, body = data.partition(b"\r\n\r\n")
+        sizes = [x for x in head.split(b"\r\n") if x.lower().startswith(b"content-length:")]
+        while sizes and len(body) < int(sizes[0].split(b":")[1]) and (chunk := tls.recv(65536)):
+            body += chunk  # read the whole request: closing on unread data resets the connection
+        seen.append((data, list(rig.journal)))
+        if (reply := replies[0]) is None:
+            server.stop.wait(30)
+            return
+        tls.sendall(reply)
+
+    server.handler = handle
+    return seen
+
+
+def test_the_channel_is_journaled_first_and_the_token_reaches_no_output(
+    rig: Rig,
+    tls_server: Server,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.undo()  # the real alert.channel, credential and Telegram transport
+    token = rig.place_token()
+    rig.alerting("telegram", CHAT)
+    replies: list[bytes | None] = [OK]
+    seen = bot_api(tls_server, monkeypatch, rig, replies)
+    rig.containers[1]["RestartCount"] = 1
+    assert rig.run(context=tls_server.client) == 0
+    assert len(seen) == 2  # the restart, then the heartbeat
+    for (head, journal), check in zip(seen, ("containers", "heartbeat"), strict=True):
+        assert head.startswith(f"POST /bot{token}/sendMessage HTTP/1.1\r\n".encode())
+        assert journal[-1].startswith(f"{check} staging:")  # journaled before it was sent
+    rig.containers[1]["RestartCount"] = 2
+    replies[0] = UNAUTHORIZED  # a revoked token
+    assert rig.run(context=tls_server.client) == 3
+    assert rig.journal[-1] == "containers: not sent off the host (HTTPError 401)"
+    out = capfd.readouterr()
+    for text in (out.out, out.err, *rig.journal, (rig.root / health.STATE).read_text()):
+        assert token.partition(":")[2] not in text and "api.telegram.org" not in text
+
+
+def test_a_bot_api_that_never_answers_ends_the_run_within_the_bound_with_exit_3(
+    rig: Rig, tls_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.undo()
+    monkeypatch.setattr(alert, "SEND_S", 0.5)
+    rig.place_token()
+    rig.alerting("telegram", CHAT)
+    rig.containers[1]["RestartCount"] = 1
+    seen = bot_api(tls_server, monkeypatch, rig, [None])
+    start = time.monotonic()
+    assert rig.run(context=tls_server.client) == 3
+    assert time.monotonic() - start < 5 and len(seen) == 1  # the rest wait for the next run
+    assert rig.state()["owed"] == [["containers", "restarted: web 1x"]]
+    assert rig.journal[-1] == "heartbeat: not sent off the host (Undelivered)"  # Down
+
+
+@pytest.mark.parametrize("mode", [0o440, 0o600, 0o444])
+def test_an_unsafe_token_file_is_not_used_and_the_run_exits_3(
+    rig: Rig, tls_server: Server, monkeypatch: pytest.MonkeyPatch, mode: int
+) -> None:
+    monkeypatch.undo()
+    rig.place_token(mode)
+    rig.alerting("telegram", CHAT)
+    seen = bot_api(tls_server, monkeypatch, rig, [OK])
+    assert rig.run(context=tls_server.client) == 3 and seen == []
+    assert rig.journal[-1] == "heartbeat: not sent off the host (UnsafeCredential)"
+    assert rig.state()["heartbeat"] == ""  # due again next run

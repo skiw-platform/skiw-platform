@@ -13,7 +13,7 @@ import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
-from secrets import token_urlsafe
+from secrets import randbelow, token_urlsafe
 from string import Template
 
 import pytest
@@ -21,7 +21,7 @@ import pytest
 from skiw_host import apply, hardening
 from skiw_host.bootstrap_db import HBA, HBA_MODE, render_hba
 from skiw_host.bootstrap_secrets import DIR_MODE
-from skiw_host.secrets import INVENTORY, OWNER, STATUS_KEY, Kind
+from skiw_host.secrets import ALERT_CREDENTIAL, INVENTORY, OWNER, STATUS_KEY, Kind
 
 HOST = Path(__file__).resolve().parents[1]
 CI_ENV = HOST / "env" / "ci.env"
@@ -97,6 +97,8 @@ class Rig:
         self.values = []  # generated per run; must never be printed
         for secret in INVENTORY:
             if "staging" not in secret.environments:  # env/ci.env is a staging host
+                continue
+            if secret.name == ALERT_CREDENTIAL:  # env/ci.env has no alert channel
                 continue
             value = token_urlsafe(32)
             line = f"v1:{value}" if secret.kind is Kind.APP_KEY else value
@@ -797,4 +799,28 @@ def test_a_production_host_holds_the_status_key_searched_as_one_body(
     rig.out["docker inspect"] = (0, rig.inspect({"LEAK": f"{body}Q=="}))
     assert rig.run(capsys)[1]["container-env"] == "FAIL a secret value is in skiw-web-1 LEAK"
     rig.out["docker inspect"] = (0, rig.inspect({"LEAK": f"x{body}y"}))  # one body line alone
+    assert rig.run(capsys)[1]["container-env"] == "FAIL a secret value is in skiw-web-1 LEAK"
+
+
+def test_the_alert_token_is_held_if_and_only_if_the_channel_is_telegram(
+    rig: Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Amendment 2026-10-24, decision 13: both wrong states fail; held, it is searched for."""
+    token = f"{randbelow(9 * 10**9) + 10**9}:{token_urlsafe(27)}"  # made now, never printed
+    rig.values.append(token)
+    path = f"{hardening.SECRETS}/{ALERT_CREDENTIAL}"
+    rig.put(path, f"{token}\n", hardening.SECRET_MODE)  # placed, the channel still empty
+    assert rig.run(capsys)[1]["secret-store"] == (
+        f"FAIL {ALERT_CREDENTIAL} is present, but SKIW_ALERT_CHANNEL is not telegram"
+    )
+    (rig.root / path).unlink()
+    rig.put(apply.ENV, CI_ENV.read_text() + "SKIW_ALERT_CHANNEL=telegram\nSKIW_ALERT_TO=42\n")
+    assert rig.run(capsys)[1]["secret-store"] == f"FAIL {ALERT_CREDENTIAL} is missing"
+    rig.put(path, f"{token}\n", hardening.SECRET_MODE)
+    code, results = rig.run(capsys)
+    assert code == 0 and results["secret-store"] == results["container-env"] == "PASS"
+    rig.put(path, f"{token}\n", 0o440)
+    assert rig.run(capsys)[1]["secret-store"].endswith(f"/{ALERT_CREDENTIAL} has mode 0440")
+    rig.put(path, f"{token}\n", hardening.SECRET_MODE)
+    rig.out["docker inspect"] = (0, rig.inspect({"LEAK": token}))
     assert rig.run(capsys)[1]["container-env"] == "FAIL a secret value is in skiw-web-1 LEAK"

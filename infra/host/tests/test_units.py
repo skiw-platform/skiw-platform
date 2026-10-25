@@ -3,7 +3,8 @@
 Each unit is parsed; the services are oneshot, started only by their timers, hardened, and keep
 root only where it is needed. UNI-19 (no cron-by-HTTP): no unit, Compose service or image
 healthcheck triggers work over HTTP; the only HTTP the host side makes is skiw-health's read-only
-GET /readyz, and the image's own healthcheck reads /healthz inside its container.
+GET /readyz and its outgoing alert POST to the Telegram Bot API, and the image's own healthcheck
+reads /healthz inside its container.
 """
 
 import configparser
@@ -90,6 +91,23 @@ def test_the_five_minute_service_keeps_one_capability_and_writes_one_directory()
     assert timeout < 300  # ends before the next run is due
     tools = 4 * health.TOOL_S + health.PROBE_S  # docker ps, inspect, apt-get, journalctl, /readyz
     assert tools + 2 * alert.SEND_S < timeout  # and one failing send, with room to spare
+
+
+def test_the_five_minute_service_can_read_the_bot_token_and_reach_the_bot_api() -> None:
+    """M1j-2: the sandbox lets skiw-health read /etc/skiw/secrets/alert_credential (root, 0400)
+    and open an outgoing HTTPS connection; nothing in the unit or nftables blocks either."""
+    service = unit("skiw-health.service")["Service"]
+    assert "User" not in service and "DynamicUser" not in service  # root: owns the 0400 token
+    assert service["ProtectSystem"] == "strict"  # /etc stays readable, only not writable
+    for key in ("InaccessiblePaths", "TemporaryFileSystem", "BindPaths", "ReadOnlyPaths"):
+        assert key not in service, key  # nothing hides or replaces /etc/skiw/secrets
+    for key in ("PrivateNetwork", "IPAddressDeny", "IPAddressAllow", "SocketBindDeny"):
+        assert key not in service, key
+    assert {"AF_INET", "AF_INET6"} <= set(service["RestrictAddressFamilies"].split())
+    assert service["CapabilityBoundingSet"] == "CAP_DAC_READ_SEARCH"  # no CAP_NET_*: none needed
+    nft = (HOST / "nftables.conf").read_text()
+    assert "hook output" not in nft  # outgoing traffic is not filtered
+    assert "ct state established,related accept" in nft  # and its answers come back in
 
 
 def test_the_monthly_service_outlasts_check_hardening() -> None:

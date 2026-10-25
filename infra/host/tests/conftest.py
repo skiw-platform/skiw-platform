@@ -1,3 +1,4 @@
+import contextlib
 import os
 import shutil
 import socket
@@ -23,9 +24,9 @@ def docker_cli() -> str:
 
 @pytest.fixture(scope="session")
 def tls_files(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A self-signed certificate for skiw.test and localhost (ci.env's SKIW_HOSTNAME), made now by
-    openssl; its key never leaves this temporary directory. Skips locally without openssl, fails
-    in CI."""
+    """A self-signed certificate for skiw.test and localhost (ci.env's SKIW_HOSTNAME) and for
+    api.telegram.org (the alert tests route that name to the fake), made now by openssl; its key
+    never leaves this temporary directory. Skips locally without openssl, fails in CI."""
     openssl = shutil.which("openssl")
     if openssl is None:
         if os.environ.get("CI") == "true":
@@ -35,14 +36,15 @@ def tls_files(tmp_path_factory: pytest.TempPathFactory) -> Path:
     argv = [openssl, "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1"]
     argv += ["-nodes", "-keyout", str(directory / "key.pem"), "-out", str(directory / "cert.pem")]
     argv += ["-days", "30", "-subj", "/CN=skiw.test"]
-    argv += ["-addext", "subjectAltName=DNS:skiw.test,DNS:localhost"]
+    argv += ["-addext", "subjectAltName=DNS:skiw.test,DNS:localhost,DNS:api.telegram.org"]
     subprocess.run(argv, capture_output=True, check=True)
     return directory
 
 
 class TlsServer:
     """A TLS listener on 127.0.0.1 that hands each connection to `handler` in its own thread; it
-    stands in for Caddy (skiw-health's /readyz request). Never a real service."""
+    stands in for Caddy (skiw-health's /readyz request) or the Telegram Bot API. Never a real
+    service."""
 
     def __init__(self, files: Path) -> None:
         self.files = files
@@ -76,6 +78,8 @@ class TlsServer:
 
     def close(self) -> None:
         self.stop.set()
+        with contextlib.suppress(OSError):  # Linux keeps a closed listener alive while accept()
+            self.listener.shutdown(socket.SHUT_RDWR)  # waits; shutdown wakes it
         self.listener.close()
 
 

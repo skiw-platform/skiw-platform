@@ -2,24 +2,28 @@
 health-alerts.md).
 
 Run as root by skiw-health.timer every 5 minutes, and with --hardening by skiw-hardening.timer once
-a month (it runs check-hardening). Read-only on the host except its own state file under
-/var/lib/skiw. Every check is one entry in CHECKS and gives ok or bad with one value built here
-from numbers, service and check names; a tool that is missing, times out, exits non-zero or prints
-what cannot be parsed makes the check bad (fail closed). Tool output, database rows, application
-logs and secret values never reach a value: the journal check counts skiw-deploy's alert lines and
-reads no message. The only HTTP request is `GET /readyz` to Caddy on 127.0.0.1 (UNI-19: nothing
-here is triggered over HTTP; the timers are the only trigger).
+a month: that run only runs check-hardening and writes its result to hardening.state, and the
+5-minute run alerts that result like any check, so an undelivered alert is retried every 5 minutes,
+not next month. Read-only on the host except its own state file under /var/lib/skiw. Every check
+is one entry in CHECKS and gives ok or bad with one value built here from numbers, service and
+check names; a tool that is missing, times out, exits non-zero or prints what cannot be parsed
+makes the check bad (fail closed). Tool output, database rows, application logs and secret values
+never reach a value: the journal check counts skiw-deploy's alert lines and reads no message. The
+only HTTP requests are `GET /readyz` to Caddy on 127.0.0.1 and the alert channel's sendMessage
+(UNI-19: nothing here is triggered over HTTP; the timers are the only trigger).
 
 Bounded flapping: a check alerts once it has been bad for its grace time, then reminds every
 REMINDER_S while bad, and sends `recovered` once it has been ok for RECOVER_S; a check that flips
 between runs sends nothing new. Container restarts and skiw-deploy alert lines are events: sent on
-the run they are seen, kept as owed (at most OWED_MAX) until delivered. Every alert goes to the
-journal; off the host only through the alert channel (skiw_host.alert: off until G8, and no
-transport is built until M1j-2).
+the run they are seen, kept as owed (at most OWED_MAX) until delivered. Once a week, while a
+channel is configured, the `heartbeat` message (`N checks, M bad`) is due until delivered, so a
+channel that stopped working is noticed by its silence (amendment 2026-10-24, decision 12). Every
+alert goes to the journal; off the host only through the alert channel (skiw_host.alert; none while
+SKIW_ALERT_CHANNEL is empty).
 Exit 0 every check ok and every due message delivered; 1 a check is bad (its due messages
 delivered); 2 refused (not root, bad host env file or alert setting: nothing checked); 3 a due
 message was not delivered (no channel, or the channel failed) or the state file was not written.
-3 wins over 1.
+3 wins over 1. --hardening exits 0 passed, 1 failed, 3 its result not written.
 """
 
 import argparse
@@ -35,7 +39,7 @@ import syslog
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -67,6 +71,12 @@ TLS_DAYS = 14
 DUMP_AGE_H: float | None = None  # predeploy dumps only follow migrations; M6 sets the Q34 cadence
 DUMP_TMP_S = 3600  # a dump's temporary file older than this is a leftover
 UPDATES_S = 48 * 3600  # unattended-upgrades runs daily: pending this long means it is not working
+# apt-daily updates the lists once a day (timer 06:00 and 18:00, up to 12 h random delay), so a
+# normal gap is at most about 36 h: no successful update for 48 h means it is not working.
+LISTS_S = 48 * 3600
+# Touched by apt after an `apt-get update` with no failed source (APT::Update::Post-Invoke-Success,
+# Ubuntu's update-notifier-common) [A]: missing, the check fails closed.
+LISTS_STAMP = "var/lib/apt/periodic/update-success-stamp"
 GRACE_S = 240  # bad on two runs in a row (the timer: every 5 minutes)
 RECOVER_S = 240  # ok on two runs in a row
 REMINDER_S = 6 * 3600
@@ -74,6 +84,9 @@ OWED_MAX = 20
 TOOL_S = 30  # each tool call; the unit's TimeoutStartSec bounds the whole run
 PROBE_S = 10  # the whole /readyz request
 HARDENING_S = 600
+HARDENING_AGE_S = 33 * 86400  # the monthly timer: 31 days apart at most, plus its random hour
+HEARTBEAT_WEEKDAY = 0  # Monday (amendment decision 12)
+HEARTBEAT_HOUR = 0  # 00:00 UTC, 08:00 in Kuala Lumpur
 CHECK_HARDENING = "/usr/local/sbin/check-hardening"
 DISKS = ("", "var/lib/docker", "srv/skiw", "var/log")
 SERVICES = ("caddy", "web", "worker", "db", "clamav")  # compose.yml, no profile (a test keeps it)
@@ -87,7 +100,10 @@ DUMP_TEMP = re.compile(r"\.[0-9]{8}T[0-9]{6}Z\.dump\.age\.tmp")
 CURSOR = re.compile(r"[A-Za-z0-9=;_-]{1,512}")
 FAIL_LINE = re.compile(r"FAIL ([a-z][a-z-]{0,40}):")
 NODE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,62}")
-STATE_KEYS = {"tracks", "restarts", "cursor", "owed"}
+WEEK = re.compile(r"[0-9]{4}-W[0-9]{2}")
+RESULT = re.compile(r"[A-Za-z0-9 ,:()-]{1,200}")  # check_hardening's values
+STATE_KEYS = {"tracks", "restarts", "cursor", "owed", "heartbeat"}
+RESULT_KEYS = {"bad", "value", "at"}
 TRACK_KEYS = {"bad_since", "ok_since", "announced", "sent"}
 
 
@@ -112,6 +128,7 @@ class State:
     restarts: dict[str, int] = field(default_factory=dict)  # container id -> RestartCount
     cursor: str = ""  # journal cursor after the last skiw-deploy alert line counted
     owed: list[tuple[str, str]] = field(default_factory=list)  # events not yet delivered
+    heartbeat: str = ""  # the week (week()) of the last heartbeat delivered
 
 
 class Probe:
@@ -322,7 +339,13 @@ def dump(p: Probe) -> Result:
 
 
 def updates(p: Probe) -> Result:
-    """Security updates apt would install; no lock taken and no cache written (simulation)."""
+    """Security updates apt would install; no lock taken and no cache written (simulation). Lists
+    not updated for LISTS_S cannot show a new update, so they are bad themselves."""
+    stamp = (p.root / LISTS_STAMP).lstat()  # missing: fail closed
+    if not stat.S_ISREG(stamp.st_mode):
+        raise Bad("cannot read the package list stamp")
+    if (age := p.now() - stamp.st_mtime) > LISTS_S:
+        return Result(True, f"package lists not updated for {math.floor(age / 3600)} h")
     argv = ["apt-get", "--simulate", "--quiet", "--quiet", "-o", "Debug::NoLocking=true"]
     argv += ["-o", "Dir::Cache::pkgcache=", "-o", "Dir::Cache::srcpkgcache=", "dist-upgrade"]
     count = 0
@@ -369,6 +392,27 @@ def check_hardening(p: Probe) -> Result:
     return Result(True, "refused (exit 2)" if done.returncode == 2 else f"exit {done.returncode}")
 
 
+def hardening_result(p: Probe) -> Result:
+    """The monthly run's result in hardening.state (written by --hardening only); older than
+    HARDENING_AGE_S, the monthly timer stopped."""
+    data = read_state(p.root, HARDENING_STATE, p.owner)
+    if data is None:
+        return Result(False, "no monthly run yet")
+    doc = json.loads(data)
+    if (
+        not isinstance(doc, dict)
+        or set(doc) != RESULT_KEYS
+        or not isinstance(doc["bad"], bool)
+        or not isinstance(doc["value"], str)
+        or not RESULT.fullmatch(doc["value"])
+        or not number(doc["at"])
+    ):
+        raise Bad("cannot read the monthly result")
+    if (age := p.now() - doc["at"]) > HARDENING_AGE_S:
+        return Result(True, f"the last monthly run is {math.floor(age / 86400)} days old")
+    return Result(doc["bad"], doc["value"])
+
+
 Check = tuple[Callable[[Probe], Result], float, float]  # the check, grace, recover time
 CHECKS: dict[str, Check] = {
     "disk": (disk, 0, RECOVER_S),
@@ -382,8 +426,8 @@ CHECKS: dict[str, Check] = {
     "security-updates": (updates, UPDATES_S, RECOVER_S),
     "reboot": (reboot, 0, RECOVER_S),
     "deploy-alert": (deploy_alerts, 0, RECOVER_S),
+    "check-hardening": (hardening_result, 0, RECOVER_S),
 }
-HARDENING: dict[str, Check] = {"check-hardening": (check_hardening, 0, 0)}  # monthly
 
 
 def number(value: object, none: bool = False) -> bool:
@@ -415,9 +459,11 @@ def parse(data: bytes) -> State:
         for k, v in restarts.items()
     ):
         raise ValueError("restarts")
-    cursor, owed = doc["cursor"], doc["owed"]
+    cursor, owed, heartbeat = doc["cursor"], doc["owed"], doc["heartbeat"]
     if not isinstance(cursor, str) or (cursor and not CURSOR.fullmatch(cursor)):
         raise ValueError("cursor")
+    if not isinstance(heartbeat, str) or (heartbeat and not WEEK.fullmatch(heartbeat)):
+        raise ValueError("heartbeat")
     if not isinstance(owed, list) or len(owed) > OWED_MAX:
         raise ValueError("owed")
     pairs = []
@@ -429,7 +475,7 @@ def parse(data: bytes) -> State:
         if not alert.CHECK.fullmatch(item[0]):
             raise ValueError("owed check")
         pairs.append((item[0], item[1]))
-    return State(tracks, restarts, cursor, pairs)
+    return State(tracks, restarts, cursor, pairs, heartbeat)
 
 
 def read_state(root: Path, rel: str, owner: Owner) -> bytes | None:
@@ -490,6 +536,16 @@ class Down:
         raise alert.Undelivered
 
 
+def week(now: float) -> str:
+    """The heartbeat week of `now`: the ISO week of the time since the last HEARTBEAT_WEEKDAY,
+    HEARTBEAT_HOUR UTC (for Monday 00:00, the ISO week itself)."""
+    shifted = datetime.fromtimestamp(now, UTC) - timedelta(
+        days=HEARTBEAT_WEEKDAY, hours=HEARTBEAT_HOUR
+    )
+    year, number, _ = shifted.isocalendar()
+    return f"{year}-W{number:02d}"
+
+
 def judge(p: Probe, check: Callable[[Probe], Result]) -> Result:
     """A check that raises is bad (fail closed), shown by its own message or its type only."""
     try:
@@ -517,20 +573,27 @@ def evaluate(
 
     owed, state.owed = state.owed, []
     state.owed = [(c, v) for c, v in owed if not send(c, v)]
-    any_bad = False
+    bad = 0
     for name, (check, grace, recover) in checks.items():
         result = judge(p, check)
-        any_bad |= result.bad
+        bad += result.bad
         print(f"{'BAD' if result.bad else 'OK'} {name}: {result.value}")
         if result.event and not send(name, result.event):
             state.owed.append((name, result.event))
         track = state.tracks.setdefault(name, Track())
         step(track, result, now, grace, recover, partial(send, name))
+    # Not an owed message: due on every run of a week until delivered, so a week's undelivered
+    # heartbeat is replaced by the next week's, never sent twice. Only with a channel configured
+    # (owner decision 2026-10-25): with none there is nothing to prove alive.
+    has_channel = transport is not None
+    due = has_channel and (current := week(now)) != state.heartbeat
+    if due and send("heartbeat", f"{len(checks)} checks, {bad} bad"):
+        state.heartbeat = current
     state.owed = state.owed[-OWED_MAX:]
     state.tracks = {n: t for n, t in state.tracks.items() if n in checks}
     state.restarts = state.restarts if p.restarts is None else p.restarts
     state.cursor = state.cursor if p.cursor is None else p.cursor
-    return any_bad, not undelivered
+    return bad > 0, not undelivered
 
 
 def to_alert(message: str) -> None:
@@ -550,6 +613,7 @@ def main(
     chown: Chown = os.chown,
     journal: Journal = to_alert,
     probe: Callable[[Probe], None] = lambda p: None,  # tests: replace the probe's wrappers
+    context: alert.Context = ssl.create_default_context,
 ) -> int:
     parser = argparse.ArgumentParser(prog="skiw-health", description=__doc__)
     parser.add_argument("--env-file", type=Path, default=Path("/") / apply.ENV)
@@ -573,7 +637,7 @@ def main(
         node = os.uname().nodename
         host = f"{environment}:{node if NODE.fullmatch(node) else 'unknown'}"
         deploy = Deploy(root, run_command, owner, chown)
-        transport = alert.channel(values)
+        transport = alert.channel(values, partial(alert.credential, root, owner), context)
     except (Refused, Bad, OSError, UnicodeError) as exc:
         text = f"{exc.strerror} {exc.filename}" if isinstance(exc, OSError) else str(exc)
         journal(f"refused, nothing checked: {text}")
@@ -581,25 +645,48 @@ def main(
         return 2
     if args.test:
         return 0 if alert.deliver(Alert("alert-test", host, "a test"), transport, journal) else 3
-    rel = HARDENING_STATE if args.hardening else STATE
+    if args.hardening:
+        return monthly(deploy, root, hostname, owner, timed, journal, probe)
     state, broken = State(), False
     try:
-        if (data := read_state(root, rel, owner)) is not None:
+        if (data := read_state(root, STATE, owner)) is not None:
             state = parse(data)
     except Exception:  # unsafe or unreadable: started fresh, rewritten below, reported
         state, broken = State(), True
     p = Probe(root, hostname, owner, state)
     p.timed = timed
     probe(p)
-    any_bad, delivered = evaluate(
-        p, HARDENING if args.hardening else CHECKS, host, transport, journal
-    )
+    any_bad, delivered = evaluate(p, CHECKS, host, transport, journal)
     if broken:
-        message = Alert("health-state", host, f"/{rel} was unreadable or unsafe; started fresh")
+        message = Alert("health-state", host, f"/{STATE} was unreadable or unsafe; started fresh")
         delivered &= alert.deliver(message, transport, journal)
     try:
-        write_state(deploy, encode(state), rel)
+        write_state(deploy, encode(state), STATE)
     except (Failed, OSError) as exc:
-        journal(f"/{rel} not written ({type(exc).__name__})")
+        journal(f"/{STATE} not written ({type(exc).__name__})")
         delivered = False
     return 3 if not delivered else 1 if any_bad else 0
+
+
+def monthly(
+    deploy: Deploy,
+    root: Path,
+    hostname: str,
+    owner: Owner,
+    timed: TimedRunner,
+    journal: Journal,
+    probe: Callable[[Probe], None],
+) -> int:
+    """--hardening: check-hardening once, its result written for the 5-minute run to alert."""
+    p = Probe(root, hostname, owner, State())
+    p.timed = timed
+    probe(p)
+    result = judge(p, check_hardening)
+    print(f"{'BAD' if result.bad else 'OK'} check-hardening: {result.value}")
+    doc = {"bad": result.bad, "value": result.value[: alert.VALUE_MAX], "at": p.now()}
+    try:
+        write_state(deploy, json.dumps(doc, sort_keys=True).encode("ascii"), HARDENING_STATE)
+    except (Failed, OSError) as exc:
+        journal(f"/{HARDENING_STATE} not written ({type(exc).__name__})")
+        return 3
+    return 1 if result.bad else 0

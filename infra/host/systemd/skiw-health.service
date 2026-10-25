@@ -1,8 +1,9 @@
 # Health checks every 5 minutes (spec §8.4 H7; plan §3 M1j; runbook health-alerts.md).
 # Started only by skiw-health.timer: no socket, path or HTTP trigger (UNI-19).
 # Root, because it reads the Docker socket, the 0700 dump directory of uid 10003 (hence
-# CAP_DAC_READ_SEARCH, the only capability kept) and the full journal, and writes its root-owned
-# state file; everything else is read-only to it.
+# CAP_DAC_READ_SEARCH, the only capability kept), the full journal and the root-only 0400 bot token
+# in /etc/skiw/secrets, and writes its root-owned state file; everything else is read-only to it.
+# AF_INET and AF_INET6 stay: the alert channel is an HTTPS POST to api.telegram.org (M1j-2).
 [Unit]
 Description=SKIW health checks and alerts
 After=docker.service network-online.target
