@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 65
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: 9e86194db2be35b27fcb03262e47bc232490fba4
+review-file: reviews/PR-65.md
+review-file-hash: 1d2922f31f7e01005419b79bad69b93403b7bf31
+review-log-branch-commit: e8f94408a4c563c778aaa370d63a7fcfe78fc119
+verdict: Approved (round 1)
+deferred-conditions: none. Optional: three P3 items (runbook chat-id snippet and proxy/stranger chats; apt stamp file assumption; M1 plan still shows G8 open).
+ci: checks, host, image, security all success on the reviewed head; publish and deploy-staging skipped on a pull request
+note: M1j-2 Telegram alert transport, weekly heartbeat (none without a channel), alert_credential and secret-store rule, monthly check-hardening retry through the 5-minute run, stale apt lists, /healthz body test, runbook. PR body still names head 2fb17ab (update pending; code and CI unaffected).
+written-at: 2026-10-25T07:13:43Z
+pr-state-at-write: OPEN, unmerged
