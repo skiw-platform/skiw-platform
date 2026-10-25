@@ -1,5 +1,68 @@
 # Review — 2026-10-25-hostinger-vps-vendor
 
+## Round 2 — 2026-10-25 · scope: slice (vendor amendment v1.1)
+
+- **Spec review:** `docs/specs/2026-10-25-hostinger-vps-vendor.md` · version 1.1 · hash
+  `b6c1d4263c2e3fe98a57ed700656fd499c74def2` (working file, untracked in the main checkout).
+- **Amends:** v1.19, hash `75ac19f61466445c35e4ff9341a0d0984a55249f` (unchanged). `main` =
+  `origin/main` = `550b622`.
+- **Mode:** read only; no file written except this one.
+- **Model used:** Claude Opus 5.5. **Switch model next step?** No.
+
+**Verdict:** Revision required
+
+One P2 is left, and it is a one-line fix: the S1 test still fails on two lines that S1 itself asks
+for. Everything else from Round 1 is resolved.
+
+### Round 1 resolution audit (re-read in v1.1)
+| Round 1 finding | Status | Evidence in v1.1 |
+|---|---|---|
+| P2 "Kuala Lumpur" as [V] and as a purchase gate | resolved | Decision 2: [V] for "Malaysia" only, the city [A] from the blog; §5, S3 and §7 say "a Malaysian location"; item 1 asks for country, city and site in writing |
+| P2 automatic weekly backups | resolved | Decision 9: off at purchase if allowed, recorded; else blocking without a written Malaysian location, retention and deletion; item 3 asks "on by default … can they be turned off"; new §7 row; §5 and S3 |
+| P2 plan rule and CPU | resolved | Decision 3: the facts with source and date; RAM rule "sum without `migrate` ≤ RAM − 1 GiB". I re-computed: production 6656 MiB ≤ 7168 (passes); staging 3328 MiB > 3072 (fails by 256). CPU halving stated; G-LOAD is the CPU test; KVM 4 the fallback; Q43 has the facts |
+| P2 change list and §8.2 values | resolved | Decision 10 adds T24, H2, H6 (both lines), H1, the control-table heading; gives the new §8.2 text. I re-computed: (8.79 + 6.49) × 4.10 = RM 62.65 ≈ 63; (14.99 + 11.99) × 4.10 = RM 110.62 ≈ 111; RM 4.10 is the spec's rate (line 628). A catch-all adds any missed iCore line (for example the §8.2 intro, lines 626–627) |
+| P2 S1 test cannot pass | **partly** | Allowed hits now list the changelog v1.14–v1.19, answered-Q history, the paper, this document, DECISIONS before 2026-10-25 and PROJECT.md until S2. Two required lines are still missing (below) |
+| P3 prices and term | resolved | Decision 4 and Q44: paid upfront, ≈ US$211 and US$156 (I re-computed 210.96 and 155.76) |
+| P3 Debian line | resolved | Decision 5: July 2026, Debian news of 2026-07-12, LTS to 2028-06-30 |
+| P3 UNI-11 two kinds of data | resolved | Decision 11; S1 names it |
+
+### Findings
+
+No P0 or P1.
+
+### [P2] The S1 test still fails on the v1.20 changelog entry and the new DECISIONS entry
+- Category: untestable milestone
+- Rule: reviewer §4 "each milestone has a testable done when"
+- Evidence: S1 done when allows "the main spec's changelog entries v1.14 to v1.19" and "`docs/DECISIONS.md`
+  entries dated before 2026-10-25", then "Any other hit fails the PR". But decision 10 requires a
+  v1.20 changelog entry (it will say that Hostinger replaces iCore), and S1 requires the DECISIONS
+  entry titled "2026-10-25 — Hostinger replaces iCore". Both hit `git grep -i icore`.
+- Failure scenario: the S1 PR fails its own test. Or the builder drops "iCore" from the new entries,
+  and the record no longer says what was replaced.
+- Required correction: allow "changelog entries v1.14 to v1.20" and "DECISIONS entries dated
+  2026-10-25 or before" (or name the new entry), in S1 and in the §7 "stale iCore line" row.
+- Owner: builder. Verification: re-read S1 and §7.
+- Disposition: before merge (before approval). Status: open.
+
+### [P3] Decision 3 asks for an env change that §2 rules out
+- Evidence: §2 "No change to … any … env file". Decision 3: "the builder lowers the staging caps in
+  `infra/host/env/staging.env` by at least 256 MiB (an env change, in the M1 PRs)". It does not say
+  which caps.
+- Suggested correction: in §2, except this conditional change, made in its own PR with the Compose
+  config tests. Say to keep `SKIW_MEM_CLAMAV` (1280m), because ClamAV needs that memory to load its
+  signatures [A]; take the 256 MiB from `web` or `db`.
+
+### [P3] The deploy peak is above the RAM rule
+- Evidence: decision 3 leaves `migrate` out of the sum, because it is "a one-off run at deploy". D16
+  runs `migrate` before the switch, while the old `web` and `worker` still run. During a deploy the
+  production caps sum to 8192 MiB, above the 7168 MiB of the rule.
+- Effect: small. These numbers are caps, not memory in use. G-LOAD does not run during a deploy.
+- Suggested correction: one sentence saying that the deploy peak is allowed because the numbers are
+  caps, and that M1k measures the real peak during one staging and one production deploy.
+
+### Required before approval
+- The P2 item.
+
 ## Round 1 — 2026-10-25 · scope: slice (vendor amendment v1.0)
 
 - **Spec review:** `docs/specs/2026-10-25-hostinger-vps-vendor.md` · version 1.0 · hash
