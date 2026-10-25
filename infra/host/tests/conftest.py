@@ -77,6 +77,10 @@ class TlsServer:
 
     def close(self) -> None:
         self.stop.set()
+        try:  # Linux keeps a closed listener alive while accept() waits; shutdown wakes it
+            self.listener.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         self.listener.close()
 
 
