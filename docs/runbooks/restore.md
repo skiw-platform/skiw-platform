@@ -1,6 +1,6 @@
 # Runbook — restore from backup
 
-The pre-migration dump restore is in place (M1g; iCore VPS, spec §8.4 H3); full backups and the restore drill arrive in M6.
+The pre-migration dump restore is in place (M1g; Hostinger VPS, spec §8.4 H3); full backups and the restore drill arrive in M6.
 
 ## What is backed up
 ## Restore the database

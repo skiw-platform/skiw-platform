@@ -1,5 +1,7 @@
 # SKIW Platform — hosting options (decision paper)
 
+> **Note (2026-10-25):** the vendor chosen in this paper (iCore, option B4) was replaced by Hostinger on 2026-10-25 (owner decision); see `docs/specs/2026-10-25-hostinger-vps-vendor.md`. The rest of this paper is unchanged and kept as the record.
+
 - Date: 2026-10-11 · Author: Builder (deep tier) · Status: draft
 - Version: 1.6 · This paper changes no spec text, so no spec hash moves. The review pins this paper's own
   git hash (v1.0 was `40ab593a`, v1.1 was `c80a1899`, v1.2 was `667150a6`, v1.3 was `9670b835`,

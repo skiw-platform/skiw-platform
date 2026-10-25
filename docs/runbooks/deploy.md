@@ -1,6 +1,6 @@
 # Runbook — deploy
 
-iCore VPS, spec §8.4 H3. Host side for staging and production (M1g); CI publish, the staging deploy
+Hostinger VPS, spec §8.4 H3. Host side for staging and production (M1g); CI publish, the staging deploy
 job and the owner's `scripts/deploy-prod` (M1h); real hosts and the measured outage in M1k. Nothing
 deploys before then: the staging deploy job is off until the owner turns it on (below).
 

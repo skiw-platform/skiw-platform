@@ -1,6 +1,6 @@
 # Runbook — rollback
 
-iCore VPS, spec §8.4 H3 steps 7 and 10.
+Hostinger VPS, spec §8.4 H3 steps 7 and 10.
 
 ## Automatic switch-back (M1g-1)
 A deploy whose `/readyz` or worker check fails switches `web` and `worker` back to the digest that
