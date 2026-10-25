@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 63
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: e9210227afab5477d3dd1e0e6e0088b2e012ac47
+review-file: reviews/PR-63.md
+review-file-hash: badc24282e3ca6e7f58fc1cfa5f9a4ec9e6234c1
+review-log-branch-commit: 16e4c6b4afb23a4f818ee57dd364bf17199006a7
+verdict: Approved (round 1)
+deferred-conditions: none. Optional: P3 the M1 plan still shows G8 open with email as the default.
+ci: checks, host, image, security all success on the reviewed head; publish and deploy-staging skipped on a pull request
+note: S1 docs PR for the alert channel amendment: spec v1.19 text changes, amendment spec v1.2, DECISIONS UNI-11/D19 record (Telegram bot chat, UptimeRobot, weekly heartbeat). Changes the main spec hash; owner runs review spec and setup after the merge.
+written-at: 2026-10-25T03:19:51Z
+pr-state-at-write: OPEN, unmerged
