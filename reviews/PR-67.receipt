@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 67
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: 1c357d1be38c9bcb03a8e7bd5bb71dcf53daaca7
+review-file: reviews/PR-67.md
+review-file-hash: 93cb711d588887d6232cefa77106acb19cdb56c4
+review-log-branch-commit: 9437f95866f34b07bcb9052448ef64c2db62a38f
+verdict: Approved (round 1)
+deferred-conditions: none.
+ci: checks, host, image, security all success on the reviewed head; publish and deploy-staging skipped on a pull request
+note: setup reconcile of agents/PROJECT.md with main spec v1.20 (hash 92841ba5, Round 23 Approved): spec hash, Hostinger wording, residency rule, locked switch, Other standards.
+written-at: 2026-10-26T07:24:55Z
+pr-state-at-write: OPEN, unmerged
