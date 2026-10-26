@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 68
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: 60fb2489695c0b27b72aa83a214d92514713c120
+review-file: reviews/PR-68.md
+review-file-hash: 20363b086a16add132ed40e894f34e931e4ccbc0
+review-log-branch-commit: 3fca2bfb80e828e1e96ffdbee2e06a364384cd41
+verdict: Approved with conditions (round 1)
+deferred-conditions: P2 the "staging lapses" runbook steps leave DNS, ghcr_read_token, alert_credential, STAGING_DEPLOY_KEY and the UptimeRobot monitor live; deferred to a docs PR merged by 2026-11-20 and in any case before staging is first allowed to lapse. P3 (owner): read the DECISIONS 2026-10-26 entry (the owner's words) before merging.
+ci: checks, host, image, security all success on the reviewed head; publish and deploy-staging skipped on a pull request
+note: staging caps for Hostinger KVM 1 (WEB 512m, DB 640m, sum 3072 MiB without migrate), RAM-rule test, Q43 record in DECISIONS, plan G3, staging rebuild checklist in host-rebuild.md.
+written-at: 2026-10-26T10:03:39Z
+pr-state-at-write: OPEN, unmerged
