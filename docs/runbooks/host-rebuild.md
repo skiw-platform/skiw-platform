@@ -290,3 +290,33 @@ sudo env SKIW_IMAGE="$image" bootstrap-db apply --env-file /etc/skiw/host.env \
 ### Not verified yet
 On a real VPS (M1k): the owner's recipients, the off-host copy of the bundle, a restore on a fresh
 host, and `check-hardening` of owners and modes on both hosts (M1k).
+
+## Staging on a monthly term (rebuild checklist)
+
+Staging is a Hostinger KVM 1 on a monthly term (owner 2026-10-26, DECISIONS of that date); it may
+lapse. Staging must exist and pass before each production deploy (D15), so while it is lapsed no
+production deploy runs.
+
+**When staging lapses**, turn the staging deploy off:
+`gh variable delete SKIW_STAGING_DEPLOY --repo skiw-platform/skiw-platform`.
+
+**To bring it back**, in this order:
+1. **Buy** a KVM 1 in a Malaysian location, Ubuntu 24.04 LTS, automatic backups and snapshots off
+   if Hostinger allows it (setting recorded, G-VENDOR item 3). Confirm the Malaysian location in
+   writing (G-VENDOR item 1) before any real data.
+2. **Build the host** with this runbook from the top: `sudo infra/host/apply --env-file
+   infra/host/env/staging.env`, `check-hardening`, then "Secrets" (`bootstrap-secrets`, with
+   staging's own escrow recipient), `ghcr_read_token` and "Database roles" (`bootstrap-db`). Staging
+   needs `SKIW_SSH_POLICY=fail2ban` to take CI deploys (deploy.md "Turn on the staging deploy",
+   step 1).
+3. **Address and host key**, in one PR: the new `SKIW_STAGING_SSH` and `SKIW_STAGING_HOST_KEY` in
+   `infra/host/env/staging.env` **and** `infra/host/env/production.env` (a test fails if they
+   differ; deploy.md step 3).
+4. **Keys** (names only, never values): a new staging deploy key and the secret
+   `STAGING_DEPLOY_KEY` (deploy.md step 2), and the production status key's line in staging's
+   `authorized_keys` ("Making `staging_status_key`" above, the staging part).
+5. **Alerts:** a new Telegram bot token for this host (health-alerts.md "Turning on the alert
+   channel") and the UptimeRobot monitor (health-alerts.md "The uptime ping (UptimeRobot)").
+6. **Turn the staging deploy on:** `gh variable set SKIW_STAGING_DEPLOY --body enabled --repo
+   skiw-platform/skiw-platform` (deploy.md step 4), and check that the next staging deploy passes
+   before any production deploy.

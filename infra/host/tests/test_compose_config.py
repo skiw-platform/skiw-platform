@@ -334,6 +334,39 @@ def test_host_env_files_refuse_to_render_until_complete(name: str) -> None:
     assert [problem for check in CHECKS for problem in check(filled)] == []
 
 
+# RAM rule (amendment 2026-10-25 decision 3): the caps without the one-off `migrate` fit the plan's
+# RAM minus 1 GiB for the host. Plans: production Hostinger KVM 2, staging KVM 1 (owner 2026-10-26).
+PLAN_MIB = {"production.env": 8192, "staging.env": 4096}
+HOST_MIB = 1024
+CLAMAV_MIB = 1280  # ClamAV needs it to load its signatures [A]
+MEMORY = re.compile(r"([1-9][0-9]*)([mg])")
+
+
+def mebibytes(value: str) -> int:
+    match = MEMORY.fullmatch(value)
+    if match is None:
+        raise ValueError(f"not a memory cap in m or g: {value!r}")
+    return int(match[1]) * (1024 if match[2] == "g" else 1)
+
+
+def caps(name: str) -> dict[str, int]:
+    return {k: mebibytes(v) for k, v in declared(name).items() if k.startswith("SKIW_MEM_")}
+
+
+@pytest.mark.parametrize("name", sorted(PLAN_MIB))
+def test_memory_caps_fit_the_plan(name: str) -> None:
+    found = caps(name)
+    total = sum(v for k, v in found.items() if k != "SKIW_MEM_MIGRATE")
+    assert total <= PLAN_MIB[name] - HOST_MIB, f"{name}: {total} MiB of caps without migrate"
+    assert found["SKIW_MEM_CLAMAV"] >= CLAMAV_MIB
+
+
+@pytest.mark.parametrize("value", ["512", "512k", "512M", "1.5g", "0m", "", " 512m"])
+def test_memory_cap_parse_refuses_other_forms(value: str) -> None:
+    with pytest.raises(ValueError):
+        mebibytes(value)
+
+
 def test_skiw_health_watches_every_service_that_always_runs(config: Config) -> None:
     always = sorted(n for n, s in services(config) if not s.get("profiles"))
     assert always == sorted(health.SERVICES) and config["name"] == health.PROJECT  # plan §3 M1j
