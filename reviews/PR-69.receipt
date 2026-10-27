@@ -1,0 +1,13 @@
+approval-receipt: 1
+pr: 69
+repo: skiw-platform/skiw-platform
+reviewed-head-sha: d3d0cdd2cc0f7cfe29b2042ffb85f544dd0cb9d1
+review-file: reviews/PR-69.md
+review-file-hash: 9e566e8e3ea834822424e87ab19978652a864790
+review-log-branch-commit: c8d233a44f5d1f5bb51bf37534795de116c5cba9
+verdict: Approved (round 1)
+deferred-conditions: none
+ci: checks, host, image, security all success on the reviewed head; publish and deploy-staging skipped on a pull request
+note: staging lapse steps (seven) and bring-back DNS step in docs/runbooks/host-rebuild.md; closes the PR 68 deferred P2.
+written-at: 2026-10-27T12:37:38Z
+pr-state-at-write: OPEN, unmerged
