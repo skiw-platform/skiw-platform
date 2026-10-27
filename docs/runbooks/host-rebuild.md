@@ -297,26 +297,45 @@ Staging is a Hostinger KVM 1 on a monthly term (owner 2026-10-26, DECISIONS of t
 lapse. Staging must exist and pass before each production deploy (D15), so while it is lapsed no
 production deploy runs.
 
-**When staging lapses**, turn the staging deploy off:
-`gh variable delete SKIW_STAGING_DEPLOY --repo skiw-platform/skiw-platform`.
+**When staging lapses**, do every step below **before the term ends**. A lapsed server's address can
+go to another customer, and the old disk may not be wiped (G-VENDOR item 5), so nothing that points
+at it or opens it may stay live.
+1. **Turn the staging deploy off:**
+   `gh variable delete SKIW_STAGING_DEPLOY --repo skiw-platform/skiw-platform`.
+2. **DNS:** delete the staging site name (`SKIW_HOSTNAME` in `infra/host/env/staging.env`) and the
+   staging SSH name (the host part of `SKIW_STAGING_SSH`), or point both away from the old IPv4.
+   Otherwise whoever gets the address can obtain a certificate for the name and serve pages under the
+   project's domain.
+3. **GHCR token:** revoke staging's `ghcr_read_token` at GitHub (Settings, Developer settings,
+   Personal access tokens). It reads every package its issuer can read (plan G10), so if production
+   uses the same token, rotate production's too ("Placing `ghcr_read_token`" above).
+4. **Telegram:** revoke staging's bot token with BotFather (`/revoke`). Each environment has its
+   own bot.
+5. **GitHub secret:** `gh secret delete STAGING_DEPLOY_KEY --repo skiw-platform/skiw-platform`.
+6. **UptimeRobot:** pause staging's monitor, or it alerts every 5 minutes until someone does.
+7. **Destroy the VPS** in the Hostinger panel (do not only let it expire) and note the date in
+   `docs/DECISIONS.md`.
 
 **To bring it back**, in this order:
 1. **Buy** a KVM 1 in a Malaysian location, Ubuntu 24.04 LTS, automatic backups and snapshots off
    if Hostinger allows it (setting recorded, G-VENDOR item 3). Confirm the Malaysian location in
    writing (G-VENDOR item 1) before any real data.
-2. **Build the host** with this runbook from the top: `sudo infra/host/apply --env-file
+2. **DNS:** point the staging site name and the staging SSH name at the new IPv4 **before** step 3,
+   so the certificate request can succeed.
+3. **Build the host** with this runbook from the top: `sudo infra/host/apply --env-file
    infra/host/env/staging.env`, `check-hardening`, then "Secrets" (`bootstrap-secrets`, with
    staging's own escrow recipient), `ghcr_read_token` and "Database roles" (`bootstrap-db`). Staging
    needs `SKIW_SSH_POLICY=fail2ban` to take CI deploys (deploy.md "Turn on the staging deploy",
    step 1).
-3. **Address and host key**, in one PR: the new `SKIW_STAGING_SSH` and `SKIW_STAGING_HOST_KEY` in
+4. **Address and host key**, in one PR: the new `SKIW_STAGING_SSH` and `SKIW_STAGING_HOST_KEY` in
    `infra/host/env/staging.env` **and** `infra/host/env/production.env` (a test fails if they
    differ; deploy.md step 3).
-4. **Keys** (names only, never values): a new staging deploy key and the secret
+5. **Keys** (names only, never values): a new staging deploy key and the secret
    `STAGING_DEPLOY_KEY` (deploy.md step 2), and the production status key's line in staging's
    `authorized_keys` ("Making `staging_status_key`" above, the staging part).
-5. **Alerts:** a new Telegram bot token for this host (health-alerts.md "Turning on the alert
-   channel") and the UptimeRobot monitor (health-alerts.md "The uptime ping (UptimeRobot)").
-6. **Turn the staging deploy on:** `gh variable set SKIW_STAGING_DEPLOY --body enabled --repo
+6. **Alerts:** a new Telegram bot token for this host (health-alerts.md "Turning on the alert
+   channel"), and the UptimeRobot monitor: un-pause it and set its address, or add it
+   (health-alerts.md "The uptime ping (UptimeRobot)").
+7. **Turn the staging deploy on:** `gh variable set SKIW_STAGING_DEPLOY --body enabled --repo
    skiw-platform/skiw-platform` (deploy.md step 4), and check that the next staging deploy passes
    before any production deploy.
