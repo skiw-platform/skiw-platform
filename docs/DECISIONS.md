@@ -380,3 +380,13 @@
 - **Still OPEN:** Q44 for production (the term); G-VENDOR has **not been run**; no VPS is bought; no real data is on any host; the real memory peak is measured in M1k.
 - **Exception to a rule?** no (the amendment §2 conditional exception, not an exception to a rule)
 - **Decided by:** owner (plans, staging term, rejected options); builder (which caps to lower, within amendment decision 3)
+
+## 2026-10-27 — M2 plan: owner answers Q1–Q4 and three plan additions
+- **Decision:** (1) **Owner's words, 2026-10-27:** "1a 2a 3a 4a". Q1 (a): HSTS `max-age=31536000` only, equal on Caddy and Django; T6's "+ preload" is fixed at the next spec change. Q2 (a): interim session lifetime from host config (`SKIW_SESSION_ABSOLUTE_H=12`, `SKIW_SESSION_IDLE_MIN=30`), moved into `setting` in M5. Q3 (a): the CI Compose proof counts for "session survives a redeploy and a restart"; a staging repeat goes on the M1k evidence list. Q4 (a): HttpOnly `__Host-csrftoken` cookie, token in the `no-store` shell. (2) **Owner additions:** the CSRF gate is a behaviour test on cookie-auth mutating routes, with a reviewed list for token-auth routes, and django-ninja's CSRF handling is read before M2d; M3 returns the new CSRF token in the login response because login rotates it; `expire_date` is bound into the M2c HMAC (plan Risk 7).
+- **Why:** Owner decision. A scan for `csrf_exempt` misses a route that skips CSRF another way; a behaviour test does not. Binding `expire_date` closes a row edit that extends a session.
+- **Alternatives rejected (owner):** HSTS with preload (hard to undo, hostnames not fixed); no lifetime policy in M2; waiting for staging before M2 is done; `CSRF_USE_SESSIONS` (writes a row for every anonymous page load).
+- **Scope / affects:** `docs/plans/2026-10-27-m2-headers-sessions-csrf.md`, this log. No code.
+- **Versions:** none new.
+- **Still OPEN:** the spec text for the MAC input and for HSTS preload (next spec change); django-ninja not yet read.
+- **Exception to a rule?** no
+- **Decided by:** owner (Q1–Q4, additions); builder (wording, MAC layout)
