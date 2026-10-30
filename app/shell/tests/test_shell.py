@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -6,18 +5,6 @@ from django.test import Client
 from pytest_django import Settings
 
 from shell.views import ASSET_CACHE_SECONDS
-
-
-@pytest.fixture
-def dist(tmp_path: Path, settings: Settings) -> Path:
-    (tmp_path / ".vite").mkdir()
-    (tmp_path / "assets").mkdir()
-    (tmp_path / "assets" / "index-abc.js").write_text("console.log('shell')")
-    (tmp_path / "assets" / "index-abc.css").write_text("body{}")
-    manifest = {"index.html": {"file": "assets/index-abc.js", "css": ["assets/index-abc.css"]}}
-    (tmp_path / ".vite" / "manifest.json").write_text(json.dumps(manifest))
-    settings.WEB_DIST_DIR = tmp_path
-    return tmp_path
 
 
 def test_shell_links_the_built_assets_from_the_manifest(dist: Path) -> None:
@@ -31,7 +18,7 @@ def test_shell_links_the_built_assets_from_the_manifest(dist: Path) -> None:
     assert '<nav class="sidebar" aria-label="Primary">' in body
     assert 'src="/assets/index-abc.js"' in body
     assert 'href="/assets/index-abc.css"' in body
-    assert 'rel="icon"' in body
+    assert '<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">' in body
 
 
 def test_shell_reports_a_missing_build_clearly(tmp_path: Path, settings: Settings) -> None:
