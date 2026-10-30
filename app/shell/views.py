@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from django.views.static import serve
 from shell import csp
 
 ENTRY = "index.html"
+ICON = re.compile(r"assets/icon-[\w-]{8}\.svg")
 ASSET_CACHE_SECONDS = 31_536_000  # one year, hashed immutable assets
 
 
@@ -34,9 +36,17 @@ def shell(request: HttpRequest) -> HttpResponse:
             status=503,
             content_type="text/plain",
         )
+    icon = next((name for name in entry.get("assets", []) if ICON.fullmatch(name)), None)
+    if icon is None:
+        return HttpResponse(
+            "Web build has no hashed icon. Run `make web-build`.",
+            status=503,
+            content_type="text/plain",
+        )
     context = {
         "script": f"/{entry['file']}",
         "styles": [f"/{name}" for name in entry.get("css", [])],
+        "icon": f"/{icon}",
         "nonce": csp.nonce(request),
     }
     return render(request, "shell/shell.html", context)
