@@ -9,6 +9,8 @@ APP_DIR = Path(__file__).resolve().parent.parent
 GOOD = {
     "DJANGO_SECRET_KEY": "test-only-not-a-secret",
     "DATABASE_URL": "postgres://u:p@localhost:5432/db",
+    "SKIW_SESSION_ABSOLUTE_H": "12",
+    "SKIW_SESSION_IDLE_MIN": "30",
 }
 
 
@@ -27,7 +29,7 @@ def test_settings_import_with_required_values() -> None:
     assert import_settings(GOOD).returncode == 0
 
 
-@pytest.mark.parametrize("missing", ["DJANGO_SECRET_KEY", "DATABASE_URL"])
+@pytest.mark.parametrize("missing", list(GOOD))
 def test_settings_fail_closed_when_required_value_missing(missing: str) -> None:
     result = import_settings({k: v for k, v in GOOD.items() if k != missing})
     assert result.returncode != 0

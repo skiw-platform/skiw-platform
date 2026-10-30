@@ -29,6 +29,8 @@ services:
       DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
       DATABASE_URL: postgres://skiw_app:${SKIW_APP_PASSWORD:?set in .env}@db:5432/${POSTGRES_DB:?set in .env}
+      SKIW_SESSION_ABSOLUTE_H: ${SKIW_SESSION_ABSOLUTE_H:?set in .env}
+      SKIW_SESSION_IDLE_MIN: ${SKIW_SESSION_IDLE_MIN:?set in .env}
     volumes:
       - ./app:/srv/app:ro
       - ./web/dist:/srv/web/dist:ro
@@ -44,6 +46,8 @@ services:
     environment:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?set in .env}
       DATABASE_URL: postgres://skiw_app:${SKIW_APP_PASSWORD:?set in .env}@db:5432/${POSTGRES_DB:?set in .env}
+      SKIW_SESSION_ABSOLUTE_H: ${SKIW_SESSION_ABSOLUTE_H:?set in .env}
+      SKIW_SESSION_IDLE_MIN: ${SKIW_SESSION_IDLE_MIN:?set in .env}
     # The image's HEALTHCHECK probes the web port, which the worker does not serve.
     healthcheck:
       disable: true

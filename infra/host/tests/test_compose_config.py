@@ -302,6 +302,26 @@ def test_worker_runs_runworker_with_the_declared_stop_grace(config: Config) -> N
     assert int(values["SKIW_WORKER_STOP_GRACE_S"]) >= int(values["SKIW_WORKER_HARD_EXIT_S"])  # D5
 
 
+SESSION_LIFETIME = ("SKIW_SESSION_ABSOLUTE_H", "SKIW_SESSION_IDLE_MIN")  # D6, §8.1 (M2b)
+DB_ROLE = {"web": "skiw_app", "worker": "skiw_app", "migrate": "skiw_migrator"}
+
+
+def test_every_settings_importer_gets_the_session_lifetime_and_keeps_its_role(
+    config: Config,
+) -> None:
+    values = declared("ci.env")
+    for name, role in DB_ROLE.items():
+        env = config["services"][name]["environment"]
+        assert {k: env[k] for k in SESSION_LIFETIME} == {k: values[k] for k in SESSION_LIFETIME}
+        assert env["DATABASE_URL"] == f"postgres://{role}@db:5432/{values['SKIW_POSTGRES_DB']}"
+        assert env["DATABASE_PASSWORD_FILE"] == f"/run/secrets/{role}_password"
+
+
+@pytest.mark.parametrize("name", SESSION_LIFETIME)
+def test_a_missing_session_lifetime_refuses_to_render(name: str) -> None:
+    assert render(ENV / "ci.env", **{name: ""}).returncode != 0
+
+
 def test_profiles_and_networks(config: Config) -> None:
     values = declared("ci.env")
     profiles = {n: s.get("profiles") for n, s in services(config) if s.get("profiles")}

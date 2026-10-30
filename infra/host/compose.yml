@@ -30,6 +30,8 @@ x-app-env: &app-env
   DATABASE_PASSWORD_FILE: /run/secrets/skiw_app_password
   DJANGO_ALLOWED_HOSTS: ${SKIW_HOSTNAME:?SKIW_HOSTNAME is empty until the owner names it (G9)}
   DJANGO_BEHIND_CADDY: "1"  # trust X-Forwarded-Proto: clients reach web only via Caddy, which sets it
+  SKIW_SESSION_ABSOLUTE_H: ${SKIW_SESSION_ABSOLUTE_H:?}
+  SKIW_SESSION_IDLE_MIN: ${SKIW_SESSION_IDLE_MIN:?}
 
 x-app-secrets: &app-secrets
   - django_secret_key
@@ -94,6 +96,9 @@ services:
       DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
       DATABASE_URL: postgres://skiw_migrator@db:5432/${SKIW_POSTGRES_DB:?}
       DATABASE_PASSWORD_FILE: /run/secrets/skiw_migrator_password
+      # Settings import needs them; not x-app-env, which carries the skiw_app credentials.
+      SKIW_SESSION_ABSOLUTE_H: ${SKIW_SESSION_ABSOLUTE_H:?}
+      SKIW_SESSION_IDLE_MIN: ${SKIW_SESSION_IDLE_MIN:?}
     secrets:
       [django_secret_key, skiw_migrator_password, tenant_token_key, approval_mac_key, lookup_decoy_key]
     healthcheck: {disable: true}

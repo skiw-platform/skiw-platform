@@ -4,7 +4,8 @@ export PYTHONPATH := app:infra/host
 NODE_MAJOR := $(shell node -p "process.versions.node.split('.')[0]" 2>/dev/null)
 SEMGREP_VERSION := 1.179.0
 PIP_AUDIT_VERSION := 2.10.1
-TOOL_ENV := DJANGO_SECRET_KEY=tooling-only-not-a-secret DATABASE_URL=postgres://u:p@localhost:5432/db
+TOOL_ENV := DJANGO_SECRET_KEY=tooling-only-not-a-secret DATABASE_URL=postgres://u:p@localhost:5432/db \
+	SKIW_SESSION_ABSOLUTE_H=12 SKIW_SESSION_IDLE_MIN=30
 
 check-node:
 	@test "$(NODE_MAJOR)" = "24" || { echo "Node 24 is required (see .node-version); run: fnm use"; exit 1; }

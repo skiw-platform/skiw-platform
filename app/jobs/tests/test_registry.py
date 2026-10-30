@@ -42,6 +42,8 @@ def test_production_settings_register_only_the_probe_task() -> None:
         "DJANGO_SETTINGS_MODULE": "config.settings",
         "DJANGO_SECRET_KEY": "test-only-not-a-secret",
         "DATABASE_URL": "postgres://u:p@localhost:5432/db",
+        "SKIW_SESSION_ABSOLUTE_H": "12",
+        "SKIW_SESSION_IDLE_MIN": "30",
     }
     code = (
         "import json, django; django.setup();"

@@ -120,6 +120,8 @@ def test_settings_import_reads_or_refuses_the_key_file(
             "DJANGO_SECRET_KEY_FILE": str(tmp_path / "key"),
             "DATABASE_PASSWORD_FILE": str(tmp_path / "password"),
             "DATABASE_URL": "postgres://skiw_app@db:5432/skiw",
+            "SKIW_SESSION_ABSOLUTE_H": "12",
+            "SKIW_SESSION_IDLE_MIN": "30",
         },
         capture_output=True,
         text=True,

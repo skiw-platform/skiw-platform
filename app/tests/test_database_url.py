@@ -59,6 +59,8 @@ def test_settings_pass_tls_options_through_to_databases() -> None:
         "DJANGO_SECRET_KEY": "test-only-not-a-secret",
         "DJANGO_REQUIRE_DB_TLS": "1",
         "DATABASE_URL": f"{BASE}?sslmode=verify-full&sslrootcert=/etc/ssl/rds-ca.pem",
+        "SKIW_SESSION_ABSOLUTE_H": "12",
+        "SKIW_SESSION_IDLE_MIN": "30",
     }
     code = "import json, config.settings as s; print(json.dumps(s.DATABASES['default']['OPTIONS']))"
     result = subprocess.run(
