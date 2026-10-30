@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,10 @@ from django.views.decorators.cache import cache_control
 from django.views.decorators.http import require_GET
 from django.views.static import serve
 
+from shell import csp
+
 ENTRY = "index.html"
+ICON = re.compile(r"assets/icon-[\w-]{8}\.svg")
 ASSET_CACHE_SECONDS = 31_536_000  # one year, hashed immutable assets
 
 
@@ -23,6 +27,7 @@ def read_entry(dist: Path) -> dict[str, Any] | None:
 
 
 @require_GET
+@cache_control(no_store=True)  # a cached page would reuse its CSP nonce
 def shell(request: HttpRequest) -> HttpResponse:
     entry = read_entry(settings.WEB_DIST_DIR)
     if entry is None:
@@ -31,9 +36,18 @@ def shell(request: HttpRequest) -> HttpResponse:
             status=503,
             content_type="text/plain",
         )
+    icon = next((name for name in entry.get("assets", []) if ICON.fullmatch(name)), None)
+    if icon is None:
+        return HttpResponse(
+            "Web build has no hashed icon. Run `make web-build`.",
+            status=503,
+            content_type="text/plain",
+        )
     context = {
         "script": f"/{entry['file']}",
         "styles": [f"/{name}" for name in entry.get("css", [])],
+        "icon": f"/{icon}",
+        "nonce": csp.nonce(request),
     }
     return render(request, "shell/shell.html", context)
 

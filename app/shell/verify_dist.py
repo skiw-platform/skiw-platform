@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from shell.views import ENTRY
+from shell.views import ENTRY, ICON
 
 
 def problems(dist: Path) -> list[str]:
@@ -18,6 +18,8 @@ def problems(dist: Path) -> list[str]:
     if not isinstance(chunks, dict) or not isinstance(chunks.get(ENTRY), dict):
         return [f"{manifest} has no {ENTRY} entry"]
     found = []
+    if not any(ICON.fullmatch(name) for name in chunks[ENTRY].get("assets", [])):
+        found.append(f"{ENTRY} names no hashed icon (assets/icon-<hash>.svg)")
     for chunk in chunks.values():
         names = [chunk.get("file"), *chunk.get("css", []), *chunk.get("assets", [])]
         found += [

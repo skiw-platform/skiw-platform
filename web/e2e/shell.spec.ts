@@ -75,6 +75,25 @@ test("no console errors or page errors", async ({ page }) => {
   expect(problems).toEqual([]);
 });
 
+test("the content security policy blocks nothing on the shell", async ({ page }) => {
+  await page.addInitScript(() => {
+    const seen: string[] = [];
+    Object.assign(window, { cspViolations: seen });
+    document.addEventListener("securitypolicyviolation", (event) => {
+      seen.push(`${event.violatedDirective} ${event.blockedURI}`);
+    });
+  });
+  const script = page.waitForResponse((r) => /\/assets\/[^/]+\.js$/.test(r.url()) && r.ok());
+  const response = await page.goto("/");
+  expect(response?.headers()["content-security-policy"]).toContain("'strict-dynamic'");
+  await script;
+  await page.waitForLoadState("networkidle");
+  const violations = await page.evaluate(
+    () => (window as unknown as { cspViolations: string[] }).cspViolations,
+  );
+  expect(violations).toEqual([]);
+});
+
 async function shellText(page: Page) {
   return page.evaluate(() => ({
     nav: [...document.querySelectorAll("nav[aria-label='Primary'] a")].map((a) => a.textContent),

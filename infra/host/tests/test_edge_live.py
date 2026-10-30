@@ -11,6 +11,7 @@ import http.client
 import ipaddress
 import json
 import os
+import re
 import secrets
 import socket
 import ssl
@@ -31,6 +32,10 @@ COMPOSE = HOST / "compose.yml"
 EDGE = HOST / "tests" / "edge" / "compose.edge.yml"
 HOSTNAME = "skiw.test"  # SKIW_HOSTNAME in env/ci.env
 HSTS = "max-age=31536000"
+CSP = re.compile(  # set by Django (app/shell/csp.py); host tooling imports no app code (UNI-04)
+    r"default-src 'self'; script-src 'nonce-[A-Za-z0-9_-]{22}' 'strict-dynamic'; "
+    r"object-src 'none'; frame-ancestors 'none'"
+)
 SPOOFED_IP = "203.0.113.9"  # TEST-NET-3
 ROOT_CA = "/data/caddy/pki/authorities/local/root.crt"
 live = pytest.mark.host_live
@@ -213,11 +218,14 @@ def test_plain_http_redirect_carries_hsts_and_ignores_forwarded_headers(stack: S
 
 
 @live
-def test_app_page_carries_hsts_once(stack: Stack) -> None:
+def test_app_page_carries_hsts_and_csp_once(stack: Stack) -> None:
     stack.serving("web")
     reply = stack.fetch("/")
     assert reply.status == 200
-    assert reply.headers.get_all("Strict-Transport-Security") == [HSTS]
+    assert reply.headers.get_all("Strict-Transport-Security") == [HSTS]  # Caddy's and Django's
+    policies = reply.headers.get_all("Content-Security-Policy") or []
+    assert len(policies) == 1
+    assert CSP.fullmatch(policies[0]), policies[0]
 
 
 @live

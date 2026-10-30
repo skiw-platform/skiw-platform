@@ -15,7 +15,17 @@ if env.flag("DJANGO_BEHIND_CADDY"):
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 INSTALLED_APPS = ["procrastinate.contrib.django", "config", "health", "shell", "jobs"]
-MIDDLEWARE: list[str] = []
+MIDDLEWARE = [
+    "django.middleware.security.SecurityMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "shell.csp.ContentSecurityPolicyMiddleware",
+]
+
+# Same value as Caddy (infra/host/caddy/edge.caddy; owner Q1 (a) 2026-10-27): one year, no
+# includeSubDomains or preload. Caddy owns the HTTP -> HTTPS redirect, so no SSL redirect here.
+SECURE_HSTS_SECONDS = 31_536_000
+SECURE_SSL_REDIRECT = False
+X_FRAME_OPTIONS = "DENY"
 
 TEMPLATES = [
     {
