@@ -32,6 +32,8 @@ x-app-env: &app-env
   DJANGO_BEHIND_CADDY: "1"  # trust X-Forwarded-Proto: clients reach web only via Caddy, which sets it
   SKIW_SESSION_ABSOLUTE_H: ${SKIW_SESSION_ABSOLUTE_H:?}
   SKIW_SESSION_IDLE_MIN: ${SKIW_SESSION_IDLE_MIN:?}
+  # web and worker only: migrate does not mount tenant_source_key (H4); settings read it lazily.
+  TENANT_SOURCE_KEY_FILE: /run/secrets/tenant_source_key
 
 x-app-secrets: &app-secrets
   - django_secret_key

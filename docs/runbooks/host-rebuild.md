@@ -108,6 +108,18 @@ service that reads it, mode 0400. The inventory, with readers and owners, is
 GHCR token, the alert bot token (BotFather `/token`, health-alerts.md "Rotating the token"). `check-hardening` expects `staging_status_key` on production and fails if staging holds
 it.
 
+### Rotating `tenant_source_key` (session MAC, M2c)
+Every `django_session` row carries a MAC under this key, bound to the row's stored key and
+`expire_date` (spec §4.1; `accounts.source_key`). `web` signs with the highest listed version and
+accepts every listed one, and reads the file once at start-up (`TENANT_SOURCE_KEY_FILE`, set for
+`web` and `worker` only; `migrate` never mounts it). So a rotation adds a new, higher `v<n>` line,
+keeps the old line until every session signed with it has expired (at most
+`SKIW_SESSION_ABSOLUTE_H` hours after the restart), then removes it; restart `web` and `worker`
+after each change. Removing the old version at once, or replacing the file, logs every user out
+(the next request gets an empty session and the cookie is deleted): that is the wanted effect when
+the key may have leaked. No script rotates app keys yet, and the escrow after every rotation (spec
+§8.4 H4) still applies.
+
 ### Before you start
 - `age` v1.3.2 at `/usr/local/bin/age`, installed from `age-v1.3.2-linux-amd64.tar.gz` after
   checking its SHA-256 against the value in `docs/DECISIONS.md` (2026-10-14, M1d). The script

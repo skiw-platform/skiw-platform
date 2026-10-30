@@ -1,4 +1,5 @@
 import os
+from functools import partial
 from pathlib import Path
 
 from . import env
@@ -45,6 +46,9 @@ SESSION_SAVE_EVERY_REQUEST = False
 # (accounts.session); the idle limit is enforced from M3. Bounds are builder values [A].
 SKIW_SESSION_ABSOLUTE_H = env.bounded_int("SKIW_SESSION_ABSOLUTE_H", 1, 72)
 SKIW_SESSION_IDLE_MIN = env.bounded_int("SKIW_SESSION_IDLE_MIN", 1, 1440)
+# A loader, not the keys: `migrate` imports settings without the tenant_source_key mount (spec
+# §8.4 H4), so accounts.source_key reads it on first use and web checks it at start-up (plan M2c).
+SKIW_TENANT_SOURCE_KEYS = partial(env.versioned_keys, "TENANT_SOURCE_KEY")
 
 TEMPLATES = [
     {

@@ -322,6 +322,23 @@ def test_a_missing_session_lifetime_refuses_to_render(name: str) -> None:
     assert render(ENV / "ci.env", **{name: ""}).returncode != 0
 
 
+def test_only_web_and_worker_read_the_session_mac_key_from_its_secret_file(
+    config: Config,
+) -> None:
+    """Plan M2c: TENANT_SOURCE_KEY_FILE is a secret-file path on web and worker only; migrate
+    imports settings without it (spec §8.4 H4)."""
+    holders = {
+        name: service["environment"]["TENANT_SOURCE_KEY_FILE"]
+        for name, service in services(config)
+        if "TENANT_SOURCE_KEY_FILE" in (service.get("environment") or {})
+    }
+    assert holders == dict.fromkeys(("web", "worker"), "/run/secrets/tenant_source_key")
+    for name in holders:
+        assert "tenant_source_key" in {s["source"] for s in config["services"][name]["secrets"]}
+    for _, service in services(config):
+        assert "TENANT_SOURCE_KEY" not in (service.get("environment") or {})
+
+
 def test_profiles_and_networks(config: Config) -> None:
     values = declared("ci.env")
     profiles = {n: s.get("profiles") for n, s in services(config) if s.get("profiles")}

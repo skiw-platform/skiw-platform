@@ -83,3 +83,17 @@ def test_context_values_start_the_settings(context: str) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr[-2000:]
+
+
+@pytest.mark.parametrize("service", ["app", "worker"])
+def test_local_compose_service_takes_the_session_mac_key_from_the_env_file(service: str) -> None:
+    compose = (REPO / "docker-compose.yml").read_text()
+    environment = block(compose, f"  {service}:", r"  [a-z]+:|volumes:")
+    assert "      TENANT_SOURCE_KEY: ${TENANT_SOURCE_KEY:?set in .env}\n" in environment
+
+
+def test_the_local_session_mac_key_is_generated_never_committed() -> None:
+    """Plan M2c: no key value in .env.example (UNI-07); `make .env` appends a random v1 line."""
+    assert not re.search(r"(?m)^TENANT_SOURCE_KEY", (REPO / ".env.example").read_text())
+    rule = block((REPO / "Makefile").read_text(), r"\.env:", r"\S")
+    assert "printf 'TENANT_SOURCE_KEY=v1:%s\\n' \"$$(openssl rand -base64 32)\" >> .env" in rule

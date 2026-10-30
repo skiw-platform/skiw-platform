@@ -129,3 +129,68 @@ def test_settings_import_reads_or_refuses_the_key_file(
     )
     assert (result.returncode == 0, result.stdout.strip()) == ((True, "1") if ok else (False, ""))
     assert value not in result.stderr
+
+
+SOURCE = "TENANT_SOURCE_KEY"  # the M2c reader: `<name>_FILE` on hosts, `<name>` locally and in CI
+
+
+@pytest.fixture
+def source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    for name in (SOURCE, f"{SOURCE}_FILE"):
+        monkeypatch.delenv(name, raising=False)
+    return tmp_path / "tenant_source_key"
+
+
+@pytest.mark.parametrize("form", ["file", "env"])
+def test_versioned_keys_keep_their_numbers_newest_first(
+    source: Path, monkeypatch: pytest.MonkeyPatch, form: str
+) -> None:
+    v1, v7, v3 = key(), key(40), key()
+    content = f"v1:{v1}\nv7:{v7}\nv3:{v3}\n"
+    if form == "file":
+        source.write_text(content)
+        monkeypatch.setenv(f"{SOURCE}_FILE", str(source))
+    else:
+        monkeypatch.setenv(SOURCE, content)
+    decoded = [(n, base64.b64decode(k)) for n, k in ((7, v7), (3, v3), (1, v1))]
+    assert env.versioned_keys(SOURCE) == decoded
+
+
+@pytest.mark.parametrize("form", ["file", "env"])
+@pytest.mark.parametrize(
+    "content",
+    ["", "v1:{k}\nv1:{k}\n", "v1:" + key(31) + "\n", "v1:{k}===\n", "v1:{k}!\n", "x1:{k}\n"],
+    ids=["empty", "repeated", "short", "bad-base64", "bad-char", "no-version"],
+)
+def test_versioned_keys_fail_closed_without_echoing_the_key(
+    source: Path, monkeypatch: pytest.MonkeyPatch, form: str, content: str
+) -> None:
+    value = key()
+    text = content.format(k=value)
+    if form == "file":
+        source.write_text(text)
+        monkeypatch.setenv(f"{SOURCE}_FILE", str(source))
+    else:
+        monkeypatch.setenv(SOURCE, text)
+    with pytest.raises((env.InvalidSettingError, env.MissingSettingError)) as raised:
+        env.versioned_keys(SOURCE)
+    secrets_in_text = [row.split(":", 1)[1] for row in text.splitlines() if ":" in row]
+    assert not [part for part in secrets_in_text if part in str(raised.value)]
+
+
+def test_versioned_keys_refuse_both_forms(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    value = key()
+    source.write_text(f"v1:{value}\n")
+    monkeypatch.setenv(f"{SOURCE}_FILE", str(source))
+    monkeypatch.setenv(SOURCE, f"v1:{value}")
+    with pytest.raises(env.InvalidSettingError, match="not both") as raised:
+        env.versioned_keys(SOURCE)
+    assert value not in str(raised.value)
+
+
+def test_versioned_keys_missing_fail_closed(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(env.MissingSettingError):
+        env.versioned_keys(SOURCE)
+    monkeypatch.setenv(f"{SOURCE}_FILE", str(source))  # named, but no such file
+    with pytest.raises(env.InvalidSettingError, match="cannot be read"):
+        env.versioned_keys(SOURCE)

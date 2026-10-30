@@ -14,8 +14,17 @@ from django.utils import timezone
 from pytest_django import DjangoDbBlocker
 
 from accounts.session import stored_key
+from accounts.source_key import require_key
 
 COOKIE = "__Host-skiw_session"
+
+
+@pytest.fixture(autouse=True)
+def fresh_source_key() -> Iterator[None]:
+    """require_key() reads the key once per process; a test that changes it must not leak."""
+    require_key.cache_clear()
+    yield
+    require_key.cache_clear()
 
 
 @pytest.fixture(scope="session")
