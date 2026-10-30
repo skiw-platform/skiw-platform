@@ -15,6 +15,8 @@ HOST_ENV = {
     "DATABASE_URL": "postgres://skiw_app@db:5432/skiw",
     "DJANGO_ALLOWED_HOSTS": "skiw.test",
     "DJANGO_BEHIND_CADDY": "1",
+    "SKIW_SESSION_ABSOLUTE_H": "12",
+    "SKIW_SESSION_IDLE_MIN": "30",
 }
 CHECK = ["check", "--deploy", "--fail-level", "WARNING"]
 ALLOWED = {

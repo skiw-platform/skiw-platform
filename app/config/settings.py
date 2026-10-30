@@ -14,9 +14,12 @@ ALLOWED_HOSTS = env.csv("DJANGO_ALLOWED_HOSTS")
 if env.flag("DJANGO_BEHIND_CADDY"):
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-INSTALLED_APPS = ["procrastinate.contrib.django", "config", "health", "shell", "jobs"]
+# Not django.contrib.sessions: its 0001_initial would create a second django_session table;
+# accounts owns that table (spec §4.1, plan M2b).
+INSTALLED_APPS = ["procrastinate.contrib.django", "config", "health", "shell", "jobs", "accounts"]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "shell.csp.ContentSecurityPolicyMiddleware",
 ]
@@ -26,6 +29,22 @@ MIDDLEWARE = [
 SECURE_HSTS_SECONDS = 31_536_000
 SECURE_SSL_REDIRECT = False
 X_FRAME_OPTIONS = "DENY"
+
+# Sessions (spec D6): DB rows keyed by SHA-256 of the cookie (accounts.session). The `__Host-`
+# prefix needs Secure, Path=/ and no Domain.
+SESSION_ENGINE = "accounts.session"
+SESSION_COOKIE_NAME = "__Host-skiw_session"
+SESSION_COOKIE_SECURE = True
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Strict"
+SESSION_COOKIE_PATH = "/"
+SESSION_COOKIE_DOMAIN = None
+SESSION_SAVE_EVERY_REQUEST = False
+# Interim deployment-wide values until M5 moves them into `setting` (owner Q2 (a), spec §8.1
+# session.absolute_h / session.idle_min). The absolute deadline is fixed when a session starts
+# (accounts.session); the idle limit is enforced from M3. Bounds are builder values [A].
+SKIW_SESSION_ABSOLUTE_H = env.bounded_int("SKIW_SESSION_ABSOLUTE_H", 1, 72)
+SKIW_SESSION_IDLE_MIN = env.bounded_int("SKIW_SESSION_IDLE_MIN", 1, 1440)
 
 TEMPLATES = [
     {

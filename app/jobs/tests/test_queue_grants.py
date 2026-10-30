@@ -49,7 +49,8 @@ NOT_GRANTED_FUNCTIONS = {
 # Spec §4.1 types need no grant; the composite one is the only type with a pg_class row.
 COMPOSITE_TYPES = {"procrastinate_job_to_defer_v1"}
 TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
-DELETE_ALLOW_LIST = {"procrastinate_periodic_defers", "procrastinate_workers"}
+# django_session: D6 "Revocation is a row delete" (accounts.0001; flush and cycle_key delete).
+DELETE_ALLOW_LIST = {"procrastinate_periodic_defers", "procrastinate_workers", "django_session"}
 # Spec §4.2 TEN-03 row: append-only evidence tables. None exist in M0c; each is checked as it lands.
 TEN03_EVIDENCE_TABLES = [
     "audit_event",

@@ -5,6 +5,8 @@ import re
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
 
+from django.core.exceptions import ImproperlyConfigured
+
 
 class MissingSettingError(RuntimeError):
     pass
@@ -18,6 +20,7 @@ TLS_OPTIONS = ("sslmode", "sslrootcert", "sslcert", "sslkey", "sslcrl")
 SSL_MODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
 STRICT_SSL_MODES = ("verify-ca", "verify-full")
 KEY_LINE = re.compile(r"v([1-9][0-9]*):([A-Za-z0-9+/]+={0,2})")
+WHOLE_NUMBER = re.compile(r"[0-9]{1,6}")  # ASCII digits only: int() also takes "+1", "1_0", " 1"
 MIN_KEY_BYTES = 32  # bootstrap-secrets mints 32 random bytes per key version (spec §8.4 H4)
 
 
@@ -33,6 +36,14 @@ def flag(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def bounded_int(name: str, low: int, high: int) -> int:
+    """A required whole number in [low, high]; the error names the variable, never the value."""
+    raw = os.environ.get(name, "")
+    if WHOLE_NUMBER.fullmatch(raw) is None or not low <= int(raw) <= high:
+        raise ImproperlyConfigured(f"{name} must be a whole number from {low} to {high}")
+    return int(raw)
 
 
 def csv(name: str) -> list[str]:

@@ -13,6 +13,11 @@ installed) until these values are set: `SKIW_SSH_PORT` (not 22, 80, 443), `SKIW_
 `allowlist` with the operator's and the off-site host's CIDRs in `SKIW_SSH_ALLOW`, or `fail2ban`
 with it empty) and `SKIW_AUTO_REBOOT` (G15). Rates and journal cap are [A] values, measured in M1k.
 
+The same env file sets the session lifetime for `web`, `worker` and `migrate`:
+`SKIW_SESSION_ABSOLUTE_H=12` (whole hours, 1 to 72) and `SKIW_SESSION_IDLE_MIN=30` (whole
+minutes, 1 to 1440) (spec D6, §8.1; M2b). Compose refuses to render without them, and the app
+refuses to start on a value outside the bounds. Keep the values in all three env files.
+
 Before the first run, as root: `apt-get install nftables gnupg`, then fetch Docker's apt key to
 `/etc/apt/keyrings/docker.asc` (root, 0644):
 `curl -fsSL -o /etc/apt/keyrings/docker.asc https://download.docker.com/linux/ubuntu/gpg`.

@@ -174,9 +174,12 @@ jobs:
           # Tooling-only values: Django settings need them to start; nothing connects.
           DJANGO_SECRET_KEY: tooling-only-not-a-secret
           DATABASE_URL: postgres://labels@127.0.0.1:5432/none
+          SKIW_SESSION_ABSOLUTE_H: "12"
+          SKIW_SESSION_IDLE_MIN: "30"
         run: |
           docker run --rm --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges -e DJANGO_SECRET_KEY -e DATABASE_URL \
+            -e SKIW_SESSION_ABSOLUTE_H -e SKIW_SESSION_IDLE_MIN \
             skiw-platform:unlabelled python app/manage.py migration_labels \
             > "$RUNNER_TEMP/migrations.json"
           PYTHONPATH=infra/host python3 -m skiw_host.labels "$GITHUB_SHA" \
