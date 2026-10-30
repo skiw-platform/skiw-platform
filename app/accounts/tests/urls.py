@@ -9,17 +9,16 @@ from django.urls import path
 
 def write(request: HttpRequest) -> HttpResponse:
     request.session["probe"] = secrets.token_hex(8)
-    return HttpResponse(request.session["probe"])
+    return HttpResponse()
 
 
 async def awrite(request: HttpRequest) -> HttpResponse:
-    value = secrets.token_hex(8)
-    await request.session.aset("probe", value)
-    return HttpResponse(value)
+    await request.session.aset("probe", secrets.token_hex(8))
+    return HttpResponse()
 
 
 def read(request: HttpRequest) -> HttpResponse:
-    return HttpResponse(request.session.get("probe", ""))
+    return HttpResponse(b"set" if "probe" in request.session else b"")
 
 
 urlpatterns = [path("write", write), path("awrite", awrite), path("read", read)]
