@@ -8,7 +8,6 @@ from django.http import HttpRequest, HttpResponse
 from django.http.response import HttpResponseBase
 from django.shortcuts import render
 from django.views.decorators.cache import cache_control
-from django.views.decorators.http import require_GET
 from django.views.static import serve
 
 from shell import csp
@@ -26,8 +25,8 @@ def read_entry(dist: Path) -> dict[str, Any] | None:
     return entry
 
 
-@require_GET
-@cache_control(no_store=True)  # a cached page would reuse its CSP nonce
+# Accepted methods come from route() in config.urls (plan M2d), not from a decorator here.
+@cache_control(no_store=True)  # a cached page would reuse its CSP nonce and CSRF token
 def shell(request: HttpRequest) -> HttpResponse:
     entry = read_entry(settings.WEB_DIST_DIR)
     if entry is None:
@@ -52,7 +51,6 @@ def shell(request: HttpRequest) -> HttpResponse:
     return render(request, "shell/shell.html", context)
 
 
-@require_GET
 @cache_control(max_age=ASSET_CACHE_SECONDS, immutable=True)
 def asset(request: HttpRequest, path: str) -> HttpResponseBase:
     return serve(request, path, document_root=str(settings.WEB_DIST_DIR / "assets"))

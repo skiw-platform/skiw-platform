@@ -1,0 +1,16 @@
+rules:
+  - id: urls-route-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Mount a plain Django view only through config.routes.route() (plan M2d, spec T6): it records
+      the accepted methods and the auth kind that dispatch and the CSRF gate both read
+      (app/tests/test_csrf_gate.py). App test packages may not import config (import-linter), so
+      their test-only URLconfs, which config.urls never includes, keep path().
+    paths:
+      exclude:
+        - /app/config/routes.py
+        - /app/*/tests/
+    pattern-either:
+      - pattern: django.urls.path(...)
+      - pattern: django.urls.re_path(...)

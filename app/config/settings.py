@@ -21,6 +21,7 @@ INSTALLED_APPS = ["procrastinate.contrib.django", "config", "health", "shell", "
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "shell.csp.ContentSecurityPolicyMiddleware",
 ]
@@ -49,6 +50,19 @@ SKIW_SESSION_IDLE_MIN = env.bounded_int("SKIW_SESSION_IDLE_MIN", 1, 1440)
 # A loader, not the keys: `migrate` imports settings without the tenant_source_key mount (spec
 # §8.4 H4), so accounts.source_key reads it on first use and web checks it at start-up (plan M2c).
 SKIW_TENANT_SOURCE_KEYS = partial(env.versioned_keys, "TENANT_SOURCE_KEY")
+
+# CSRF on every mutating route, no switch (spec T6, A.19). Owner Q4 (a): an HttpOnly cookie; the
+# token is rendered into the no-store shell and sent back as X-CSRFToken. Same origin only (D2),
+# so no CSRF_TRUSTED_ORIGINS. A browser-session cookie (CSRF_COOKIE_AGE None) is a builder value.
+CSRF_COOKIE_NAME = "__Host-csrftoken"
+CSRF_COOKIE_SECURE = True
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = "Strict"
+CSRF_COOKIE_PATH = "/"
+CSRF_COOKIE_DOMAIN = None
+CSRF_COOKIE_AGE = None
+CSRF_USE_SESSIONS = False
+CSRF_FAILURE_VIEW = "config.csrf.failure"
 
 TEMPLATES = [
     {

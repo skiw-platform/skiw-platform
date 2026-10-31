@@ -134,14 +134,19 @@ def write_secrets(command: list[str], env: dict[str, str], directory: Path) -> d
     return files
 
 
+def build_image(path: str, *extra: str) -> str:
+    """The local image ID is the sha256 digest of the image config: content-addressed like the
+    registry digest compose.yml requires on hosts, without pushing anything."""
+    built = subprocess.run([path, "build", "-q", *extra, str(REPO)], capture_output=True, text=True)
+    assert built.returncode == 0, built.stderr[-3000:]
+    return built.stdout.strip()
+
+
 @pytest.fixture(scope="module")
 def stack(tmp_path_factory: pytest.TempPathFactory, docker_cli: str) -> Iterator[Stack]:
+    """One throwaway Compose project per test module (test_session_live.py reuses it)."""
     path = docker_cli
-    built = subprocess.run([path, "build", "-q", str(REPO)], capture_output=True, text=True)
-    assert built.returncode == 0, built.stderr[-3000:]
-    # The local image ID is the sha256 digest of the image config: content-addressed like the
-    # registry digest compose.yml requires on hosts, without pushing anything.
-    env = {**os.environ, "SKIW_IMAGE": built.stdout.strip()}
+    env = {**os.environ, "SKIW_IMAGE": build_image(path)}
     env_file = ["--env-file", str(HOST / "env" / "ci.env")]
     tmp = tmp_path_factory.mktemp("edge")
     every = ["--profile", "deploy", "--profile", "ops"]
@@ -245,7 +250,8 @@ def test_body_cap_is_25_mb(stack: Stack) -> None:
     over = stack.fetch("/edge-probe", method="POST", body=bytes(26 * 1024 * 1024), timeout=60)
     assert over.status == 413  # FILE-02 outer cap
     under = stack.fetch("/edge-probe", method="POST", body=bytes(20 * 1000 * 1000), timeout=60)
-    assert under.status == 200  # a 20 MB upload still reaches web
+    # A 20 MB upload still reaches web: Django's CSRF check answers it, not Caddy's cap (M2d).
+    assert (under.status, under.headers["X-Skiw-Csrf"]) == (403, "rejected")
 
 
 @live
