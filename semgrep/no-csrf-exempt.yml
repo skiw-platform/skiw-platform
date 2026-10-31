@@ -1,0 +1,18 @@
+rules:
+  - id: no-csrf-exempt
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Django CSRF protects every mutating route and nothing may switch it off (spec T6, A.19: no
+      CSRF_ENFORCE switch). csrf_exempt, the flags CsrfViewMiddleware skips on, and django-ninja's
+      csrf=False on a cookie auth class all bypass it. A token-auth route goes on the reviewed
+      TOKEN_AUTH_ROUTES list in app/tests/test_csrf_gate.py instead.
+    pattern-either:
+      - pattern: django.views.decorators.csrf.csrf_exempt
+      - pattern: $X.csrf_exempt = $V
+      - pattern: setattr($X, "csrf_exempt", ...)
+      - pattern: $D.update(..., csrf_exempt=$V, ...)
+      - pattern: $X.csrf_processing_done = $V
+      - pattern: $X._dont_enforce_csrf_checks = $V
+      - pattern: $X._ninja_csrf_exempt = $V
+      - pattern: $AUTH(..., csrf=False, ...)

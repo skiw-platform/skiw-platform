@@ -24,7 +24,6 @@ ALLOWED = {
     "the internal /readyz probes reach web over plain HTTP",
     "security.W005": "HSTS without includeSubDomains (owner Q1 (a), 2026-10-27)",
     "security.W021": "HSTS without preload (owner Q1 (a), 2026-10-27)",
-    "security.W003": "no CsrfViewMiddleware until M2d, which adds it and removes this entry",
 }
 
 

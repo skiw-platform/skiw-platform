@@ -1,3 +1,5 @@
+"""Fixtures shared by the app test packages."""
+
 import json
 from pathlib import Path
 

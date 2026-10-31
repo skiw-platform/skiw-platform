@@ -246,6 +246,16 @@ and not readable by group or others. Each deploy:
 
 Rollback: [rollback.md](rollback.md).
 
+## Sessions across deploys
+A session is a `django_session` row plus its cookie; nothing lives in the `web` container, so a
+deploy, a rollback or `docker compose restart web` keeps everyone logged in (spec §9 M2). Two things
+do log everyone out: removing the `tenant_source_key` version the rows were sealed with (keep the
+old version listed until its sessions expire, host-rebuild.md), and changing `django_secret_key`
+without keeping the old version. CI proves restart and redeploy on a throwaway stack
+(`infra/host/tests/test_session_live.py`, owner Q3 (a)). **M1k evidence:** on staging, with a
+session in the browser (a login from M3; hosts carry no probe view), run `docker compose restart
+web` and then a `skiw-deploy` of a new digest, and show the same session is still valid after each.
+
 ## Smoke tests
 `/readyz` and the worker are checked by the deploy itself; on staging the status line records the
 G12 checks. From production, with the values of `SKIW_STAGING_SSH` (`<host>:<port>`):
