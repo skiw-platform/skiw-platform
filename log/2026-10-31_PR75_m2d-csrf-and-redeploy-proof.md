@@ -1,0 +1,133 @@
+# PR 75 — feat(config): CSRF on every mutating route and the redeploy proof (M2d)
+
+- **Merged:** 2026-10-31T09:42:36Z (GitHub) · **Merge commit:** f1ddc8eba91d50f4981979ed5f16ee111567ceef · **Branch:** feat/m2d-csrf-and-redeploy-proof
+- **Gate breaches:** none
+- **Approval receipt:** `reviews/PR-75.receipt` on agent-logs (review commit dfbbc508f96dfd30d126abd80017f1bb2926a4e0); head 436280b6 and review-file hash 2444b570 match the final round; written 2026-10-31T09:41:49Z, before the merge
+- **Merge evidence:** `gh pr view 75` state MERGED, merge commit above, merged 2026-10-31T09:42:36Z; commit is an ancestor of the fetched `origin/main`; final head SHA 436280b6e47bc498d3a082fd96f444850c41a2c6 equals the reviewed SHA
+- **Drafted by:** Opus sub-agent (code), Claude Sonnet 5.5 (checks, commit, PR); reviewer Claude Opus 5.5 · **Final verdict:** Approved (round 1)
+- **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md v1.20 · **Plan:** docs/plans/2026-10-27-m2-headers-sessions-csrf.md · **Milestone:** M2 (M2d, last PR of M2)
+
+## What changed
+Adds `CsrfViewMiddleware` with the `__Host-csrftoken` cookie (Secure, HttpOnly, SameSite=Strict) and the token in the shell meta tag. Adds `config.routes.route()`, the only way to register a plain view, which records the allowed methods and auth kind. Adds a 32-test behaviour gate over every (route, method) pair, two Semgrep rules (`no-csrf-exempt`, `urls-route-only`), the CSRF failure view with the `X-Skiw-Csrf: rejected` marker, and live restart, redeploy and negative-control tests of the session through Caddy. Removes the `security.W003` exception.
+
+## Why
+Spec T6 (Django CSRF on all mutating routes, no `CSRF_ENFORCE` switch), A.19, section 9 M2 ("session survives a redeploy and a restart of the one `web` container"), UNI-05, UNI-17, UNI-18.
+
+## Review rounds
+- R1: Approved. No P0/P1/P2. Two P3 notes (below). The reviewer compared the PR body counts with the CI logs of run 41172009362 and found them matching.
+
+## Deferred conditions
+- [P3] The DECISIONS M2d "Evidence" line says some checks were not run that did run → add a dated correction note in the next PR that touches `docs/DECISIONS.md` (the M3 plan PR).
+- [P3] The self-check marked the frontend rules n/a although the shell template changed → mark FE-50 and FE-70 pass for shell changes in the next self-check.
+- Carried from PR 74 (still open for M3): the P2 session-reject warning reaches no output with `DEBUG` off (first M3 PR); owner Q2 = A, a server-side revocation marker in the M3 plan.
+
+## Decisions worth keeping
+- django-ninja 1.7.3 (read, not added): every ninja view is `csrf_exempt` at the middleware level; only `APIKeyCookie`-based auth classes check CSRF, and on failure ninja drops our failure view's response, so a ninja refusal has no marker. The gate fails closed on the first ninja route; the PR that adds ninja must extend it first.
+- **Owner ASK for the ninja PR:** how to mark a ninja CSRF refusal.
+- Probe views answer by status only; session data in a response body trips the CI registry Semgrep rule `reflected-data-httpresponse`.
+- Size was about 620 lines against the plan's 380 (production about 85; the rest is gate, live proof and Semgrep).
+
+## Follow-ups
+- Record in `docs/DECISIONS.md` (a reviewed PR): PR 74 owner answers Q1 = A and Q2 = A, and the PR 75 evidence-line correction.
+- M2 is complete once this log is on the remote. The real-host repeat of restart and redeploy stays on the M1k list (owner Q3 (a)); M1k waits for the bought VPSs.
+- Next milestone: M3 (staff sign-in). Its plan PR needs the Q2 revocation marker, the P2 above and the ninja ASK if ninja arrives with it.
+
+## Appendix — final review round
+## Round 1 — 2026-10-31 · scope: slice (M2d, the last PR of M2; plan `docs/plans/2026-10-27-m2-headers-sessions-csrf.md`)
+- **Code review:** base (merge base) `ebe2c918814bdc64e1525969df0aeb5346816227` · head `436280b6e47bc498d3a082fd96f444850c41a2c6` · head re-checked at end: yes (GitHub)
+- **Spec review:** spec path `docs/specs/2026-10-05-skiw-platform-stack-design.md` · version 1.20 · hash (`git hash-object`) `92841ba555e9e857ac70e86a5b043cf9729ed371`
+- Review checkout: `.agent/worktrees/review-75-436280b6` (detached worktree at the head SHA). Planted-regression checks ran on a separate copy in the reviewer's scratch folder, never in the checkout.
+
+**Verdict:** Approved
+**Model used:** Claude Opus 5.5 (deep tier, `PROJECT.md` §6) · **Switch model next step?** No — `approved 75` and `merged 75` are builder steps; M3 (login) needs the deep tier again.
+
+### Findings
+
+No P0, P1 or P2 findings. The gate works as the plan asks. The middleware and cookie match T6 and owner Q4 (a). The failure view never echoes client headers. `route()` is the one source of methods for both dispatch and the gate. The restart, redeploy and negative-control proofs pass through Caddy.
+
+### [P3] The DECISIONS M2d "Evidence" line says checks were not run that did run
+- Category: defect (documentation)
+- Rule: reviewer role §3 (evidence must match); UNI-13
+- Evidence: `docs/DECISIONS.md` M2d entry, "Evidence": "**Not run:** the full `make host-test-live` (so the changed body-cap assertion in `test_edge_live.py` is unproven), `make test-live`, `make e2e`." The PR body says all three ran (124 / 33 / 36 passed). CI run 41172009362 on `436280b6` passed the `checks` job (test-live, e2e) and the `host` job (host-test-live). I ran `test_edge_live.py` + `test_session_live.py` locally: 10 passed, the body-cap case included.
+- Failure scenario: a later reader of the committed log believes the 20 MB body-cap assertion was never proven and repeats or distrusts the work.
+- Fabrication check: I compared the PR body's counts with the CI logs of run 41172009362 (`gh run view --log`): `checks` 1118 unit, 4 vitest, 124 live, 36 e2e; `host` 818 host-test, 33 host-test-live. All match the PR body, so no claim of an unrun check was made.
+- Why it matters: limited. The record under-states, it does not over-claim. But it is the lasting record.
+- Required correction: in the next PR that touches `docs/DECISIONS.md` (the M3 plan PR), add a dated note to the M2d entry: CI run 41172009362 and the builder's local re-run proved host-test-live, test-live and e2e on `436280b6`. Don't re-push PR 75 just for this.
+- Owner: builder
+- Verification: the note is in `docs/DECISIONS.md` on `main`.
+- Status: open
+
+### [P3] The self-check marks the frontend rules n/a, but the shell template changed
+- Category: guardrail mismatch (label only)
+- Rule: FE-50, FE-70 (the plan's own "Guardrail packs touched" lists FE-50, FE-61, FE-70 for M2)
+- Evidence: PR self-check "FE rules | n/a | one meta tag in the shell; no UI"; `app/shell/templates/shell/shell.html` gains `<meta name="csrf-token">`. The evidence exists: `make e2e` 36 passed (PR body) and CI `checks` green; the gate's `test_csrf_cookie_is_host_prefixed_and_http_only` asserts the meta.
+- Failure scenario: a later PR copies "one tag, so n/a" and skips the console-clean e2e after a shell change.
+- Required correction: in the next self-check, mark FE-50 and FE-70 as pass for shell changes, citing the build and the e2e run.
+- Owner: builder
+- Verification: the M3 self-check lists them.
+- Status: open
+
+### Notes (no severity)
+- **Size:** about 620 added lines against the 400 LOC target (`PROJECT.md` §4) and the plan's ≈ 380. Production code is about 85 lines; the rest is the gate, the live proof and Semgrep rules. The builder disclosed it and left it to the owner. I see no reason to split it.
+- **ASK for the owner, later:** how to mark a django-ninja CSRF refusal. This is for the PR that adds ninja, not this one. The gate already fails closed on the first ninja route (no `skiw_methods`), and the DECISIONS entry records what that PR must add to the gate first.
+- **No text in the PR body is addressed to an AI agent.** I scanned it.
+- **PR 74 conditions still apply to M3:** the deferred P2 (the session-reject warning reaches no output with `DEBUG` off) and the owner's Q2 = A (a server-side revocation marker in the M3 plan).
+
+### Self-check audit
+
+My applicability list (built before reading the table): UNI-01–06, 09, 13, 16–19 apply (new module, Semgrep rules, failure-view output, runbooks, cookie, test-only probes); UNI-07/08 apply only to the live test's generated keys; UNI-10–12, 14, 15 n/a. AUTH-07 (prereq) applies; AUTH-01–06, 08–13 n/a (no login, no wrapper, no sign-out flow yet). TEN: n/a (no tenant table, no grant change; `accounts.session` unchanged). FE-50, FE-70 apply (shell template). PROJECT §9: TEN-10 allow-list, the D26 async-middleware rule (a new middleware entry).
+
+| Rule | Applies? (why / n-a reason) | Builder said | Reviewer found | Evidence | Disagreement |
+|---|---|---|---|---|---|
+| UNI-01 | yes | pass | pass | mypy: 120 files, no issues | none |
+| UNI-02 | yes (cookie age) | pass | pass | `CSRF_COOKIE_AGE = None` recorded as a builder value in DECISIONS | none |
+| UNI-03 | yes (`route()` input) | pass | pass | `test_route_refuses_a_bad_registration`: empty, repeated, TRACE, bad auth | none |
+| UNI-04 | yes | pass | pass | lint-imports 10 kept; Semgrep `urls-route-only` + fixture | none |
+| UNI-05 | yes | pass | pass | `security.W003` exception removed; old `@require_GET` removed, not left beside `route()` | none |
+| UNI-06 | yes | pass | pass | lockfiles unchanged; ninja read only | none |
+| UNI-07, 08 | yes (live test keys) | pass | pass | keys generated per run; added-line scan found no key values | none |
+| UNI-09 | yes (failure body) | pass | pass | `config/csrf.py` sends a fixed code, never the reason (which can carry Origin/Referer) | none |
+| UNI-13 | yes | pass | pass | gate in `checks`, live proof in `host`; CI 41172009362 green on head | none |
+| UNI-16 | yes | pass | pass | `local-dev.md` CSRF line; `deploy.md` "Sessions across deploys" with the M1k step | none |
+| UNI-17, 18 | yes | pass | pass | `__Host-csrftoken` attributes asserted; M2a/M2b tests green | none |
+| UNI-19 | yes | pass | pass | session probes only in `edge_probe` (test-mounted) and `tests.csrf_urls` | none |
+| UNI-10–12, 14, 15 | n-a | n/a | n/a | no audit, external service, agent folder, dependency or migration change | none |
+| AUTH-07 (prereq) | yes | pass | pass | revocation still a row delete; negative control logs out | none |
+| AUTH-01–06, 08–13 | n-a until M3 | n/a | n/a | no login or action wrapper | none |
+| TEN-01–12 | n-a | n/a | n/a | no tenant table or grant change | none |
+| FE-50, FE-70 | yes (shell template) | n/a | pass | e2e 36 passed (PR body), CI `checks` green | P3 label |
+| PROJECT §9 (TEN-10, D26) | yes | pass | pass | `accounts.session` sole session module; `test_middleware_async` green with `CsrfViewMiddleware` | none |
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| `git diff --check ebe2c91...436280b` | clean |
+| `ruff check .`, `ruff format --check .` | pass (166 files) |
+| `lint-imports` | 10 kept, 0 broken |
+| `mypy app infra/host scripts/deploy-prod` | no issues, 120 files |
+| `semgrep --config semgrep/ --error app`; `semgrep --test semgrep/` | 6 rules, 0 findings; 6/6 fixture tests pass |
+| `pytest` (unit) | 1118 passed |
+| `make test-live` | 124 passed |
+| `pytest -m host_live test_edge_live.py test_session_live.py` (Caddy, HTTPS, Docker) | 10 passed (restart, redeploy, negative control, body cap); no containers or volumes left |
+| Planted regression 1 (scratch copy): `@csrf_exempt` on the probe POST route | 3 failed (the three CSRF-marker cases), 29 passed |
+| Planted regression 2: shell route also accepts POST, fixtures untouched | 35 passed: (shell, POST) joined the inventory and its 4 cases ran; its POST 405 case dropped out |
+| Planted regression 3: `request.csrf_processing_done = True` in a view | Semgrep `no-csrf-exempt`: 1 blocking finding |
+| Registry Semgrep, `make e2e`, web lint/typecheck/vitest | not run locally; CI run 41172009362 on `436280b6`: checks, host, image, security pass |
+| Added-line secret scan; PR body scan for agent-addressed text | clean; none |
+| End: GitHub head re-read; checkout `git status --untracked-files=no` | unchanged; clean |
+
+### Residual risks and test gaps
+- The real-host restart and redeploy proof on staging is still an M1k evidence item (`deploy.md`).
+- Whether Chromium keeps the `__Host-` Secure cookies on plain `http://127.0.0.1:8000` is unchecked (plan Risk 4); it matters from M3's first browser POST.
+- The only POST through Caddy in the live tests is a refusal (body cap). No test shows that a same-origin POST with a valid token is **accepted** behind Caddy, which depends on Caddy passing `Host` and `X-Forwarded-Proto` so Django's Origin check matches. M3's first mutating route should get a `host_live` case accepted through Caddy with `Origin` and the token.
+- The gate has no logged-in fixture yet; M3 adds one, and must rotate and re-deliver the CSRF token at login (owner addition 2026-10-27).
+- `test_session_live.py` depends on file order and shared state (documented in its docstring); running one test alone fails with a clear message.
+
+### Required before merge
+- None.
+
+### Deferred conditions
+- None from this PR. (PR 74's deferred P2 still applies to the first M3 PR.)
+
+### Optional improvements
+- The two P3 items, in the M3 plan PR.
