@@ -88,6 +88,26 @@ FILES_ROOT = os.environ.get("SKIW_FILES_ROOT", "")
 # Age after which the sweeper removes tmp/*.part and quarantine leftovers (spec §8.4 H5 [A]).
 FILES_SWEEP_AGE_S = 3600
 
+# Django's default LOGGING prints django.* only with DEBUG on, so security warnings (a rejected
+# session row, M2c) reached nothing on hosts. django.security goes to stderr (the container log);
+# the other default handlers and library loggers are kept (plan M3 (a)).
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"plain": {"format": "%(levelname)s %(name)s %(message)s"}},
+    "handlers": {
+        "stderr": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+            "level": "WARNING",
+            "formatter": "plain",
+        }
+    },
+    "loggers": {
+        "django.security": {"handlers": ["stderr"], "level": "WARNING", "propagate": False}
+    },
+}
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 TIME_ZONE = "Asia/Kuala_Lumpur"
 USE_TZ = True

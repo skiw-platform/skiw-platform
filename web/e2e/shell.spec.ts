@@ -7,6 +7,23 @@ test("healthz answers ok", async ({ request }) => {
   expect(await response.text()).toBe("ok");
 });
 
+test("the browser keeps the __Host-csrftoken cookie and sends it back", async ({
+  page,
+  context,
+}) => {
+  const csrfCookie = async () =>
+    (await context.cookies()).find((cookie) => cookie.name === "__Host-csrftoken");
+  const response = await page.goto("/");
+  const setCookie = (await response?.headerValues("set-cookie")) ?? [];
+  expect(setCookie.some((value) => value.startsWith("__Host-csrftoken="))).toBe(true);
+  const first = await csrfCookie();
+  expect(first).toMatchObject({ secure: true, httpOnly: true, sameSite: "Strict", path: "/" });
+  await page.reload();
+  // Django mints a new secret when the request carries no cookie, so an equal value proves the
+  // browser sent it back.
+  expect((await csrfCookie())?.value).toBe(first?.value);
+});
+
 test("shell has one main, one h1 and a named nav", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("main")).toHaveCount(1);

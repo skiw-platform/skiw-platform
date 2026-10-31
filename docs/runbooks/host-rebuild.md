@@ -119,6 +119,10 @@ after each change. Removing the old version at once, or replacing the file, logs
 (the next request gets an empty session and the cookie is deleted): that is the wanted effect when
 the key may have leaked. No script rotates app keys yet, and the escrow after every rotation (spec
 §8.4 H4) still applies.
+Both `web` (`config.asgi`) and `worker` (`runworker`, from M3a) refuse to start when the file is
+missing or malformed, before the migration check and without printing the key. A version number
+has at most six digits (`v1` to `v999999`): the reader and `bootstrap-secrets restore` refuse a
+larger one.
 
 ### Before you start
 - `age` v1.3.2 at `/usr/local/bin/age`, installed from `age-v1.3.2-linux-amd64.tar.gz` after

@@ -8,11 +8,12 @@ import secrets
 import subprocess
 import sys
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from accounts.source_key import require_key
+from accounts.source_key import require_key, seal, unseal
 from config import env
 
 APP_DIR = Path(__file__).resolve().parent.parent
@@ -28,8 +29,8 @@ def no_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     require_key.cache_clear()
 
 
-def line(size: int = 32) -> str:
-    return "v1:" + base64.b64encode(secrets.token_bytes(size)).decode()
+def line(size: int = 32, version: int = 1) -> str:
+    return f"v{version}:" + base64.b64encode(secrets.token_bytes(size)).decode()
 
 
 def test_require_key_refuses_a_missing_key() -> None:
@@ -37,7 +38,11 @@ def test_require_key_refuses_a_missing_key() -> None:
         require_key()
 
 
-@pytest.mark.parametrize("value", ["v1:not-base64!", line(16), "1:" + line()[3:], ""])
+@pytest.mark.parametrize(
+    "value",
+    ["v1:not-base64!", line(16), "1:" + line()[3:], "", line(version=1_000_000)],
+    ids=["not-base64", "short", "no-v", "empty", "seven-digit-version"],
+)
 def test_require_key_refuses_a_malformed_key(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     monkeypatch.setenv("TENANT_SOURCE_KEY", value)
     with pytest.raises((env.InvalidSettingError, env.MissingSettingError)):
@@ -49,6 +54,14 @@ def test_require_key_loads_once(monkeypatch: pytest.MonkeyPatch) -> None:
     first = require_key()
     monkeypatch.setenv("TENANT_SOURCE_KEY", line())
     assert require_key() is first and first[0][0] == 1 and len(first[0][1]) == 32
+
+
+def test_the_highest_version_seals_and_verifies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """source_key.SEALED takes at most six digits; the key reader is bounded the same (M3 (c))."""
+    monkeypatch.setenv("TENANT_SOURCE_KEY", line(version=999_999))
+    when = datetime(2026, 10, 31, tzinfo=UTC)
+    sealed = seal("stored", when, "blob")
+    assert sealed.startswith("v999999:") and unseal("stored", when, sealed) == "blob"
 
 
 def start(code: str, **extra: str) -> subprocess.CompletedProcess[str]:
@@ -84,6 +97,14 @@ def test_asgi_refuses_a_bad_key_before_the_migration_check(value: str | None) ->
     assert result.returncode != 0
     assert "TENANT_SOURCE_KEY" in result.stderr.splitlines()[-1]
     assert "cannot verify migrations" not in result.stderr
+
+
+def test_asgi_refuses_a_seven_digit_version_without_echoing_the_key() -> None:
+    value = line(version=1_000_000)
+    result = start("import config.asgi", TENANT_SOURCE_KEY=value)
+    assert result.returncode != 0
+    assert "TENANT_SOURCE_KEY: line 1 is not v<n>:<base64>" in result.stderr.splitlines()[-1]
+    assert value.partition(":")[2] not in result.stderr
 
 
 def test_asgi_with_a_valid_key_goes_on_to_the_migration_check() -> None:

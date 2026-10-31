@@ -240,6 +240,19 @@ def test_restore_refuses_a_bad_bundle_and_writes_nothing(
     assert not other.root.exists()
 
 
+def test_restore_refuses_a_seven_digit_version_without_echoing_it(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The app reads at most v999999 (config.env KEY_LINE, accounts.source_key SEALED)."""
+    big = entry(1_000_000)
+    keys = {name: [big if name == "field_kek" else entry(1)] for name in APP_KEYS}
+    other = restored(tmp_path, {"format": "skiw-escrow-1", "keys": keys})
+    assert other.code == 2
+    err = capfd.readouterr().err
+    assert "field_kek: version entry 1 is malformed or repeated" in err
+    assert big["line"].partition(":")[2] not in err and not other.root.exists()
+
+
 def test_restore_refuses_a_non_empty_store(tmp_path: Path) -> None:
     other = Rig(tmp_path, "b")
     other.secrets.mkdir(parents=True)

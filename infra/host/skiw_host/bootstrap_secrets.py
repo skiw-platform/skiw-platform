@@ -27,7 +27,7 @@ from skiw_host import escrow
 from skiw_host.secrets import APP_KEYS, OWNER
 
 KEY_BYTES = 32  # app/config/env.py MIN_KEY_BYTES
-KEY_LINE = re.compile(r"v([1-9][0-9]*):([A-Za-z0-9+/]+={0,2})")
+KEY_LINE = re.compile(r"v([1-9][0-9]{0,5}):([A-Za-z0-9+/]+={0,2})")  # app/config/env.py KEY_LINE
 FORMAT = "skiw-escrow-1"
 MARKER = ".restored"
 DIR_MODE = stat.S_IRWXU  # 0700: only root enters the secret and escrow directories
