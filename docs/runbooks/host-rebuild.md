@@ -18,6 +18,15 @@ The same env file sets the session lifetime for `web`, `worker` and `migrate`:
 minutes, 1 to 1440) (spec D6, §8.1; M2b). Compose refuses to render without them, and the app
 refuses to start on a value outside the bounds. Keep the values in all three env files.
 
+It also sets the interim auth values for the same three services (owner Q6 (a), M3b; bounds in
+`app/config/settings.py`, meaning in `.env.example`): `SKIW_ARGON2_MEMORY_KIB=65536`,
+`SKIW_ARGON2_TIME_COST=3`, `SKIW_ARGON2_PARALLELISM=1` (T5), `SKIW_AUTH_FAILS_PER_ACCOUNT=5`,
+`SKIW_AUTH_FAILS_PER_IP=20`, `SKIW_AUTH_WINDOW_MIN=15`, `SKIW_AUTH_LOCK_AFTER=10`,
+`SKIW_AUTH_LOCK_MIN=30`, `SKIW_TOTP_SKEW_STEPS=1` (Flow 5.1, T18), `SKIW_STEPUP_MAX_AGE_MIN=5`
+(§8.1), `SKIW_LOGIN_PENDING_MIN=5` and `SKIW_ENROL_LINK_MIN=30` (builder values). Each one is
+required, the same way. Nothing reads them yet: the Argon2 values from M3b-2 (password hashing;
+each verify then takes `SKIW_ARGON2_MEMORY_KIB` of `web` memory), the others from M3c on.
+
 Before the first run, as root: `apt-get install nftables gnupg`, then fetch Docker's apt key to
 `/etc/apt/keyrings/docker.asc` (root, 0644):
 `curl -fsSL -o /etc/apt/keyrings/docker.asc https://download.docker.com/linux/ubuntu/gpg`.
@@ -123,6 +132,17 @@ Both `web` (`config.asgi`) and `worker` (`runworker`, from M3a) refuse to start 
 missing or malformed, before the migration check and without printing the key. A version number
 has at most six digits (`v1` to `v999999`): the reader and `bootstrap-secrets restore` refuse a
 larger one.
+
+### Rotating `login_blob_key` (login and credential blobs, M3b)
+`web` and `worker` read it from `LOGIN_BLOB_KEY_FILE` (`migrate` never mounts it) and refuse to
+start when it is missing or malformed, before the migration check and without printing the key.
+Its version must be at most `v65535`, because each blob stores the version in two bytes (the
+blob module lands in M3b-2). The highest version seals new blobs; every listed version opens. Each
+`app_user.login_blob_ct` and `user_factor.lookup_blob_ct` (from M3e and M3g) stays sealed under the
+version that wrote it, so a rotation adds a new, higher line and keeps every old one until a later
+job re-seals the blobs (spec T16; not built yet). Removing a version that still seals a blob
+makes that account's password login, or that passkey, fail as if the account were unknown.
+Restart `web` and `worker` after each change, then escrow (spec §8.4 H4).
 
 ### Before you start
 - `age` v1.3.2 at `/usr/local/bin/age`, installed from `age-v1.3.2-linux-amd64.tar.gz` after

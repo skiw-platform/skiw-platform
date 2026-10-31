@@ -7,9 +7,13 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 application = get_asgi_application()
 
 # Imported after Django is set up. Refuse to serve without a valid tenant_source_key (sessions are
-# MAC-verified, plan M2c) or against unapplied migrations (spec D16).
+# MAC-verified, plan M2c) or login_blob_key (login blobs, plan M3b), or against unapplied
+# migrations (spec D16).
+from django.conf import settings  # noqa: E402
+
 from accounts.source_key import require_key  # noqa: E402
 from jobs.startup import require_migrated  # noqa: E402
 
 require_key()
+settings.SKIW_LOGIN_BLOB_KEYS()
 require_migrated()

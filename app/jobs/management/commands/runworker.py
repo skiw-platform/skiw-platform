@@ -14,8 +14,10 @@ class Command(BaseCommand):
         parser.add_argument("worker_args", nargs="*", help="passed to `procrastinate worker`")
 
     def handle(self, *args: Any, **options: Any) -> None:
-        # Fail closed on a missing or malformed tenant_source_key, as config.asgi does for web
-        # (plan M3 (j)); through settings, so jobs imports no accounts.
+        # Fail closed on a missing or malformed tenant_source_key or login_blob_key, as
+        # config.asgi does for web (plan M3 (j), M3b); through settings, so jobs imports no
+        # accounts.
         settings.SKIW_TENANT_SOURCE_KEYS()
+        settings.SKIW_LOGIN_BLOB_KEYS()
         require_migrated()
         call_command("procrastinate", "worker", *options["worker_args"])

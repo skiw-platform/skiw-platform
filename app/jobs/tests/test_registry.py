@@ -13,6 +13,7 @@ from procrastinate.jobs import DeleteJobCondition
 from jobs.enqueue import enqueue_in_tx
 from jobs.registry import id_schema, job
 from jobs.tasks import noop
+from tests.settings_env import REQUIRED
 
 APP_DIR = Path(__file__).resolve().parents[2]
 # Registered by Procrastinate itself; nothing defers it and skiw_app cannot run it (spec §4.1).
@@ -42,8 +43,7 @@ def test_production_settings_register_only_the_probe_task() -> None:
         "DJANGO_SETTINGS_MODULE": "config.settings",
         "DJANGO_SECRET_KEY": "test-only-not-a-secret",
         "DATABASE_URL": "postgres://u:p@localhost:5432/db",
-        "SKIW_SESSION_ABSOLUTE_H": "12",
-        "SKIW_SESSION_IDLE_MIN": "30",
+        **REQUIRED,
     }
     code = (
         "import json, django; django.setup();"

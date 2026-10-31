@@ -176,10 +176,26 @@ jobs:
           DATABASE_URL: postgres://labels@127.0.0.1:5432/none
           SKIW_SESSION_ABSOLUTE_H: "12"
           SKIW_SESSION_IDLE_MIN: "30"
+          SKIW_ARGON2_MEMORY_KIB: "65536"
+          SKIW_ARGON2_TIME_COST: "3"
+          SKIW_ARGON2_PARALLELISM: "1"
+          SKIW_AUTH_FAILS_PER_ACCOUNT: "5"
+          SKIW_AUTH_FAILS_PER_IP: "20"
+          SKIW_AUTH_WINDOW_MIN: "15"
+          SKIW_AUTH_LOCK_AFTER: "10"
+          SKIW_AUTH_LOCK_MIN: "30"
+          SKIW_STEPUP_MAX_AGE_MIN: "5"
+          SKIW_TOTP_SKEW_STEPS: "1"
+          SKIW_LOGIN_PENDING_MIN: "5"
+          SKIW_ENROL_LINK_MIN: "30"
         run: |
           docker run --rm --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges -e DJANGO_SECRET_KEY -e DATABASE_URL \
             -e SKIW_SESSION_ABSOLUTE_H -e SKIW_SESSION_IDLE_MIN \
+            -e SKIW_ARGON2_MEMORY_KIB -e SKIW_ARGON2_TIME_COST -e SKIW_ARGON2_PARALLELISM \
+            -e SKIW_AUTH_FAILS_PER_ACCOUNT -e SKIW_AUTH_FAILS_PER_IP -e SKIW_AUTH_WINDOW_MIN \
+            -e SKIW_AUTH_LOCK_AFTER -e SKIW_AUTH_LOCK_MIN -e SKIW_STEPUP_MAX_AGE_MIN \
+            -e SKIW_TOTP_SKEW_STEPS -e SKIW_LOGIN_PENDING_MIN -e SKIW_ENROL_LINK_MIN \
             skiw-platform:unlabelled python app/manage.py migration_labels \
             > "$RUNNER_TEMP/migrations.json"
           PYTHONPATH=infra/host python3 -m skiw_host.labels "$GITHUB_SHA" \

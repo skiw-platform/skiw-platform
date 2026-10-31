@@ -5,7 +5,11 @@ NODE_MAJOR := $(shell node -p "process.versions.node.split('.')[0]" 2>/dev/null)
 SEMGREP_VERSION := 1.179.0
 PIP_AUDIT_VERSION := 2.10.1
 TOOL_ENV := DJANGO_SECRET_KEY=tooling-only-not-a-secret DATABASE_URL=postgres://u:p@localhost:5432/db \
-	SKIW_SESSION_ABSOLUTE_H=12 SKIW_SESSION_IDLE_MIN=30
+	SKIW_SESSION_ABSOLUTE_H=12 SKIW_SESSION_IDLE_MIN=30 \
+	SKIW_ARGON2_MEMORY_KIB=65536 SKIW_ARGON2_TIME_COST=3 SKIW_ARGON2_PARALLELISM=1 \
+	SKIW_AUTH_FAILS_PER_ACCOUNT=5 SKIW_AUTH_FAILS_PER_IP=20 SKIW_AUTH_WINDOW_MIN=15 \
+	SKIW_AUTH_LOCK_AFTER=10 SKIW_AUTH_LOCK_MIN=30 SKIW_STEPUP_MAX_AGE_MIN=5 \
+	SKIW_TOTP_SKEW_STEPS=1 SKIW_LOGIN_PENDING_MIN=5 SKIW_ENROL_LINK_MIN=30
 
 check-node:
 	@test "$(NODE_MAJOR)" = "24" || { echo "Node 24 is required (see .node-version); run: fnm use"; exit 1; }
@@ -85,11 +89,13 @@ web-dev: check-node
 build: web-build
 	docker compose build
 
-# The local tenant_source_key is generated, never committed (UNI-07; the gitleaks rule flags any
-# literal value for it); an older .env without it: docs/runbooks/local-dev.md.
+# The local tenant_source_key and login_blob_key are generated, never committed (UNI-07; the
+# gitleaks rule flags any literal value for them); an older .env without them:
+# docs/runbooks/local-dev.md.
 .env:
 	cp .env.example .env
 	printf 'TENANT_SOURCE_KEY=v1:%s\n' "$$(openssl rand -base64 32)" >> .env
+	printf 'LOGIN_BLOB_KEY=v1:%s\n' "$$(openssl rand -base64 32)" >> .env
 
 dev: .env web-build
 	docker compose up -d --wait db

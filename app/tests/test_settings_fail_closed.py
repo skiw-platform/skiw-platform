@@ -5,12 +5,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.settings_env import REQUIRED
+
 APP_DIR = Path(__file__).resolve().parent.parent
 GOOD = {
     "DJANGO_SECRET_KEY": "test-only-not-a-secret",
     "DATABASE_URL": "postgres://u:p@localhost:5432/db",
-    "SKIW_SESSION_ABSOLUTE_H": "12",
-    "SKIW_SESSION_IDLE_MIN": "30",
+    **REQUIRED,
 }
 
 

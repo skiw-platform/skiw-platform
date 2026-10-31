@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from config.env import InvalidSettingError, MissingSettingError, database_from_url
+from tests.settings_env import REQUIRED
 
 APP_DIR = Path(__file__).resolve().parent.parent
 BASE = "postgres://u:p%40ss@db.example:5433/skiw"
@@ -59,8 +60,7 @@ def test_settings_pass_tls_options_through_to_databases() -> None:
         "DJANGO_SECRET_KEY": "test-only-not-a-secret",
         "DJANGO_REQUIRE_DB_TLS": "1",
         "DATABASE_URL": f"{BASE}?sslmode=verify-full&sslrootcert=/etc/ssl/rds-ca.pem",
-        "SKIW_SESSION_ABSOLUTE_H": "12",
-        "SKIW_SESSION_IDLE_MIN": "30",
+        **REQUIRED,
     }
     code = "import json, config.settings as s; print(json.dumps(s.DATABASES['default']['OPTIONS']))"
     result = subprocess.run(

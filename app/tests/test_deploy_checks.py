@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests.settings_env import REQUIRED
+
 APP_DIR = Path(__file__).resolve().parent.parent
 # The variables infra/host/compose.yml x-app-env gives web and worker (no password file: the
 # deploy checks open no connection).
@@ -15,8 +17,7 @@ HOST_ENV = {
     "DATABASE_URL": "postgres://skiw_app@db:5432/skiw",
     "DJANGO_ALLOWED_HOSTS": "skiw.test",
     "DJANGO_BEHIND_CADDY": "1",
-    "SKIW_SESSION_ABSOLUTE_H": "12",
-    "SKIW_SESSION_IDLE_MIN": "30",
+    **REQUIRED,
 }
 CHECK = ["check", "--deploy", "--fail-level", "WARNING"]
 ALLOWED = {

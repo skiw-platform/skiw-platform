@@ -32,8 +32,21 @@ x-app-env: &app-env
   DJANGO_BEHIND_CADDY: "1"  # trust X-Forwarded-Proto: clients reach web only via Caddy, which sets it
   SKIW_SESSION_ABSOLUTE_H: ${SKIW_SESSION_ABSOLUTE_H:?}
   SKIW_SESSION_IDLE_MIN: ${SKIW_SESSION_IDLE_MIN:?}
-  # web and worker only: migrate does not mount tenant_source_key (H4); settings read it lazily.
+  SKIW_ARGON2_MEMORY_KIB: ${SKIW_ARGON2_MEMORY_KIB:?}
+  SKIW_ARGON2_TIME_COST: ${SKIW_ARGON2_TIME_COST:?}
+  SKIW_ARGON2_PARALLELISM: ${SKIW_ARGON2_PARALLELISM:?}
+  SKIW_AUTH_FAILS_PER_ACCOUNT: ${SKIW_AUTH_FAILS_PER_ACCOUNT:?}
+  SKIW_AUTH_FAILS_PER_IP: ${SKIW_AUTH_FAILS_PER_IP:?}
+  SKIW_AUTH_WINDOW_MIN: ${SKIW_AUTH_WINDOW_MIN:?}
+  SKIW_AUTH_LOCK_AFTER: ${SKIW_AUTH_LOCK_AFTER:?}
+  SKIW_AUTH_LOCK_MIN: ${SKIW_AUTH_LOCK_MIN:?}
+  SKIW_STEPUP_MAX_AGE_MIN: ${SKIW_STEPUP_MAX_AGE_MIN:?}
+  SKIW_TOTP_SKEW_STEPS: ${SKIW_TOTP_SKEW_STEPS:?}
+  SKIW_LOGIN_PENDING_MIN: ${SKIW_LOGIN_PENDING_MIN:?}
+  SKIW_ENROL_LINK_MIN: ${SKIW_ENROL_LINK_MIN:?}
+  # web and worker only: migrate mounts neither key (H4); settings read them lazily.
   TENANT_SOURCE_KEY_FILE: /run/secrets/tenant_source_key
+  LOGIN_BLOB_KEY_FILE: /run/secrets/login_blob_key
 
 x-app-secrets: &app-secrets
   - django_secret_key
@@ -101,6 +114,18 @@ services:
       # Settings import needs them; not x-app-env, which carries the skiw_app credentials.
       SKIW_SESSION_ABSOLUTE_H: ${SKIW_SESSION_ABSOLUTE_H:?}
       SKIW_SESSION_IDLE_MIN: ${SKIW_SESSION_IDLE_MIN:?}
+      SKIW_ARGON2_MEMORY_KIB: ${SKIW_ARGON2_MEMORY_KIB:?}
+      SKIW_ARGON2_TIME_COST: ${SKIW_ARGON2_TIME_COST:?}
+      SKIW_ARGON2_PARALLELISM: ${SKIW_ARGON2_PARALLELISM:?}
+      SKIW_AUTH_FAILS_PER_ACCOUNT: ${SKIW_AUTH_FAILS_PER_ACCOUNT:?}
+      SKIW_AUTH_FAILS_PER_IP: ${SKIW_AUTH_FAILS_PER_IP:?}
+      SKIW_AUTH_WINDOW_MIN: ${SKIW_AUTH_WINDOW_MIN:?}
+      SKIW_AUTH_LOCK_AFTER: ${SKIW_AUTH_LOCK_AFTER:?}
+      SKIW_AUTH_LOCK_MIN: ${SKIW_AUTH_LOCK_MIN:?}
+      SKIW_STEPUP_MAX_AGE_MIN: ${SKIW_STEPUP_MAX_AGE_MIN:?}
+      SKIW_TOTP_SKEW_STEPS: ${SKIW_TOTP_SKEW_STEPS:?}
+      SKIW_LOGIN_PENDING_MIN: ${SKIW_LOGIN_PENDING_MIN:?}
+      SKIW_ENROL_LINK_MIN: ${SKIW_ENROL_LINK_MIN:?}
     secrets:
       [django_secret_key, skiw_migrator_password, tenant_token_key, approval_mac_key, lookup_decoy_key]
     healthcheck: {disable: true}

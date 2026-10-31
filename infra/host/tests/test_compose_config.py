@@ -303,40 +303,53 @@ def test_worker_runs_runworker_with_the_declared_stop_grace(config: Config) -> N
 
 
 SESSION_LIFETIME = ("SKIW_SESSION_ABSOLUTE_H", "SKIW_SESSION_IDLE_MIN")  # D6, §8.1 (M2b)
+# Interim auth values (owner Q6 (a), plan M3b): T5, Flow 5.1, T18, §8.1.
+AUTH_VALUES = (
+    *(f"SKIW_ARGON2_{n}" for n in ("MEMORY_KIB", "TIME_COST", "PARALLELISM")),
+    *(f"SKIW_AUTH_{n}" for n in ("FAILS_PER_ACCOUNT", "FAILS_PER_IP", "WINDOW_MIN")),
+    *(f"SKIW_AUTH_{n}" for n in ("LOCK_AFTER", "LOCK_MIN")),
+    "SKIW_STEPUP_MAX_AGE_MIN",
+    "SKIW_TOTP_SKEW_STEPS",
+    "SKIW_LOGIN_PENDING_MIN",
+    "SKIW_ENROL_LINK_MIN",
+)
+SETTINGS_VALUES = SESSION_LIFETIME + AUTH_VALUES
 DB_ROLE = {"web": "skiw_app", "worker": "skiw_app", "migrate": "skiw_migrator"}
 
 
-def test_every_settings_importer_gets_the_session_lifetime_and_keeps_its_role(
+def test_every_settings_importer_gets_the_bounded_values_and_keeps_its_role(
     config: Config,
 ) -> None:
     values = declared("ci.env")
     for name, role in DB_ROLE.items():
         env = config["services"][name]["environment"]
-        assert {k: env[k] for k in SESSION_LIFETIME} == {k: values[k] for k in SESSION_LIFETIME}
+        assert {k: env[k] for k in SETTINGS_VALUES} == {k: values[k] for k in SETTINGS_VALUES}
         assert env["DATABASE_URL"] == f"postgres://{role}@db:5432/{values['SKIW_POSTGRES_DB']}"
         assert env["DATABASE_PASSWORD_FILE"] == f"/run/secrets/{role}_password"
 
 
-@pytest.mark.parametrize("name", SESSION_LIFETIME)
-def test_a_missing_session_lifetime_refuses_to_render(name: str) -> None:
+@pytest.mark.parametrize("name", SETTINGS_VALUES)
+def test_a_missing_bounded_value_refuses_to_render(name: str) -> None:
     assert render(ENV / "ci.env", **{name: ""}).returncode != 0
 
 
-def test_only_web_and_worker_read_the_session_mac_key_from_its_secret_file(
-    config: Config,
+@pytest.mark.parametrize("key", ["tenant_source_key", "login_blob_key"])
+def test_only_web_and_worker_read_the_app_key_from_its_secret_file(
+    config: Config, key: str
 ) -> None:
-    """Plan M2c: TENANT_SOURCE_KEY_FILE is a secret-file path on web and worker only; migrate
-    imports settings without it (spec §8.4 H4)."""
+    """Plans M2c, M3b: <KEY>_FILE is a secret-file path on web and worker only; migrate imports
+    settings without it (spec §8.4 H4)."""
+    variable = key.upper()
     holders = {
-        name: service["environment"]["TENANT_SOURCE_KEY_FILE"]
+        name: service["environment"][f"{variable}_FILE"]
         for name, service in services(config)
-        if "TENANT_SOURCE_KEY_FILE" in (service.get("environment") or {})
+        if f"{variable}_FILE" in (service.get("environment") or {})
     }
-    assert holders == dict.fromkeys(("web", "worker"), "/run/secrets/tenant_source_key")
+    assert holders == dict.fromkeys(("web", "worker"), f"/run/secrets/{key}")
     for name in holders:
-        assert "tenant_source_key" in {s["source"] for s in config["services"][name]["secrets"]}
+        assert key in {s["source"] for s in config["services"][name]["secrets"]}
     for _, service in services(config):
-        assert "TENANT_SOURCE_KEY" not in (service.get("environment") or {})
+        assert variable not in (service.get("environment") or {})
 
 
 def test_profiles_and_networks(config: Config) -> None:
