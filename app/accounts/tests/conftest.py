@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -25,6 +26,16 @@ def fresh_source_key() -> Iterator[None]:
     require_key.cache_clear()
     yield
     require_key.cache_clear()
+
+
+@pytest.fixture
+def security_log(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """django.security does not propagate to the root logger (settings LOGGING), where caplog
+    listens, so its handler is attached to django.security for the test."""
+    logger = logging.getLogger("django.security")
+    logger.addHandler(caplog.handler)
+    yield caplog
+    logger.removeHandler(caplog.handler)
 
 
 @pytest.fixture(scope="session")

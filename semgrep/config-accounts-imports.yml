@@ -1,0 +1,68 @@
+rules:
+  - id: config-accounts-imports
+    languages: [python]
+    severity: ERROR
+    message: >-
+      config may import from accounts only accounts.views (in config/urls.py) and
+      accounts.source_key (in config/asgi.py). The TEN-10 import contract ignores the one edge
+      config.urls -> accounts.views (owner Q10 (a), plan M3a); any other import, and any import by
+      string (import_module, import_string, __import__, include), would reach the session store
+      past the contract.
+    paths:
+      include:
+        - /app/config/
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: import $M
+              - pattern: from $M import $N
+          - metavariable-regex:
+              metavariable: $M
+              regex: ^accounts(\.|$)
+          - pattern-not: import accounts.views
+          - pattern-not: from accounts import views
+          - pattern-not: from accounts.views import $N
+          - pattern-not: import accounts.source_key
+          - pattern-not: from accounts import source_key
+          - pattern-not: from accounts.source_key import $N
+      - patterns:
+          - pattern-either:
+              - pattern: importlib.import_module("$S", ...)
+              - pattern: django.utils.module_loading.import_string("$S", ...)
+              - pattern: __import__("$S", ...)
+              - pattern: django.urls.include("$S", ...)
+          - metavariable-regex:
+              metavariable: $S
+              regex: ^accounts(\.|$)
+
+  - id: config-accounts-views-in-urls-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only config/urls.py may import accounts.views: the TEN-10 contract ignores exactly
+      config.urls -> accounts.views (owner Q10 (a), plan M3a).
+    paths:
+      include:
+        - /app/config/
+      exclude:
+        - /app/config/urls.py
+    pattern-either:
+      - pattern: import accounts.views
+      - pattern: from accounts import views
+      - pattern: from accounts.views import $N
+
+  - id: config-accounts-source-key-in-asgi-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only config/asgi.py may import accounts.source_key: its start-up key check (DECISIONS M2c
+      deviation (a)).
+    paths:
+      include:
+        - /app/config/
+      exclude:
+        - /app/config/asgi.py
+    pattern-either:
+      - pattern: import accounts.source_key
+      - pattern: from accounts import source_key
+      - pattern: from accounts.source_key import $N

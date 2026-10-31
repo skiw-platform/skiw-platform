@@ -128,10 +128,14 @@ source_modules = ["documents.storage", "documents.clamd"]
 forbidden_modules = ["psycopg", "procrastinate"]
 
 # TEN-10 allow-list (spec §4.1 `django_session`, §4.2): only accounts touches the session table.
-# accounts.models is left unlisted for M3's user models, but its Session re-export still trips this
-# contract as an indirect import; M3 decides (DECISIONS 2026-10-30 M2b, ASK).
+# One named edge (owner Q10 (a), plan M3 §3 M3a): config.urls mounts accounts.views, whose login
+# views reach accounts.session. Semgrep config-accounts-imports keeps every other config import of
+# accounts out (asgi.py -> accounts.source_key, M2c, aside). "warn" only until config.urls first
+# imports accounts.views (the first login route), because an unmatched ignore is an error.
 [[tool.importlinter.contracts]]
 name = "Only accounts may import the session store and its model (TEN-10)"
 type = "forbidden"
 source_modules = ["config", "health", "shell", "jobs", "documents", "skiw_host"]
-forbidden_modules = ["accounts.session", "accounts.session_model"]
+forbidden_modules = ["accounts.session", "accounts.session_model", "accounts.models"]
+ignore_imports = ["config.urls -> accounts.views"]
+unmatched_ignore_imports_alerting = "warn"

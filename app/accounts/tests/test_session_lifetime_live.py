@@ -95,6 +95,39 @@ def test_acycle_key_preserves_the_deadline(clock: Clock) -> None:
     assert row_deadline(str(store.session_key)) == deadline and row_deadline(cookie) is None
 
 
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_a_fresh_store_loads_the_renewed_row(
+    clock: Clock, security_log: pytest.LogCaptureFixture, asynchronous: bool
+) -> None:
+    """After start_new_lifetime() + cycle_key() + save, the MAC covers the new key and the new
+    deadline, so the next request's fresh store reads the row back (plan M3 (d))."""
+    store = SessionStore(started_at_t0(clock))
+    probe = store["probe"]
+
+    async def renew() -> SessionStore:
+        await store.astart_new_lifetime()
+        await store.aset("user", "u1")
+        await store.acycle_key()
+        await store.asave()
+        fresh = SessionStore(store.session_key)
+        assert await fresh.aget("user") == "u1" and await fresh.aget("probe") == probe
+        assert await fresh.aget_expiry_date() == clock.now + absolute()
+        return fresh
+
+    if asynchronous:
+        fresh = async_to_sync(renew)()
+    else:
+        store.start_new_lifetime()
+        store["user"] = "u1"
+        store.cycle_key()
+        store.save()
+        fresh = SessionStore(store.session_key)
+        assert fresh["user"] == "u1" and fresh["probe"] == probe
+        assert fresh.get_expiry_date() == clock.now + absolute()  # T0 + 23 h, not T0 + 12 h
+    assert fresh.session_key == store.session_key and row_deadline(str(fresh.session_key))
+    assert not [r for r in security_log.records if r.name.startswith("django.security")]
+
+
 class StubUser:
     """Just what login()/alogin() read when given a backend: pk and _meta.pk.value_to_string."""
 

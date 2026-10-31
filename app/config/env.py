@@ -19,7 +19,8 @@ class InvalidSettingError(RuntimeError):
 TLS_OPTIONS = ("sslmode", "sslrootcert", "sslcert", "sslkey", "sslcrl")
 SSL_MODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
 STRICT_SSL_MODES = ("verify-ca", "verify-full")
-KEY_LINE = re.compile(r"v([1-9][0-9]*):([A-Za-z0-9+/]+={0,2})")
+# At most six digits, as accounts.source_key.SEALED reads them back (plan M3 (c)).
+KEY_LINE = re.compile(r"v([1-9][0-9]{0,5}):([A-Za-z0-9+/]+={0,2})")
 WHOLE_NUMBER = re.compile(r"[0-9]{1,6}")  # ASCII digits only: int() also takes "+1", "1_0", " 1"
 MIN_KEY_BYTES = 32  # bootstrap-secrets mints 32 random bytes per key version (spec §8.4 H4)
 

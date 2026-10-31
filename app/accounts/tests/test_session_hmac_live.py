@@ -195,8 +195,9 @@ def test_an_old_version_verifies_while_listed_and_is_rejected_once_removed(
 
 
 def test_the_warning_carries_no_key_cookie_mac_or_session_value(
-    caplog: pytest.LogCaptureFixture,
+    security_log: pytest.LogCaptureFixture,
 ) -> None:
+    caplog = security_log
     cookie = started()
     version, mac, blob = data_of(cookie).split(":", 2)
     probe = str(SessionStore().decode(blob)["probe"])

@@ -1,5 +1,6 @@
 from typing import Any
 
+from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandParser
 
@@ -13,5 +14,8 @@ class Command(BaseCommand):
         parser.add_argument("worker_args", nargs="*", help="passed to `procrastinate worker`")
 
     def handle(self, *args: Any, **options: Any) -> None:
+        # Fail closed on a missing or malformed tenant_source_key, as config.asgi does for web
+        # (plan M3 (j)); through settings, so jobs imports no accounts.
+        settings.SKIW_TENANT_SOURCE_KEYS()
         require_migrated()
         call_command("procrastinate", "worker", *options["worker_args"])

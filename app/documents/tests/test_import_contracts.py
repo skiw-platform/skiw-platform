@@ -1,5 +1,5 @@
-"""The files-volume (plan §3 M1i) and session-store (plan M2b) import-linter contracts fail on a
-planted import (UNI-04, TEN-10).
+"""The files-volume (plan §3 M1i) and session-store (plan M2b; the config.urls -> accounts.views
+edge, plan M3a, owner Q10 (a)) import-linter contracts fail on a planted import (UNI-04, TEN-10).
 
 lint-imports runs with this repository's own pyproject.toml on a stub tree that has every root
 package, so the contract text under test is exactly the one CI uses."""
@@ -57,9 +57,43 @@ def test_a_planted_db_import_breaks_the_contract(tmp_path: Path, module: str) ->
 
 
 @pytest.mark.parametrize("root", ["config", "health", "shell", "jobs", "documents", "skiw_host"])
-@pytest.mark.parametrize("target", ["accounts.session", "accounts.session_model"])
+@pytest.mark.parametrize(
+    "target", ["accounts.session", "accounts.session_model", "accounts.models"]
+)
 def test_a_planted_session_store_import_breaks_the_contract(
     tmp_path: Path, root: str, target: str
 ) -> None:
     out = lint(tmp_path, {f"{root}/planted.py": f"import {target}\n"})
     assert f"{SESSION} BROKEN" in out
+
+
+# accounts.views stands in for the login views: it reaches the store, as accounts.auth will.
+VIEWS = {"accounts/views.py": "import accounts.session\n"}
+
+
+def test_config_urls_may_import_accounts_views(tmp_path: Path) -> None:
+    out = lint(tmp_path, {**VIEWS, "config/urls.py": "from accounts import views\n"})
+    assert f"{SESSION} KEPT" in out and "0 broken" in out
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import accounts.session\n",
+        "from accounts import models\n",
+        "from accounts import views\nfrom accounts.session import SessionStore\n",
+        "from accounts import views\nimport accounts.models\n",
+    ],
+    ids=["store", "models", "views-and-store", "views-and-models"],
+)
+def test_config_urls_reaching_the_store_another_way_breaks_the_contract(
+    tmp_path: Path, source: str
+) -> None:
+    assert f"{SESSION} BROKEN" in lint(tmp_path, {**VIEWS, "config/urls.py": source})
+
+
+@pytest.mark.parametrize("module", ["config/other.py", "shell/planted.py", "jobs/planted.py"])
+def test_accounts_views_outside_config_urls_breaks_the_contract(
+    tmp_path: Path, module: str
+) -> None:
+    assert f"{SESSION} BROKEN" in lint(tmp_path, {**VIEWS, module: "from accounts import views\n"})
