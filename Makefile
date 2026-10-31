@@ -85,8 +85,11 @@ web-dev: check-node
 build: web-build
 	docker compose build
 
+# The local tenant_source_key is generated, never committed (UNI-07; the gitleaks rule flags any
+# literal value for it); an older .env without it: docs/runbooks/local-dev.md.
 .env:
 	cp .env.example .env
+	printf 'TENANT_SOURCE_KEY=v1:%s\n' "$$(openssl rand -base64 32)" >> .env
 
 dev: .env web-build
 	docker compose up -d --wait db

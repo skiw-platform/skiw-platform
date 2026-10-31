@@ -88,10 +88,11 @@ def secret_file(name: str) -> str:
         raise InvalidSettingError(f"{name}: the secret file cannot be read") from exc
 
 
-def key_versions(name: str) -> list[str]:
-    """`v<n>:<base64>` lines (spec §8.4 H4), newest version first. Fails closed on any bad line."""
-    versions: dict[int, str] = {}
-    for number, line in enumerate(secret_file(name).splitlines(), start=1):
+def parse_key_lines(name: str, text: str) -> list[tuple[int, str, bytes]]:
+    """`v<n>:<base64>` lines (spec §8.4 H4) as (n, base64, bytes), newest version first. Fails
+    closed on any bad line; errors name the line, never its content."""
+    versions: dict[int, tuple[str, bytes]] = {}
+    for number, line in enumerate(text.splitlines(), start=1):
         match = KEY_LINE.fullmatch(line)
         if match is None:
             raise InvalidSettingError(f"{name}: line {number} is not v<n>:<base64>")
@@ -101,10 +102,30 @@ def key_versions(name: str) -> list[str]:
             raise InvalidSettingError(f"{name}: line {number} is not valid base64") from exc
         if len(raw) < MIN_KEY_BYTES or int(match[1]) in versions:
             raise InvalidSettingError(f"{name}: line {number} is too short or a repeated version")
-        versions[int(match[1])] = match[2]
+        versions[int(match[1])] = (match[2], raw)
     if not versions:
-        raise InvalidSettingError(f"{name}: the secret file holds no key version")
-    return [versions[version] for version in sorted(versions, reverse=True)]
+        raise InvalidSettingError(f"{name}: holds no key version")
+    return [(n, *versions[n]) for n in sorted(versions, reverse=True)]
+
+
+def key_versions(name: str) -> list[str]:
+    """The base64 text of each version in secret file `name`, newest first."""
+    return [text for _, text, _ in parse_key_lines(name, secret_file(name))]
+
+
+def versioned_keys(name: str) -> list[tuple[int, bytes]]:
+    """(version, key bytes) of app key `name`, newest first: from the secret file named by
+    `<name>_FILE` on hosts, else from env var `name` (local and CI), in the same line format."""
+    file_name = f"{name}_FILE"
+    if file_name in os.environ:
+        if name in os.environ:
+            raise InvalidSettingError(f"set {name} or {file_name}, not both")
+        text, source = secret_file(file_name), file_name
+    elif os.environ.get(name):
+        text, source = os.environ[name], name
+    else:
+        raise MissingSettingError(f"{name} (or {file_name} on hosts) is required and not set")
+    return [(version, raw) for version, _, raw in parse_key_lines(source, text)]
 
 
 def secret_key() -> tuple[str, list[str]]:

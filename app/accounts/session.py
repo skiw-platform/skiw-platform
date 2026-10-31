@@ -8,6 +8,9 @@ app/accounts/tests/test_session_store_surface.py pins that list against Django's
 Each session has one absolute deadline, now + SKIW_SESSION_ABSOLUTE_H when it starts. Saves and
 key rotation (cycle_key) keep it; Django's sliding expiry is never used. Only
 start_new_lifetime(), called by M3's successful login just before login()'s cycle_key, renews it.
+
+session_data carries a MAC under tenant_source_key bound to the stored key and the row's
+expire_date (accounts.source_key; plan M2c). A row that fails it loads like a missing one.
 """
 
 import hashlib
@@ -19,6 +22,7 @@ from django.contrib.sessions.backends import db
 from django.contrib.sessions.backends.base import VALID_KEY_CHARS
 from django.utils import timezone
 
+from accounts import source_key
 from accounts.session_model import Session
 
 KEY_LENGTH = 32  # what Django's SessionBase._get_new_session_key mints (≈ 165 bits)
@@ -148,9 +152,15 @@ class SessionStore(db.SessionStore):
     def _loaded(self, row: Session | None) -> dict[str, Any]:
         if row is None:
             return {}
+        blob = source_key.unseal(row.session_key, row.expire_date, row.session_data)
+        if blob is None:
+            # As Django's not-found path: the next save mints a new key, so the rejected row is
+            # never updated in place, and its deadline is never taken (plan M2c Risk 2).
+            self._session_key = None
+            return {}
         if not self._renew_lifetime:
             self._absolute_expiry = row.expire_date
-        return self.decode(row.session_data)
+        return self.decode(blob)
 
     def load(self) -> dict[str, Any]:
         return self._loaded(self._get_session_from_db())
@@ -165,10 +175,11 @@ class SessionStore(db.SessionStore):
         return await Session.objects.filter(session_key=stored_key(session_key)).aexists()
 
     def create_model_instance(self, data: dict[str, Any]) -> Session:
+        key, deadline = stored_key(self._current_key()), self._ensure_deadline()
         return Session(
-            session_key=stored_key(self._current_key()),
-            session_data=self.encode(data),
-            expire_date=self._ensure_deadline(),
+            session_key=key,
+            session_data=source_key.seal(key, deadline, self.encode(data)),
+            expire_date=deadline,
         )
 
     async def acreate_model_instance(self, data: dict[str, Any]) -> Session:

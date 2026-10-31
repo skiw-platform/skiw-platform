@@ -31,6 +31,7 @@ services:
       DATABASE_URL: postgres://skiw_app:${SKIW_APP_PASSWORD:?set in .env}@db:5432/${POSTGRES_DB:?set in .env}
       SKIW_SESSION_ABSOLUTE_H: ${SKIW_SESSION_ABSOLUTE_H:?set in .env}
       SKIW_SESSION_IDLE_MIN: ${SKIW_SESSION_IDLE_MIN:?set in .env}
+      TENANT_SOURCE_KEY: ${TENANT_SOURCE_KEY:?set in .env}
     volumes:
       - ./app:/srv/app:ro
       - ./web/dist:/srv/web/dist:ro
@@ -48,6 +49,7 @@ services:
       DATABASE_URL: postgres://skiw_app:${SKIW_APP_PASSWORD:?set in .env}@db:5432/${POSTGRES_DB:?set in .env}
       SKIW_SESSION_ABSOLUTE_H: ${SKIW_SESSION_ABSOLUTE_H:?set in .env}
       SKIW_SESSION_IDLE_MIN: ${SKIW_SESSION_IDLE_MIN:?set in .env}
+      TENANT_SOURCE_KEY: ${TENANT_SOURCE_KEY:?set in .env}
     # The image's HEALTHCHECK probes the web port, which the worker does not serve.
     healthcheck:
       disable: true
