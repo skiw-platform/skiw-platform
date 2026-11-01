@@ -29,7 +29,7 @@ Applies from M0a. Other runbooks: [README](README.md); deployment, rollback and 
 | `make image-scan` | builds the image and scans it with Trivy (needs `brew install trivy`) |
 | `make hooks` | enables `.githooks/pre-push` (secret scan of pushed commits) |
 | `make db-up` | starts only the database and waits until healthy |
-| `make migrate` | runs migrations with `MIGRATION_DATABASE_URL` (`skiw_migrator`), then `makemigrations --check`, then `lintmigrations --warnings-as-errors` on the project's own apps (django-migration-linter; Procrastinate's migrations are excluded) |
+| `make migrate` | runs migrations with `MIGRATION_DATABASE_URL` (`skiw_migrator`), then `makemigrations --check`, then `lintmigrations --warnings-as-errors` on the project's own apps (django-migration-linter; Procrastinate's migrations are excluded, and so is `tenancy.0002_guard_key_tables_unlinted`, whose reverse `DROP TABLE` the linter flags; its forward and reverse are tested in `test_guard_schema_live.py`, `docs/DECISIONS.md` "M4c-2a") |
 | `make clean` | stops the stack and deletes the local database volume |
 
 ## Environment variables

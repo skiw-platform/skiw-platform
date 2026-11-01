@@ -19,7 +19,15 @@ if SKIW_BEHIND_CADDY:
 
 # Not django.contrib.sessions: its 0001_initial would create a second django_session table;
 # accounts owns that table (spec §4.1, plan M2b).
-INSTALLED_APPS = ["procrastinate.contrib.django", "config", "health", "shell", "jobs", "accounts"]
+INSTALLED_APPS = [
+    "procrastinate.contrib.django",
+    "config",
+    "tenancy",
+    "health",
+    "shell",
+    "jobs",
+    "accounts",
+]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",

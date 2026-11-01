@@ -319,9 +319,12 @@ sudo env SKIW_IMAGE="$image" bootstrap-db apply --env-file /etc/skiw/host.env \
   any role belongs to one of the six, it stops, changes nothing and names the membership. Exit 1.
   Allowed, each granted once: `skiw_backup` in `pg_read_all_data`, and `skiw_migrator` in
   `skiw_tenant_guard` and `skiw_auth_lookup` with `INHERIT FALSE, SET TRUE` and no `ADMIN OPTION`.
-  A changed INHERIT or SET on the migrator's own grant is reset by the run, not reported; an
-  `ADMIN OPTION` stops it, and so does a second grant of a pair (its grantor needs `ADMIN OPTION`
-  on the role, which is itself refused). A person reads the membership and revokes it
+  A changed INHERIT, SET or `ADMIN OPTION` on the migrator's own grant stops it too (exit 1;
+  psql exits 3, e.g. `unexpected role membership, nothing changed: skiw_migrator in
+  skiw_auth_lookup`): the check runs before the migrator's GRANTs, so a run no longer resets
+  drifted options silently (M4c-2a, PR 83 P3). A second grant of a pair stops it as well (its
+  grantor needs `ADMIN OPTION` on the role, which is itself refused). A host that has no
+  migrator membership yet (before M4c-1) gets both on its next run. A person reads the membership and revokes it
   by hand, then runs `apply` again.
 - **Before the first M4c-2a deploy (once per existing host; plan M4c-1).** The M4c-1 `roles.sql`
   gives `skiw_migrator` a SET-only membership in `skiw_tenant_guard` and `skiw_auth_lookup`

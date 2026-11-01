@@ -2,9 +2,9 @@
 
 The `host_live` tests run only under `make host-test-live`. One container from the digest-pinned
 db image: no network, no published port, data on tmpfs, removed afterwards. They prove that a
-second run changes no value (plan M4c-1 A7), that a run resets INHERIT and SET on the migrator's
-own grant, and drift handling: a membership the file does not allow stops the run and changes
-nothing.
+second run changes no value (plan M4c-1 A7), that a host without the migrator's memberships gets
+them, and drift handling: a membership the file does not allow, or changed INHERIT or SET on the
+migrator's own grant (PR 83 P3), stops the run and changes nothing.
 """
 
 import os
@@ -97,6 +97,11 @@ union all select concat_ws('|', 'db', datname, datdba::regrole, datacl) from pg_
 union all select concat_ws('|', 'schema', nspname, nspowner::regrole, nspacl) from pg_namespace
   where nspname = 'public'
 order by 1"""
+MIGRATOR_OPTIONS = (
+    "select string_agg(concat_ws('|', roleid::regrole, admin_option, inherit_option, set_option),"
+    " ',' order by roleid::regrole::text) from pg_auth_members"
+    " where member = 'skiw_migrator'::regrole"
+)
 
 
 def test_a_clean_run_and_a_second_run_pass_and_the_second_changes_nothing(db: Db) -> None:
@@ -105,26 +110,33 @@ def test_a_clean_run_and_a_second_run_pass_and_the_second_changes_nothing(db: Db
     assert db.roles().returncode == 0
     assert db.value(CATALOG) == before  # A7: the GRANTs with the same options are no-ops
     assert db.value(MEMBERS) == ALLOWED
-    options = (
-        "select string_agg(concat_ws('|', roleid::regrole, admin_option, inherit_option, "
-        "set_option), ',' order by roleid::regrole::text) from pg_auth_members "
-        "where member = 'skiw_migrator'::regrole"
-    )
-    assert db.value(options) == "skiw_auth_lookup|f|f|t,skiw_tenant_guard|f|f|t"
+    assert db.value(MIGRATOR_OPTIONS) == "skiw_auth_lookup|f|f|t,skiw_tenant_guard|f|f|t"
 
 
-def test_a_run_resets_inherit_and_set_on_its_own_grant(db: Db) -> None:
-    # PostgreSQL 17 updates the options of an existing grant from the same grantor in place, so a
-    # re-run repairs this drift silently instead of stopping (ADMIN OPTION is not reset: below).
+def test_changed_inherit_or_set_on_the_migrators_grant_stops_the_run(db: Db) -> None:
+    # The drift guard runs before the GRANTs: a GRANT from the same grantor would rewrite the
+    # options in place and hide the drift (PR 83 P3).
     assert db.roles().returncode == 0
     grant = "GRANT skiw_auth_lookup TO skiw_migrator WITH INHERIT TRUE, SET FALSE;"
     assert db.psql(grant).returncode == 0
-    assert db.roles().returncode == 0
-    options = (
-        "select concat_ws('|', admin_option, inherit_option, set_option) from pg_auth_members "
+    before = db.value(CATALOG)
+    result = db.roles()
+    assert result.returncode == 3  # psql: a script error under ON_ERROR_STOP
+    assert (
+        "unexpected role membership, nothing changed: skiw_migrator in skiw_auth_lookup"
+        in result.stderr
     )
-    options += "where member = 'skiw_migrator'::regrole and roleid = 'skiw_auth_lookup'::regrole"
-    assert db.value(options) == "f|f|t"
+    assert db.value(CATALOG) == before
+    assert db.value(MIGRATOR_OPTIONS) == "skiw_auth_lookup|f|t|f,skiw_tenant_guard|f|f|t"
+
+
+def test_a_host_without_the_migrators_memberships_gets_them(db: Db) -> None:
+    # An existing host from before M4c-1 (PR 83 review step 4).
+    assert db.roles().returncode == 0
+    assert db.psql("REVOKE skiw_tenant_guard, skiw_auth_lookup FROM skiw_migrator;").returncode == 0
+    assert db.value(MIGRATOR_OPTIONS) == ""
+    assert db.roles().returncode == 0
+    assert db.value(MIGRATOR_OPTIONS) == "skiw_auth_lookup|f|f|t,skiw_tenant_guard|f|f|t"
 
 
 @pytest.mark.parametrize(
