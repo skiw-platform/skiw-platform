@@ -92,7 +92,7 @@ Files it reads must be regular files, not links, root-owned and not writable by 
 | `stale-files` | no fail2ban jail under `allowlist`, no `/etc/sudoers.d/skiw*` but `skiw-ops` and `skiw-deploy`, no sshd drop-in sorting before `00-skiw.conf` that sets a checked key, no `/var/lib/skiw/apply.pending` (run `apply`) |
 | `secret-store` | `/etc/skiw/secrets` is a root:root 0700 directory, not a link; it holds every inventory name (`skiw_host/secrets.py`) and nothing else but `.restored`; `alert_credential` if and only if `SKIW_ALERT_CHANNEL` is `telegram` (missing with the channel on, or present with it off, fails); each file is a regular file, mode 0400, owned by its inventory uid, group root |
 | `container-env` | no running container's environment (`docker inspect`) holds a secret value: a secret line, or the part after `v<n>:`, of 16 characters or more is searched inside every value; a shorter credential is compared whole and also FAILs as unsupported (it cannot be searched safely), as does an empty secret file; each container from `docker ps` must be described exactly once, with a `Config` and an `Env` that is null or a list of strings; a FAIL names the secret file, container and variable, never the value |
-| `role-set` | through the db socket as `postgres` (`docker compose exec db`, bootstrap-db's password file), the WHOLE role inventory: only the six roles of `roles.sql` (with their attributes, connection limits and settings), `postgres` (the bootstrap superuser, the only superuser) and PostgreSQL's predefined `pg_*` roles (made by initdb; none may log in, be superuser or bypass RLS); any other role, of any name, fails; memberships are exactly `roles.sql`'s grants (`skiw_backup` in `pg_read_all_data`) plus PostgreSQL 17.11's own after initdb (`pg_monitor` in `pg_read_all_settings`, `pg_read_all_stats` and `pg_stat_scan_tables`), each with its options (`admin_option` false, `inherit_option` true, `set_option` true); any other membership (also between `pg_*` roles, e.g. `pg_read_all_data` in `pg_write_all_data`), a missing one, one granted twice or changed options (`INHERIT FALSE`, `SET FALSE`, `ADMIN OPTION`) fails. A FAIL names only roles from that list and `roles.sql`'s settings; other roles are counted (find them with `\du`), and no setting value or database row is ever printed; fails while `/srv/skiw/compose.yml` (or `--compose-file`) or skiw-deploy's state file `/var/lib/skiw/deploy.env` (root, 0644) is missing or untrusted |
+| `role-set` | through the db socket as `postgres` (`docker compose exec db`, bootstrap-db's password file), the WHOLE role inventory: only the six roles of `roles.sql` (with their attributes, connection limits and settings), `postgres` (the bootstrap superuser, the only superuser) and PostgreSQL's predefined `pg_*` roles (made by initdb; none may log in, be superuser or bypass RLS); any other role, of any name, fails; memberships are exactly `roles.sql`'s grants (`skiw_backup` in `pg_read_all_data` with `admin_option` false, `inherit_option` true, `set_option` true; from M4c-1 `skiw_migrator` in `skiw_tenant_guard` and in `skiw_auth_lookup` with `admin_option` false, `inherit_option` false, `set_option` true) plus PostgreSQL 17.11's own after initdb (`pg_monitor` in `pg_read_all_settings`, `pg_read_all_stats` and `pg_stat_scan_tables`, each false, true, true); any other membership (also between `pg_*` roles, e.g. `pg_read_all_data` in `pg_write_all_data`), a missing one, one granted twice or changed options (`INHERIT FALSE`, `SET FALSE`, `ADMIN OPTION`; for the migrator also `INHERIT TRUE`) fails. A FAIL names only roles from that list and `roles.sql`'s settings; other roles are counted (find them with `\du`), and no setting value or database row is ever printed; fails while `/srv/skiw/compose.yml` (or `--compose-file`) or skiw-deploy's state file `/var/lib/skiw/deploy.env` (root, 0644) is missing or untrusted |
 | `pg-hba` | `/etc/skiw/db/pg_hba.conf` (root, 0444) equals the template rendered from the env file; after a subnet change run `bootstrap-db prepare` again |
 | `health-timers` | `skiw-health.timer` and `skiw-hardening.timer` are both `enabled` and `active` (a stopped timer alerts nothing; run `apply`) |
 
@@ -310,14 +310,39 @@ sudo env SKIW_IMAGE="$image" bootstrap-db apply --env-file /etc/skiw/host.env \
   reached the db), 3 done but its log line failed: do not repeat `prepare`/`apply` for that; fix
   the log problem as for `bootstrap-secrets` exit 3 and note the run by hand. Each run writes one
   value-free line to the journal (`journalctl -t bootstrap-db`) and `/var/log/skiw/deploy.log`.
-- Roles: `skiw_migrator` (owns the schema; `migrate` only), `skiw_app` (web and worker), `skiw_readonly`,
+- Roles: `skiw_migrator` (owns the schema; `migrate` only; SET-only member of the two NOLOGIN roles), `skiw_app` (web and worker), `skiw_readonly`,
   `skiw_backup` (read only, 2 connections), and the NOLOGIN `skiw_tenant_guard`, `skiw_auth_lookup`.
 - `apply` signs in as `postgres` with a libpq password file: made inside the db container from
   `/run/secrets/postgres_password`, mode 0600, removed when psql ends. The password is never in an
   environment variable or in argv (H4).
-- `roles.sql` refuses to run on drift: if any of the six roles belongs to a role it should not
-  (only `skiw_backup` in `pg_read_all_data` is allowed), it stops, changes nothing and names the
-  role. Exit 1. A person reads the membership and revokes it by hand, then runs `apply` again.
+- `roles.sql` refuses to run on drift: if any of the six roles belongs to a role it should not, or
+  any role belongs to one of the six, it stops, changes nothing and names the membership. Exit 1.
+  Allowed, each granted once: `skiw_backup` in `pg_read_all_data`, and `skiw_migrator` in
+  `skiw_tenant_guard` and `skiw_auth_lookup` with `INHERIT FALSE, SET TRUE` and no `ADMIN OPTION`.
+  A changed INHERIT or SET on the migrator's own grant is reset by the run, not reported; an
+  `ADMIN OPTION` stops it, and so does a second grant of a pair (its grantor needs `ADMIN OPTION`
+  on the role, which is itself refused). A person reads the membership and revokes it
+  by hand, then runs `apply` again.
+- **Before the first M4c-2a deploy (once per existing host; plan M4c-1).** The M4c-1 `roles.sql`
+  gives `skiw_migrator` a SET-only membership in `skiw_tenant_guard` and `skiw_auth_lookup`
+  (owner Q1 (a), `docs/DECISIONS.md` "M4c-1"). Migrations from M4c-2a on run `SET LOCAL ROLE` to
+  those roles. Install the new host config with `apply`, then run `bootstrap-db apply` as above
+  before deploying any M4c-2a digest. A new host gets the membership from its first
+  `bootstrap-db apply`.
+  - Without it, the migration fails with `permission denied to set role "skiw_tenant_guard"` (or
+    `"skiw_auth_lookup"`; the PostgreSQL 17 text, seen as the migrator on the local database).
+    `skiw-deploy` reports only ``failed: `migrate` exited <n>`` (it withholds tool output), stops
+    before the switch, so the old digest keeps serving, and exits 1. Run `bootstrap-db apply`, then
+    deploy again.
+  - Between the `apply` that installs this `roles.sql` and `bootstrap-db apply`, `check-hardening`
+    `role-set` fails with `skiw_migrator is not a member of skiw_auth_lookup` (and of
+    `skiw_tenant_guard`), because it reads the installed `roles.sql`. The monthly
+    `skiw-hardening.timer` run would alert it through `skiw-health`. Run both steps together.
+  - `bootstrap-db apply` also sets every DB password again from its file (unchanged files, so the
+    same passwords).
+  - Undoing it is a reviewed `roles.sql` change, then `REVOKE skiw_tenant_guard, skiw_auth_lookup
+    FROM skiw_migrator;` as `postgres` before that older `roles.sql` is applied: an older file
+    stops on these two memberships (its drift guard allows only `skiw_backup`).
 - DB passwords are not escrowed. After a rebuild, run `prepare` then `apply` again: new passwords.
 - `prepare` also renders `/etc/skiw/db/pg_hba.conf` (root, mode 0444, no secret) from
   `infra/host/db/pg_hba.conf` and the host's `env/<environment>.env`; it needs `--env-file`. Compose

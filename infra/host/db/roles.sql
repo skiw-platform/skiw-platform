@@ -25,6 +25,12 @@ GRANT pg_read_all_data TO skiw_backup;
 -- NOLOGIN function owners (D18, §4.1): only skiw_auth_lookup bypasses RLS, for the pre-tenant lookups.
 ALTER ROLE skiw_tenant_guard NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
 ALTER ROLE skiw_auth_lookup NOLOGIN NOSUPERUSER BYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+-- SET-only membership for migrations (owner Q1 (a), plan M4c-1): no inherited privileges, only an
+-- explicit SET ROLE, so `migrate` can create, replace and hand over the guard objects these roles
+-- own. BYPASSRLS applies only after SET ROLE skiw_auth_lookup. One role per GRANT: check-hardening
+-- reads these lines. A re-run with the same options changes nothing.
+GRANT skiw_tenant_guard TO skiw_migrator WITH INHERIT FALSE, SET TRUE;
+GRANT skiw_auth_lookup TO skiw_migrator WITH INHERIT FALSE, SET TRUE;
 
 ALTER DATABASE :"db" OWNER TO skiw_migrator;
 ALTER SCHEMA public OWNER TO skiw_migrator;
@@ -32,20 +38,32 @@ REVOKE ALL ON DATABASE :"db" FROM PUBLIC;
 GRANT CONNECT ON DATABASE :"db" TO skiw_app, skiw_readonly, skiw_backup;
 
 -- Fails closed on drift (TEN-02): ALTER ROLE never removes a membership, so a role that already
--- belongs to another role would keep its reach. The only membership allowed is skiw_backup in
--- pg_read_all_data. Anything else aborts the whole run, rolled back; a person decides what to revoke.
+-- belongs to another role would keep its reach. Allowed, with exactly these options (admin,
+-- inherit, set): skiw_backup in pg_read_all_data (f, t, t) and skiw_migrator in skiw_tenant_guard
+-- and skiw_auth_lookup (f, f, t). Any other membership with one of the six roles on either side,
+-- or other options (ADMIN OPTION; a GRANT above resets INHERIT and SET of its own grant), aborts
+-- the whole run, rolled back; a person decides what to revoke. A second grant of a pair needs a
+-- grantor holding ADMIN OPTION on the role, a membership this check already refuses.
 DO $$
 DECLARE
     extra text;
 BEGIN
+    WITH six AS (
+        SELECT oid FROM pg_roles WHERE rolname IN
+            ('skiw_migrator', 'skiw_app', 'skiw_readonly', 'skiw_backup',
+             'skiw_tenant_guard', 'skiw_auth_lookup')
+    ), allowed (member, roleid, admin_option, inherit_option, set_option) AS (
+        VALUES ('skiw_backup'::regrole::oid, 'pg_read_all_data'::regrole::oid, false, true, true),
+               ('skiw_migrator'::regrole::oid, 'skiw_tenant_guard'::regrole::oid, false, false, true),
+               ('skiw_migrator'::regrole::oid, 'skiw_auth_lookup'::regrole::oid, false, false, true)
+    )
     SELECT string_agg(format('%s in %s', m.member::regrole, m.roleid::regrole), ', '
                       ORDER BY m.member::regrole::text, m.roleid::regrole::text)
     INTO extra
     FROM pg_auth_members m
-    WHERE m.member IN (SELECT oid FROM pg_roles WHERE rolname IN
-              ('skiw_migrator', 'skiw_app', 'skiw_readonly', 'skiw_backup',
-               'skiw_tenant_guard', 'skiw_auth_lookup'))
-      AND NOT (m.member = 'skiw_backup'::regrole AND m.roleid = 'pg_read_all_data'::regrole);
+    WHERE (m.member IN (SELECT oid FROM six) OR m.roleid IN (SELECT oid FROM six))
+      AND (m.member, m.roleid, m.admin_option, m.inherit_option, m.set_option)
+          NOT IN (SELECT * FROM allowed);
     IF extra IS NOT NULL THEN
         RAISE EXCEPTION 'unexpected role membership, nothing changed: %', extra;
     END IF;

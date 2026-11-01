@@ -25,3 +25,5 @@ member|skiw_backup|pg_read_all_data|f|t|t
 member|pg_monitor|pg_read_all_settings|f|t|t
 member|pg_monitor|pg_read_all_stats|f|t|t
 member|pg_monitor|pg_stat_scan_tables|f|t|t
+member|skiw_migrator|skiw_tenant_guard|f|f|t
+member|skiw_migrator|skiw_auth_lookup|f|f|t
