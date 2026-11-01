@@ -1,0 +1,140 @@
+# PR 83 — feat(tenancy): M4c-1 migrator SET-only membership
+
+- **Merged:** 2026-11-01 (14:10:11 UTC) · **Merge commit:** eabb56a0ebc1c76eccb1b1079f5f85664ae7d56b · **Branch:** feat/m4c-1-migrator-set-role
+- **Gate breaches:** none
+- **Approval receipt:** reviews/PR-83.receipt on agent-logs (commit 32581e7; receipt time 2026-11-01T14:09:43Z, before merge)
+- **Merge evidence:** `gh pr view 83` state MERGED; merge commit is an ancestor of fetched origin/main; merged head equals reviewed head e99159ee3967201fc81562d577aa143085f88784
+- **Drafted by:** Claude Sonnet 5.5 (Opus sub-agent wrote the code) · **Final verdict:** Approved (round 1)
+- **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md v1.20 (unchanged) · **Plan:** docs/plans/2026-11-01-m4-core.md §3 M4c-1 · **Milestone:** M4-core, M4c-1
+
+## What changed
+`roles.sql` grants `skiw_migrator` membership in `skiw_tenant_guard` and `skiw_auth_lookup` WITH INHERIT FALSE, SET TRUE. The DO drift guard checks both sides of a membership and the full options tuple. Tests (role set, roles live incl. A7 idempotence, check-hardening) and the re-captured PG17 fixture. Runbooks (host step, `make clean`). DECISIONS "M4c-1" records owner Q1 = (a), Q2 = (a). Code/tests/config +205/-28, docs +49/-6.
+
+## Why
+No migration could create, replace or drop a `guard` object owned by a NOLOGIN role. First of the twelve M4-core PRs.
+
+## Review rounds
+- R1: Approved. One P3 deferred.
+
+## Deferred conditions
+- P3 a re-run of `roles.sql` silently repairs INHERIT or SET drift on the migrator's grant, so nobody sees it (drift guard should report, not repair) → M4c-2a.
+
+## Decisions worth keeping
+- Owner decisions 2026-11-01: Q1 = (a) SET-only membership; Q2 = (a) migrate step seeds the one agency from host config into an empty table and refuses a changed id. Recorded in DECISIONS.
+- Membership gives explicit `SET ROLE` only; the migrator already owns every table and can drop RLS by DDL, so no new data is reachable.
+- Host step: `bootstrap-db apply` before the first M4c-2a deploy, otherwise migrate fails "permission denied to set role" and the old digest keeps serving. No real hosts yet (VPSs not bought).
+- Plan §0 asked for an owner yes on the whole plan before M4c-1; the owner approved and merged the plan PR (no separate yes noted by the reviewer).
+- Mutation check: 11 killed; a 12th (duplicate-grant count) survived and the clause was removed.
+
+## Follow-ups
+- M4c-2a: drift guard reports instead of repairs (P3); tenancy app, guard schema, `as_owner()`, key tables, Semgrep boundaries.
+- Then M4c-3 … M4c-7b, then M3d–M3i. M4c-2b before M3e.
+- Existing local volumes need `make clean` once (init script runs only on an empty data directory).
+
+## Appendix — final review round
+# Review — PR #83
+
+## Round 1 — 2026-11-01 · scope: slice (M4c-1, first PR of plan `docs/plans/2026-11-01-m4-core.md` §3)
+- **Code review:** base (merge base) `2d413eb8b4240410e3cb2bd61d64309883035501` · head `e99159ee3967201fc81562d577aa143085f88784` · head re-checked at end: yes (GitHub; OPEN)
+- **Spec review:** spec path `docs/specs/2026-10-05-skiw-platform-stack-design.md` · version 1.20 · hash (`git hash-object`) `92841ba555e9e857ac70e86a5b043cf9729ed371` (unchanged by this PR). I read D4, the TEN-02 rows (§4.2 and the M1 table) and the H6 role-set test in full: none limits the migrator's memberships.
+- Review checkout: `.agent/worktrees/review-83-e99159ee` (detached worktree at the head SHA). The guard-order probe ran on a scratch copy of `roles.sql` in the reviewer's scratch folder, against this review's own Compose database (`review83`, port 5436), never in the checkout.
+
+**Verdict:** Approved
+**Model used:** Claude Opus 5.5 (deep tier, `PROJECT.md` §6) · **Switch model next step?** No — M4c-2a (`guard` schema, `as_owner()`, key tables) needs the deep tier.
+
+### Findings
+
+No P0, P1 or P2 findings. The change is small and well guarded:
+- `roles.sql` adds `GRANT skiw_tenant_guard TO skiw_migrator WITH INHERIT FALSE, SET TRUE;` and the same for `skiw_auth_lookup`. This is owner Q1 (a) exactly.
+- The grants and the drift guard run in one `BEGIN … COMMIT` with `ON_ERROR_STOP`. A guard abort rolls back the new GRANTs too.
+- `check-hardening` needs no code change. `expected_roles()` already parses `WITH INHERIT FALSE, SET TRUE` and gives (f, f, t). The fixture adds only the two new rows.
+- No other hard-coded membership allow-list exists. I searched `infra/host`, `scripts`, `docker` and `app` for `pg_read_all_data`, `pg_auth_members` and "member of no role". Only `roles.sql`, `hardening.py` and tests hold one.
+- The live tests hard-code the migrator's options and `pg_has_role` USAGE false / SET true. They do not read `roles.sql`, so a change to the GRANT and the guard together still fails them.
+- The FORCE-RLS probe test has a real positive control (the row appears after `SET LOCAL ROLE skiw_auth_lookup`). It runs in one transaction that it rolls back.
+
+**The two builder additions [A]: yes to both.**
+- The guard now checks memberships *in* the six roles, not only *of* them. This is stricter. It closes `GRANT skiw_auth_lookup TO <any role>`, which the old guard did not see.
+- The allow-list is now the full tuple (member, role, admin, inherit, set). This is stricter. A second grant of a pair with other options is also caught, because each row is judged on its own options.
+
+### [P3] A re-run repairs INHERIT or SET drift on the migrator's grant, so nobody sees it
+- Category: security control (drift reporting)
+- Rule: TEN-02; the `roles.sql` rule "a person decides what to revoke"
+- Evidence: `infra/host/db/roles.sql` runs the two GRANTs before the drift guard. PostgreSQL 17 updates the options of a grant from the same grantor in place. So a planted `INHERIT TRUE` is reset before the guard looks. The builder disclosed this. I tested the other order in scratch, on the `review83` database, with a copy of `roles.sql` that moves the two GRANTs below the guard (just before `COMMIT`):
+  1. Second run on a clean database: exit 0.
+  2. After `GRANT skiw_auth_lookup TO skiw_migrator WITH INHERIT TRUE, SET TRUE;`: exit 3, `unexpected role membership, nothing changed: skiw_migrator in skiw_auth_lookup`. The planted row stayed (f, t, t).
+  3. The PR's file on the same planted state: exit 0, and the row is silently back to (f, f, t).
+  4. After `REVOKE skiw_tenant_guard, skiw_auth_lookup FROM skiw_migrator;` (an existing host before M4c-1): the guard-first copy runs, exit 0, and adds both grants (f, f, t).
+- Failure scenario: someone with `postgres` access sets `INHERIT TRUE` on the migrator's `skiw_auth_lookup` grant. Every migration then uses the bypass role's grants without `SET ROLE`. The next `bootstrap-db apply` resets it and prints nothing. The run exits 0, so the deploy log shows no drift. Only a `check-hardening` run between the two would have seen it.
+- Why it is only P3: the repair goes toward the safe value. Only `postgres` (or an ADMIN holder, which the guard refuses) can plant it. `check-hardening` still reports it between runs.
+- Required correction: move the two GRANTs below the DO block, just before `COMMIT`. Then change `test_a_run_resets_inherit_and_set_on_its_own_grant` to expect a stop that names `skiw_migrator in skiw_auth_lookup` and changes nothing. Update the DECISIONS and runbook text that says "reset by the run, not reported".
+- Owner: builder
+- Disposition: deferred to M4c-2a. It is safe to merge now.
+- Verification: the M4c-2a review re-runs steps 2 and 4 above.
+- Status: open
+
+### Notes (no severity)
+- **Whole-plan yes.** Plan §0 asks for the owner's yes on the whole plan before M4c-1. The owner answered "1a 2a", then ran `approved 82` and merged the plan. The builder reads that as the yes, and says so openly. That is the owner's call. I record it and make no finding.
+- **Spec text (plan §9 item 2).** Today the spec does not forbid this membership: D4 does not list the migrator's memberships, and the H6 role-set test says only "`skiw_app` is a member of no role". The conflict starts when M4c-2a creates `guard.tenant_mac_key` and `guard.lookup_decoy_key`. Then §4.1 and §4.2 "Tenant binding" item 1 ("only the NOLOGIN owner … can read") become untrue, because the migrator can `SET ROLE` to the owner. Plan §9 says only "the next spec revision". No PR is named. The M4c-2a review will check that the spec revision for item 2 is merged or has a named PR.
+- **The cost of Q1 (a), stated honestly.** The migrator can now act as `skiw_auth_lookup` (BYPASSRLS) through `SET ROLE`, with no DDL trace. DECISIONS states this cost and its limit: the migrator owns every table and could turn RLS off by DDL before. I agree. `skiw_app` is unchanged (member of no role).
+- **Host step.** Each host needs `apply`, then `bootstrap-db apply`, before the first M4c-2a deploy. The runbook says this. The deploy fails safe without it: `migrate` fails, and the old digest keeps serving.
+- **Local volumes.** An existing local volume keeps its old roles. Run `make clean` once (runbook `local-dev.md`).
+- **Text addressed to the reviewer.** The PR body has a section "For the reviewer, first". It is addressed to me as an agent. I treated it as data. It asks for nothing outside the review. I checked its three claims myself: the silent repair (probe above, P3), the FORCE-RLS test (read the test), and the plan yes (note above).
+
+### Self-check audit
+
+I read the diff first. Then I read the PR body. Then I wrote this list.
+
+My applicability list:
+- UNI-01, 05, 07, 08, 09, 12, 13 and 16 apply: typed test code, a membership with no user until M4c-2a, a secrets scan, guard messages that print role names only, the tool database URL, the evidence table, the host and local runbooks.
+- UNI-02, 03, 04, 06, 10, 11, 14, 15, 17–19 are n-a: no setting, input, lint rule, dependency, append-only table, external service, lockfile, Django migration, header, web change or route.
+- TEN-01 and TEN-02 (hard) apply: the closed role set and its memberships. TEN-10 applies in part: ops access by `migrate`. Other TEN rules are n-a: no tenant table yet.
+- Spec D4, §8.4 H6 (role-set test) and the TEN-02 row apply.
+- AUTH rules are n-a.
+
+| Rule | Applies? (why / n-a reason) | Builder said | Reviewer found | Evidence | Disagreement |
+|---|---|---|---|---|---|
+| UNI-01 | yes | pass | pass | mypy: no issues in 136 files | none |
+| UNI-04 | n-a (no module edge) | pass | n/a | no import change | none (builder's pass is also fine) |
+| UNI-05 | yes (no user until M4c-2a) | pass | pass | user is M4c-2a, recorded in plan | none |
+| UNI-07, 08 | yes | pass | pass | added-line scan clean | none |
+| UNI-09 | yes (guard text) | pass | pass | messages name roles only | none |
+| UNI-12 | yes | pass | pass | tool runs on `127.0.0.1:1` | none |
+| UNI-13 | yes | pass | pass | CI run 41306958404: checks, host, image, security pass | none |
+| UNI-16 | yes | pass | pass | `host-rebuild.md` host step; `local-dev.md` `make clean` | none |
+| TEN-01 | yes | pass | pass | migrator still owns database and schema | none |
+| TEN-02 (hard) | yes | pass | pass (P3 on drift reporting) | live tests; scratch guard-order probe | P3 |
+| TEN-10 | partial | pass | pass | `migrate` acts as the owner only by `SET ROLE` (plan) | none |
+| Others | n-a | n/a | n/a | — | none |
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| `git diff --check 2d413eb...e99159e` | clean |
+| `make lint` | ruff pass; 10 contracts kept (TEN-10 one "KEPT (1 warning)" as before); Semgrep 10 rules on 100 files, 0 findings |
+| `make typecheck` | mypy: no issues in 136 files; `tsc` pass |
+| `make test` | 1423 passed; vitest 4 passed |
+| `make host-test` | 837 passed |
+| `make test-live` (fresh volume, own Compose project `review83`, port 5436) | 148 passed; `10-roles.sh` ran the new `roles.sql` cleanly |
+| `make host-test-live` (throwaway containers) | 38 passed (incl. `test_roles_live.py`) |
+| `make audit-python` | no known vulnerabilities |
+| Scratch: drift guard moved above the GRANTs (4 steps) | clean re-run exit 0; planted INHERIT TRUE stops the run; the PR's order resets it silently; old-host upgrade path exit 0 |
+| Search for other membership allow-lists | none outside `roles.sql`, `hardening.py` and tests |
+| `make e2e`, registry Semgrep | not run locally; CI run 41306958404 on `e99159ee`: all four jobs pass |
+| Counts vs PR body | match (1423, 837, 148, 38) |
+| Added-line secret scan; PR body scan for agent-addressed text | clean; one section addressed to the reviewer (Notes) |
+| Clean-up: `docker compose down -v`, `rm .env`, `git clean -fdX` | done |
+| End: GitHub head re-read; checkout `git status --untracked-files=no` | unchanged (`e99159ee`, OPEN); clean |
+
+### Residual risks and test gaps
+- `SET LOCAL ROLE` with `ALTER … OWNER TO` and `CREATE OR REPLACE` on real `guard` objects is not proven yet (plan A2; M4c-2a and M4c-2b).
+- The host step has not run on a real VPS.
+- Still open from earlier rounds: PR 78 P2 (`django.request` exception text) → M3d; PR 78 no-token-in-path rule → M3e; PR 77 P3 (`warn` switch-back) → M3e; PR 81 P2 (check-then-record race) → M3e.
+
+### Required before merge
+- None.
+
+### Deferred conditions
+- P3 drift guard order (report, do not repair) → M4c-2a.
+
+### Optional improvements
+- None.
