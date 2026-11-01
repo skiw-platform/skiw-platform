@@ -10,6 +10,7 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 
 from config import env
+from tests.settings_env import REQUIRED
 
 APP_DIR = Path(__file__).resolve().parent.parent
 BOUNDS = {"SKIW_SESSION_ABSOLUTE_H": (1, 72), "SKIW_SESSION_IDLE_MIN": (1, 1440)}
@@ -54,8 +55,7 @@ def test_settings_import_refuses_a_bad_value_and_never_prints_it(name: str) -> N
     good = {
         "DJANGO_SECRET_KEY": "test-only-not-a-secret",
         "DATABASE_URL": "postgres://u:p@localhost:5432/db",
-        "SKIW_SESSION_ABSOLUTE_H": "12",
-        "SKIW_SESSION_IDLE_MIN": "30",
+        **REQUIRED,
     }
     marker = "planted-session-value"
     result = subprocess.run(

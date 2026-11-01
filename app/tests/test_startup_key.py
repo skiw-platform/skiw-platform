@@ -15,9 +15,10 @@ import pytest
 
 from accounts.source_key import require_key, seal, unseal
 from config import env
+from tests.settings_env import REQUIRED
 
 APP_DIR = Path(__file__).resolve().parent.parent
-NAMES = ("TENANT_SOURCE_KEY", "TENANT_SOURCE_KEY_FILE")
+NAMES = ("TENANT_SOURCE_KEY", "TENANT_SOURCE_KEY_FILE", "LOGIN_BLOB_KEY", "LOGIN_BLOB_KEY_FILE")
 
 
 @pytest.fixture(autouse=True)
@@ -74,8 +75,7 @@ def start(code: str, **extra: str) -> subprocess.CompletedProcess[str]:
             "DJANGO_SECRET_KEY": "test-only-not-a-secret",
             # Nothing listens here: reaching the migration check would fail on the database.
             "DATABASE_URL": "postgres://u:p@127.0.0.1:9/db",
-            "SKIW_SESSION_ABSOLUTE_H": "12",
-            "SKIW_SESSION_IDLE_MIN": "30",
+            **REQUIRED,
             **extra,
         },
         capture_output=True,
@@ -107,6 +107,21 @@ def test_asgi_refuses_a_seven_digit_version_without_echoing_the_key() -> None:
     assert value.partition(":")[2] not in result.stderr
 
 
-def test_asgi_with_a_valid_key_goes_on_to_the_migration_check() -> None:
-    result = start("import config.asgi", TENANT_SOURCE_KEY=line())
+def test_asgi_with_valid_keys_goes_on_to_the_migration_check() -> None:
+    result = start("import config.asgi", TENANT_SOURCE_KEY=line(), LOGIN_BLOB_KEY=line())
     assert result.returncode != 0 and "cannot verify migrations" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, line(16), line(version=65_536), line()[3:]],
+    ids=["missing", "short", "version-above-65535", "no-version"],
+)
+def test_asgi_refuses_a_bad_login_blob_key_without_echoing_it(value: str | None) -> None:
+    """Plan M3b: the login blob stores the key version in two bytes."""
+    extra = {} if value is None else {"LOGIN_BLOB_KEY": value}
+    result = start("import config.asgi", TENANT_SOURCE_KEY=line(), **extra)
+    assert result.returncode != 0
+    assert "LOGIN_BLOB_KEY" in result.stderr.splitlines()[-1]
+    assert "cannot verify migrations" not in result.stderr
+    assert value is None or value.rpartition(":")[2] not in result.stderr

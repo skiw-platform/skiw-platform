@@ -89,7 +89,9 @@ def secret_file(name: str) -> str:
         raise InvalidSettingError(f"{name}: the secret file cannot be read") from exc
 
 
-def parse_key_lines(name: str, text: str) -> list[tuple[int, str, bytes]]:
+def parse_key_lines(
+    name: str, text: str, max_version: int = 999_999
+) -> list[tuple[int, str, bytes]]:
     """`v<n>:<base64>` lines (spec §8.4 H4) as (n, base64, bytes), newest version first. Fails
     closed on any bad line; errors name the line, never its content."""
     versions: dict[int, tuple[str, bytes]] = {}
@@ -97,6 +99,8 @@ def parse_key_lines(name: str, text: str) -> list[tuple[int, str, bytes]]:
         match = KEY_LINE.fullmatch(line)
         if match is None:
             raise InvalidSettingError(f"{name}: line {number} is not v<n>:<base64>")
+        if int(match[1]) > max_version:
+            raise InvalidSettingError(f"{name}: line {number} has a version above {max_version}")
         try:
             raw = base64.b64decode(match[2], validate=True)
         except binascii.Error as exc:
@@ -114,9 +118,10 @@ def key_versions(name: str) -> list[str]:
     return [text for _, text, _ in parse_key_lines(name, secret_file(name))]
 
 
-def versioned_keys(name: str) -> list[tuple[int, bytes]]:
+def versioned_keys(name: str, max_version: int = 999_999) -> list[tuple[int, bytes]]:
     """(version, key bytes) of app key `name`, newest first: from the secret file named by
-    `<name>_FILE` on hosts, else from env var `name` (local and CI), in the same line format."""
+    `<name>_FILE` on hosts, else from env var `name` (local and CI), in the same line format.
+    `max_version` is lower where a key's version is stored in fewer digits or bytes."""
     file_name = f"{name}_FILE"
     if file_name in os.environ:
         if name in os.environ:
@@ -126,7 +131,7 @@ def versioned_keys(name: str) -> list[tuple[int, bytes]]:
         text, source = os.environ[name], name
     else:
         raise MissingSettingError(f"{name} (or {file_name} on hosts) is required and not set")
-    return [(version, raw) for version, _, raw in parse_key_lines(source, text)]
+    return [(version, raw) for version, _, raw in parse_key_lines(source, text, max_version)]
 
 
 def secret_key() -> tuple[str, list[str]]:

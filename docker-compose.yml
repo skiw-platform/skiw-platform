@@ -32,6 +32,19 @@ services:
       SKIW_SESSION_ABSOLUTE_H: ${SKIW_SESSION_ABSOLUTE_H:?set in .env}
       SKIW_SESSION_IDLE_MIN: ${SKIW_SESSION_IDLE_MIN:?set in .env}
       TENANT_SOURCE_KEY: ${TENANT_SOURCE_KEY:?set in .env}
+      SKIW_ARGON2_MEMORY_KIB: ${SKIW_ARGON2_MEMORY_KIB:?set in .env}
+      SKIW_ARGON2_TIME_COST: ${SKIW_ARGON2_TIME_COST:?set in .env}
+      SKIW_ARGON2_PARALLELISM: ${SKIW_ARGON2_PARALLELISM:?set in .env}
+      SKIW_AUTH_FAILS_PER_ACCOUNT: ${SKIW_AUTH_FAILS_PER_ACCOUNT:?set in .env}
+      SKIW_AUTH_FAILS_PER_IP: ${SKIW_AUTH_FAILS_PER_IP:?set in .env}
+      SKIW_AUTH_WINDOW_MIN: ${SKIW_AUTH_WINDOW_MIN:?set in .env}
+      SKIW_AUTH_LOCK_AFTER: ${SKIW_AUTH_LOCK_AFTER:?set in .env}
+      SKIW_AUTH_LOCK_MIN: ${SKIW_AUTH_LOCK_MIN:?set in .env}
+      SKIW_STEPUP_MAX_AGE_MIN: ${SKIW_STEPUP_MAX_AGE_MIN:?set in .env}
+      SKIW_TOTP_SKEW_STEPS: ${SKIW_TOTP_SKEW_STEPS:?set in .env}
+      SKIW_LOGIN_PENDING_MIN: ${SKIW_LOGIN_PENDING_MIN:?set in .env}
+      SKIW_ENROL_LINK_MIN: ${SKIW_ENROL_LINK_MIN:?set in .env}
+      LOGIN_BLOB_KEY: ${LOGIN_BLOB_KEY:?set in .env}
     volumes:
       - ./app:/srv/app:ro
       - ./web/dist:/srv/web/dist:ro
@@ -50,6 +63,19 @@ services:
       SKIW_SESSION_ABSOLUTE_H: ${SKIW_SESSION_ABSOLUTE_H:?set in .env}
       SKIW_SESSION_IDLE_MIN: ${SKIW_SESSION_IDLE_MIN:?set in .env}
       TENANT_SOURCE_KEY: ${TENANT_SOURCE_KEY:?set in .env}
+      SKIW_ARGON2_MEMORY_KIB: ${SKIW_ARGON2_MEMORY_KIB:?set in .env}
+      SKIW_ARGON2_TIME_COST: ${SKIW_ARGON2_TIME_COST:?set in .env}
+      SKIW_ARGON2_PARALLELISM: ${SKIW_ARGON2_PARALLELISM:?set in .env}
+      SKIW_AUTH_FAILS_PER_ACCOUNT: ${SKIW_AUTH_FAILS_PER_ACCOUNT:?set in .env}
+      SKIW_AUTH_FAILS_PER_IP: ${SKIW_AUTH_FAILS_PER_IP:?set in .env}
+      SKIW_AUTH_WINDOW_MIN: ${SKIW_AUTH_WINDOW_MIN:?set in .env}
+      SKIW_AUTH_LOCK_AFTER: ${SKIW_AUTH_LOCK_AFTER:?set in .env}
+      SKIW_AUTH_LOCK_MIN: ${SKIW_AUTH_LOCK_MIN:?set in .env}
+      SKIW_STEPUP_MAX_AGE_MIN: ${SKIW_STEPUP_MAX_AGE_MIN:?set in .env}
+      SKIW_TOTP_SKEW_STEPS: ${SKIW_TOTP_SKEW_STEPS:?set in .env}
+      SKIW_LOGIN_PENDING_MIN: ${SKIW_LOGIN_PENDING_MIN:?set in .env}
+      SKIW_ENROL_LINK_MIN: ${SKIW_ENROL_LINK_MIN:?set in .env}
+      LOGIN_BLOB_KEY: ${LOGIN_BLOB_KEY:?set in .env}
     # The image's HEALTHCHECK probes the web port, which the worker does not serve.
     healthcheck:
       disable: true
