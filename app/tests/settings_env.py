@@ -18,18 +18,19 @@ AUTH = {
     "SKIW_ENROL_LINK_MIN": "30",
 }
 REQUIRED = {**SESSION, **AUTH}
-# (low, high) for each auth value, as app/config/settings.py reads them (builder values [A]).
+# (low, high) for each auth value, as app/config/settings.py reads them: the weak end is the spec or
+# owner value (PR 78 P2), the strict end a builder value [A].
 AUTH_BOUNDS = {
-    "SKIW_ARGON2_MEMORY_KIB": (19_456, 131_072),
-    "SKIW_ARGON2_TIME_COST": (2, 10),
+    "SKIW_ARGON2_MEMORY_KIB": (65_536, 131_072),
+    "SKIW_ARGON2_TIME_COST": (3, 10),
     "SKIW_ARGON2_PARALLELISM": (1, 8),
-    "SKIW_AUTH_FAILS_PER_ACCOUNT": (3, 20),
-    "SKIW_AUTH_FAILS_PER_IP": (5, 200),
-    "SKIW_AUTH_WINDOW_MIN": (1, 1440),
-    "SKIW_AUTH_LOCK_AFTER": (3, 50),
-    "SKIW_AUTH_LOCK_MIN": (1, 1440),
-    "SKIW_STEPUP_MAX_AGE_MIN": (1, 15),
-    "SKIW_TOTP_SKEW_STEPS": (0, 2),
+    "SKIW_AUTH_FAILS_PER_ACCOUNT": (3, 5),
+    "SKIW_AUTH_FAILS_PER_IP": (5, 20),
+    "SKIW_AUTH_WINDOW_MIN": (15, 1440),
+    "SKIW_AUTH_LOCK_AFTER": (3, 10),
+    "SKIW_AUTH_LOCK_MIN": (30, 1440),
+    "SKIW_STEPUP_MAX_AGE_MIN": (1, 5),
+    "SKIW_TOTP_SKEW_STEPS": (0, 1),
     "SKIW_LOGIN_PENDING_MIN": (1, 15),
-    "SKIW_ENROL_LINK_MIN": (5, 1440),
+    "SKIW_ENROL_LINK_MIN": (5, 30),
 }

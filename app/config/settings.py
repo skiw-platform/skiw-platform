@@ -57,20 +57,22 @@ SKIW_LOGIN_BLOB_KEYS = partial(env.versioned_keys, "LOGIN_BLOB_KEY", max_version
 # Interim deployment-wide auth values until a spec change adds §8.1 rows (owner Q6 (a), plan M3b);
 # the step-up age moves into `setting` in M5. Values: T5 (Argon2id), Flow 5.1 and T18 (limits,
 # lock, TOTP skew), §8.1 (step-up); pending login and enrolment link are builder values [A].
-# Bounds are builder values [A]: the Argon2 floor is OWASP's minimum (19 MiB, t=2, p=1), and the
-# memory cap keeps two parallel verifies inside the staging web limit (512 MiB).
-SKIW_ARGON2_MEMORY_KIB = env.bounded_int("SKIW_ARGON2_MEMORY_KIB", 19_456, 131_072)
-SKIW_ARGON2_TIME_COST = env.bounded_int("SKIW_ARGON2_TIME_COST", 2, 10)
+# The weak end of each bound is the spec or owner value (T5, Flow 5.1, §8.1 "≤ 5 min", Q5 (a)), so a
+# weaker host value needs an owner decision (PR 78 P2); the strict end is a builder value [A]. The
+# memory cap keeps two parallel verifies inside the staging web limit (512 MiB). Parallelism and
+# the pending-login minutes have no spec value; their bounds are unchanged builder values [A].
+SKIW_ARGON2_MEMORY_KIB = env.bounded_int("SKIW_ARGON2_MEMORY_KIB", 65_536, 131_072)
+SKIW_ARGON2_TIME_COST = env.bounded_int("SKIW_ARGON2_TIME_COST", 3, 10)
 SKIW_ARGON2_PARALLELISM = env.bounded_int("SKIW_ARGON2_PARALLELISM", 1, 8)
-SKIW_AUTH_FAILS_PER_ACCOUNT = env.bounded_int("SKIW_AUTH_FAILS_PER_ACCOUNT", 3, 20)
-SKIW_AUTH_FAILS_PER_IP = env.bounded_int("SKIW_AUTH_FAILS_PER_IP", 5, 200)
-SKIW_AUTH_WINDOW_MIN = env.bounded_int("SKIW_AUTH_WINDOW_MIN", 1, 1440)
-SKIW_AUTH_LOCK_AFTER = env.bounded_int("SKIW_AUTH_LOCK_AFTER", 3, 50)
-SKIW_AUTH_LOCK_MIN = env.bounded_int("SKIW_AUTH_LOCK_MIN", 1, 1440)
-SKIW_STEPUP_MAX_AGE_MIN = env.bounded_int("SKIW_STEPUP_MAX_AGE_MIN", 1, 15)
-SKIW_TOTP_SKEW_STEPS = env.bounded_int("SKIW_TOTP_SKEW_STEPS", 0, 2)
+SKIW_AUTH_FAILS_PER_ACCOUNT = env.bounded_int("SKIW_AUTH_FAILS_PER_ACCOUNT", 3, 5)
+SKIW_AUTH_FAILS_PER_IP = env.bounded_int("SKIW_AUTH_FAILS_PER_IP", 5, 20)
+SKIW_AUTH_WINDOW_MIN = env.bounded_int("SKIW_AUTH_WINDOW_MIN", 15, 1440)
+SKIW_AUTH_LOCK_AFTER = env.bounded_int("SKIW_AUTH_LOCK_AFTER", 3, 10)
+SKIW_AUTH_LOCK_MIN = env.bounded_int("SKIW_AUTH_LOCK_MIN", 30, 1440)
+SKIW_STEPUP_MAX_AGE_MIN = env.bounded_int("SKIW_STEPUP_MAX_AGE_MIN", 1, 5)
+SKIW_TOTP_SKEW_STEPS = env.bounded_int("SKIW_TOTP_SKEW_STEPS", 0, 1)
 SKIW_LOGIN_PENDING_MIN = env.bounded_int("SKIW_LOGIN_PENDING_MIN", 1, 15)
-SKIW_ENROL_LINK_MIN = env.bounded_int("SKIW_ENROL_LINK_MIN", 5, 1440)
+SKIW_ENROL_LINK_MIN = env.bounded_int("SKIW_ENROL_LINK_MIN", 5, 30)
 
 # CSRF on every mutating route, no switch (spec T6, A.19). Owner Q4 (a): an HttpOnly cookie; the
 # token is rendered into the no-store shell and sent back as X-CSRFToken. Same origin only (D2),
