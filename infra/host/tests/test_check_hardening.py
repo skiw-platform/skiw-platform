@@ -592,7 +592,9 @@ def test_expected_roles_are_read_from_roles_sql() -> None:
     want, want_settings, want_members = hardening.expected_roles()
     assert {name: roles[name][1] for name in want} == want and len(want) == 6 and bad == 0
     assert want_settings == settings and want_members == {
-        ("skiw_backup", "pg_read_all_data"): ("f", "t", "t")  # PG16+ GRANT defaults
+        ("skiw_backup", "pg_read_all_data"): ("f", "t", "t"),  # PG16+ GRANT defaults
+        ("skiw_migrator", "skiw_tenant_guard"): ("f", "f", "t"),  # INHERIT FALSE, SET TRUE
+        ("skiw_migrator", "skiw_auth_lookup"): ("f", "f", "t"),
     }
     assert members == {**hardening.BASELINE_MEMBERS, **want_members}  # the native run, exactly
 
@@ -640,6 +642,32 @@ def test_expected_roles_are_read_from_roles_sql() -> None:
             "member|skiw_backup|pg_read_all_data|f|t|t\n",
             "member|skiw_backup|pg_read_all_data|f|t|t\nmember|skiw_backup|pg_read_all_data|f|t|t\n",
             "skiw_backup in pg_read_all_data: granted more than once",
+        ),
+        (  # a third membership in a guard role (M4c-1)
+            "member|skiw_migrator|skiw_auth_lookup|f|f|t\n",
+            "member|skiw_migrator|skiw_auth_lookup|f|f|t\n"
+            "member|skiw_readonly|skiw_auth_lookup|f|f|t\n",
+            "unexpected membership: skiw_readonly in skiw_auth_lookup",
+        ),
+        (  # the migrator inherits the guard role's privileges
+            "member|skiw_migrator|skiw_auth_lookup|f|f|t",
+            "member|skiw_migrator|skiw_auth_lookup|f|t|t",
+            "skiw_migrator in skiw_auth_lookup: options differ from the allowed grant: inherit",
+        ),
+        (  # the migrator could grant the guard role on
+            "member|skiw_migrator|skiw_tenant_guard|f|f|t",
+            "member|skiw_migrator|skiw_tenant_guard|t|f|t",
+            "skiw_migrator in skiw_tenant_guard: options differ from the allowed grant: admin",
+        ),
+        (  # SET FALSE: migrations could no longer act as the owner
+            "member|skiw_migrator|skiw_tenant_guard|f|f|t",
+            "member|skiw_migrator|skiw_tenant_guard|f|f|f",
+            "skiw_migrator in skiw_tenant_guard: options differ from the allowed grant: set",
+        ),
+        (  # not yet granted: bootstrap-db apply has not run since this roles.sql was installed
+            "member|skiw_migrator|skiw_auth_lookup|f|f|t\n",
+            "",
+            "skiw_migrator is not a member of skiw_auth_lookup",
         ),
     ],
 )
