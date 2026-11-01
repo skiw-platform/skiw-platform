@@ -3,30 +3,38 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      Only accounts.auth writes auth_throttle, security_event and (from M3h) auth_stepup (spec
-      §4.1, TEN-03, TEN-10, PROJECT.md §9): their keys are HMACs, security_event and auth_stepup
-      are append-only evidence. Write them only from code in accounts.auth, never through the
-      models or SQL elsewhere; the accounts tests change rows by SQL on purpose.
+      Only accounts.auth (throttle, events.record_event) writes auth_throttle, security_event and
+      (from M3h) auth_stepup (spec §4.1, TEN-03, TEN-10, PROJECT.md §9): their keys are HMACs,
+      security_event and auth_stepup are append-only evidence. Write them only from code in
+      accounts.auth, never through the models or SQL elsewhere; the accounts tests change rows by
+      SQL on purpose.
     paths:
       exclude:
         - /app/accounts/auth/
         - /app/accounts/migrations/
         - /app/accounts/tests/
     pattern-either:
-      - pattern: AuthThrottle.objects
-      - pattern: SecurityEvent.objects
+      - patterns:
+          - pattern-either:
+              - pattern: AuthThrottle.$M
+              - pattern: SecurityEvent.$M
+              - pattern: accounts.models.AuthThrottle.$M
+              - pattern: accounts.models.SecurityEvent.$M
+              - pattern: accounts.auth.tables.AuthThrottle.$M
+              - pattern: accounts.auth.tables.SecurityEvent.$M
+          - metavariable-regex:
+              metavariable: $M
+              regex: ^(objects|_default_manager|_base_manager)$
       - pattern: AuthThrottle(...)
       - pattern: SecurityEvent(...)
-      - pattern: accounts.models.AuthThrottle.objects
-      - pattern: accounts.models.SecurityEvent.objects
       - pattern: accounts.models.AuthThrottle(...)
       - pattern: accounts.models.SecurityEvent(...)
-      - pattern: accounts.auth.tables.AuthThrottle.objects
-      - pattern: accounts.auth.tables.SecurityEvent.objects
       - pattern: accounts.auth.tables.AuthThrottle(...)
       - pattern: accounts.auth.tables.SecurityEvent(...)
+      # Semgrep matches a metavariable-regex from the start of the value, so ^.*? lets the verb sit
+      # anywhere: after a newline, a space, a comment, a CTE or an earlier statement (PR 80 P2).
       - patterns:
           - pattern: '"$SQL"'
           - metavariable-regex:
               metavariable: $SQL
-              regex: (?is)\b(insert|update|delete|truncate|copy|merge|alter|drop|grant|revoke|lock)\b.*\b(auth_throttle|security_event|auth_stepup)\b
+              regex: (?is)^.*?\b(insert|update|delete|truncate|copy|merge|alter|drop|grant|revoke|lock)\b.*\b(auth_throttle|security_event|auth_stepup)\b

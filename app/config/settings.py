@@ -12,7 +12,9 @@ ALLOWED_HOSTS = env.csv("DJANGO_ALLOWED_HOSTS")
 
 # Hosts only (spec §8.4 H1, UNI-17): Caddy overwrites X-Forwarded-Proto on every request, so
 # Django may trust it there. Unset elsewhere, so a client-sent header never makes a request secure.
-if env.flag("DJANGO_BEHIND_CADDY"):
+# Caddy replaces X-Forwarded-For too, so accounts.auth.throttle.client_ip reads it only then.
+SKIW_BEHIND_CADDY = env.flag("DJANGO_BEHIND_CADDY")
+if SKIW_BEHIND_CADDY:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Not django.contrib.sessions: its 0001_initial would create a second django_session table;

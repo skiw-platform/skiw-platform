@@ -12,6 +12,10 @@ def banned(key, window, kind):
     models.SecurityEvent.objects.all().delete()
     # ruleid: auth-tables-accounts-only
     models.SecurityEvent(kind=kind).save()
+    # ruleid: auth-tables-accounts-only
+    Row._default_manager.all().delete()
+    # ruleid: auth-tables-accounts-only
+    models.SecurityEvent._base_manager.all().delete()
     with connection.cursor() as cursor:
         # ruleid: auth-tables-accounts-only
         cursor.execute("UPDATE auth_throttle SET count = 0 WHERE key_hmac = %s", [key])
@@ -21,6 +25,18 @@ def banned(key, window, kind):
         cursor.execute("DELETE FROM auth_stepup")
         # ruleid: auth-tables-accounts-only
         cursor.execute("TRUNCATE security_event")
+        # ruleid: auth-tables-accounts-only
+        cursor.execute("""
+            UPDATE auth_throttle SET count = 0
+        """)
+        # ruleid: auth-tables-accounts-only
+        cursor.execute(" DELETE FROM auth_throttle")
+        # ruleid: auth-tables-accounts-only
+        cursor.execute("WITH d AS (DELETE FROM auth_throttle RETURNING 1) SELECT count(*) FROM d")
+        # ruleid: auth-tables-accounts-only
+        cursor.execute("SELECT 1; UPDATE auth_throttle SET count = 0")
+        # ruleid: auth-tables-accounts-only
+        cursor.execute("-- reset\nUPDATE auth_throttle SET count = 0")
 
 
 def allowed():
@@ -28,4 +44,8 @@ def allowed():
     tables = {"auth_throttle": {"SELECT", "INSERT", "UPDATE"}, "security_event": {"SELECT"}}
     # ok: auth-tables-accounts-only
     query = "SELECT to_regclass('security_event') IS NOT NULL"
-    return tables, query
+    # ok: auth-tables-accounts-only
+    other = "DELETE FROM django_session WHERE session_key = %s"
+    # ok: auth-tables-accounts-only
+    name = Row._meta.db_table
+    return tables, query, other, name
