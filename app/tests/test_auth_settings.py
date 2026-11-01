@@ -33,6 +33,30 @@ def test_each_bound_is_inclusive(name: str, monkeypatch: pytest.MonkeyPatch) -> 
         assert load(monkeypatch, **{name: str(value)})[name] == value
 
 
+# One step weaker than the spec or owner value, written out here, not taken from AUTH_BOUNDS, so a
+# bound widened in settings.py and AUTH_BOUNDS together still fails (PR 78 P2).
+WEAKER_THAN_SPEC = {
+    "SKIW_ARGON2_MEMORY_KIB": "65535",  # T5: 64 MiB
+    "SKIW_ARGON2_TIME_COST": "2",  # T5: t=3
+    "SKIW_AUTH_FAILS_PER_ACCOUNT": "6",  # Flow 5.1: 5 per account
+    "SKIW_AUTH_FAILS_PER_IP": "21",  # Flow 5.1: 20 per IP
+    "SKIW_AUTH_WINDOW_MIN": "14",  # Flow 5.1: per 15 min
+    "SKIW_AUTH_LOCK_AFTER": "11",  # Flow 5.1: after 10 failures
+    "SKIW_AUTH_LOCK_MIN": "29",  # Flow 5.1: for 30 min
+    "SKIW_STEPUP_MAX_AGE_MIN": "6",  # T5, §8.1: ≤ 5 min
+    "SKIW_TOTP_SKEW_STEPS": "2",  # Flow 5.1: ±1 step
+    "SKIW_ENROL_LINK_MIN": "31",  # owner Q5 (a): 30 min
+}
+
+
+@pytest.mark.parametrize("name", WEAKER_THAN_SPEC)
+def test_a_value_weaker_than_the_spec_fails_closed(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(ImproperlyConfigured, match=f"^{name} must be a whole number"):
+        load(monkeypatch, **{name: WEAKER_THAN_SPEC[name]})
+
+
 @pytest.mark.parametrize("name", AUTH_BOUNDS)
 @pytest.mark.parametrize("case", ["below", "above", "missing", *MALFORMED])
 def test_a_value_outside_the_bounds_missing_or_malformed_fails_closed(
