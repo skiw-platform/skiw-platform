@@ -8,6 +8,8 @@ import uuid
 from collections.abc import Callable, Iterator
 
 import pytest
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from accounts.auth import blob
 from accounts.auth.blob import LoginRecord
@@ -102,6 +104,23 @@ def test_the_newest_version_seals_and_every_listed_one_opens(use_keys: Callable[
     sealed_new = blob.seal_login(RECORD, EMAIL)
     assert sealed_new[:2] == (65_535).to_bytes(2, "big") and sealed_v1[:2] == b"\0\x01"
     assert blob.open_login(sealed_v1, EMAIL) == blob.open_login(sealed_new, EMAIL) == RECORD
+
+
+def test_the_version_header_is_bound_by_the_aad(use_keys: Callable[..., None]) -> None:
+    same = base64.b64encode(secrets.token_bytes(32)).decode()
+    use_keys(f"v2:{same}", f"v1:{same}")  # one key under two versions: only the AAD differs
+    sealed = blob.seal_login(RECORD, EMAIL)
+    assert sealed[:2] == b"\0\x02" and blob.open_login(sealed, EMAIL) == RECORD
+    assert blob.open_login(b"\0\x01" + sealed[2:], EMAIL) is None
+
+
+def test_the_aes_key_is_derived_not_the_raw_key(use_keys: Callable[..., None]) -> None:
+    raw = secrets.token_bytes(32)
+    use_keys("v1:" + base64.b64encode(raw).decode())
+    sealed = blob.seal_login(RECORD, EMAIL)
+    aad = sealed[:2] + blob.LOGIN_AAD + EMAIL.encode()  # the exact AAD: only the key differs
+    with pytest.raises(InvalidTag):
+        AESGCM(raw).decrypt(sealed[2 : 2 + blob.NONCE], sealed[2 + blob.NONCE :], aad)
 
 
 @pytest.mark.parametrize(
