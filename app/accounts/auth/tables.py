@@ -1,6 +1,6 @@
 """The global pre-tenant tables `auth_throttle` and `security_event` (spec §4.1 "Global tables";
-plan M3c). Models for the schema only; no code writes them yet (the throttle and the event
-writer come in a later PR), and only accounts.auth may (Semgrep auth-tables-accounts-only).
+plan M3c). Models for the schema only: accounts.auth.throttle and accounts.auth.events write
+them by SQL, and only accounts.auth may (Semgrep auth-tables-accounts-only).
 Every key and HMAC is a 32-byte HMAC-SHA-256 value, so no raw email or IP fits a column."""
 
 from django.db import models

@@ -4,7 +4,7 @@ export PYTHONPATH := app:infra/host
 NODE_MAJOR := $(shell node -p "process.versions.node.split('.')[0]" 2>/dev/null)
 SEMGREP_VERSION := 1.179.0
 PIP_AUDIT_VERSION := 2.10.1
-TOOL_ENV := DJANGO_SECRET_KEY=tooling-only-not-a-secret DATABASE_URL=postgres://u:p@localhost:5432/db \
+TOOL_ENV := DJANGO_SECRET_KEY=tooling-only-not-a-secret DATABASE_URL=postgres://u:p@127.0.0.1:1/db \
 	SKIW_SESSION_ABSOLUTE_H=12 SKIW_SESSION_IDLE_MIN=30 \
 	SKIW_ARGON2_MEMORY_KIB=65536 SKIW_ARGON2_TIME_COST=3 SKIW_ARGON2_PARALLELISM=1 \
 	SKIW_AUTH_FAILS_PER_ACCOUNT=5 SKIW_AUTH_FAILS_PER_IP=20 SKIW_AUTH_WINDOW_MIN=15 \
