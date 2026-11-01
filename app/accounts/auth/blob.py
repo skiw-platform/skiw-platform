@@ -2,12 +2,12 @@
 `lookup_blob_ct`, §8.4 H4; plan M3b). No database access.
 
 blob = version (2 bytes, big-endian) || nonce (12 random bytes) || AES-256-GCM ciphertext || tag
-(16 bytes). The AES key is HKDF-SHA-256 of the key version under LABEL, so a key line longer than
-32 bytes still gives one AES-256 key. The AAD is the version bytes || a purpose label || the
-lookup value, so a blob moved to another row or purpose fails its tag. Plaintexts are padded to
-one size per purpose, so every blob of a purpose has one length (login 222, credential 62) and
-an Argon2 parameter change cannot tell old blobs from new ones. The newest version seals; every
-listed one opens.
+(16 bytes). Each version's AES key is HKDF-SHA-256 of that version's key under LABEL, so a key
+line longer than 32 bytes still gives one AES-256 key. The AAD is the version bytes || a purpose
+label || the lookup value, so a blob moved to another row, purpose or version fails its tag.
+Plaintexts are padded to one size per purpose, so every blob of a purpose has one length (login
+222, credential 62) and an Argon2 parameter change cannot tell old blobs from new ones. The
+newest version seals; every listed one opens.
 """
 
 import functools

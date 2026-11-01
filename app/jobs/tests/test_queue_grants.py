@@ -51,7 +51,16 @@ COMPOSITE_TYPES = {"procrastinate_job_to_defer_v1"}
 TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
 # django_session: D6 "Revocation is a row delete" (accounts.0001; flush and cycle_key delete).
 DELETE_ALLOW_LIST = {"procrastinate_periodic_defers", "procrastinate_workers", "django_session"}
-# Spec §4.2 TEN-03 row: append-only evidence tables. None exist in M0c; each is checked as it lands.
+# accounts.0002 (plan M3c): the global pre-tenant tables of spec §4.1; no DELETE, no TRUNCATE.
+AUTH_TABLES = {
+    "auth_throttle": {"SELECT", "INSERT", "UPDATE"},
+    "security_event": {"SELECT", "INSERT"},  # append-only (TEN-03)
+}
+# Every relation the migrations create is in spec §4.1's closed global list until M4 adds
+# tenant-owned tables (and the schema check); the probe tables are made by test fixtures only.
+GLOBAL_TABLES = {*TABLES, *AUTH_TABLES, "django_session", "django_migrations"}
+TEST_ONLY_TABLES = {"jobs_probe", "files_probe"}
+# Spec §4.2 TEN-03 row: append-only evidence tables, each checked as it lands.
 TEN03_EVIDENCE_TABLES = [
     "audit_event",
     "security_event",
@@ -86,6 +95,24 @@ def test_queue_objects_are_exactly_the_audited_ones() -> None:
     )
 
 
+def test_every_table_is_in_the_closed_global_list() -> None:
+    rows = separate("SELECT c.relname" + USER_RELATIONS + " AND c.relkind IN ('r', 'p')")
+    assert {name for (name,) in rows} - TEST_ONLY_TABLES == GLOBAL_TABLES
+
+
+def test_app_role_acl_entries_on_the_auth_tables_are_exactly_the_plan_list() -> None:
+    rows = separate(
+        "SELECT c.relname, a.privilege_type FROM pg_class c, aclexplode(c.relacl) a"
+        " WHERE c.relname = ANY(%s) AND a.grantee = %s::regrole",
+        list(AUTH_TABLES),
+        APP_ROLE,
+    )
+    granted: dict[str, set[str]] = defaultdict(set)
+    for relname, privilege in rows:
+        granted[relname].add(privilege)
+    assert granted == AUTH_TABLES
+
+
 def test_app_role_acl_entries_on_queue_relations_are_exactly_the_spec_list() -> None:
     rows = separate(
         "SELECT c.relname, a.privilege_type FROM pg_class c, aclexplode(c.relacl) a"
@@ -98,14 +125,14 @@ def test_app_role_acl_entries_on_queue_relations_are_exactly_the_spec_list() -> 
     assert granted == TABLES | SEQUENCES
 
 
-@pytest.mark.parametrize("table", TABLES)
+@pytest.mark.parametrize("table", [*TABLES, *AUTH_TABLES])
 def test_app_role_effective_table_privileges(table: str) -> None:
     held = {
         privilege
         for privilege in TABLE_PRIVILEGES
         if separate("SELECT has_table_privilege(%s, %s, %s)", APP_ROLE, table, privilege)[0][0]
     }
-    assert held == TABLES[table]
+    assert held == (TABLES | AUTH_TABLES)[table]
 
 
 @pytest.mark.parametrize("sequence", SEQUENCES)
@@ -160,6 +187,7 @@ def test_app_role_deletes_only_from_the_allow_list() -> None:
 
 
 def test_evidence_tables_that_exist_are_append_only_for_the_app_role() -> None:
+    assert separate("SELECT to_regclass('security_event') IS NOT NULL") == [(True,)]
     rows = separate(
         "SELECT t FROM unnest(%s::text[]) t WHERE to_regclass(t) IS NOT NULL AND ("
         " has_table_privilege(%s, t, 'UPDATE') OR has_table_privilege(%s, t, 'DELETE')"
