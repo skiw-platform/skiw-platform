@@ -56,6 +56,14 @@ AUTH_TABLES = {
     "auth_throttle": {"SELECT", "INSERT", "UPDATE"},
     "security_event": {"SELECT", "INSERT"},  # append-only (TEN-03)
 }
+# Every non-owner ACL entry on the auth tables, a closed list (grantee "-" would be PUBLIC).
+# accounts.0003 (plan M4c-2b): skiw_auth_lookup, owner of the guard.auth_lookup_* definer
+# functions (M3e, M3g), may only INSERT events.
+LOOKUP_ROLE = "skiw_auth_lookup"
+AUTH_TABLE_GRANTS = {
+    **{(table, APP_ROLE): privileges for table, privileges in AUTH_TABLES.items()},
+    ("security_event", LOOKUP_ROLE): {"INSERT"},
+}
 # Every relation the migrations create is in spec §4.1's closed global list until M4 adds
 # tenant-owned tables (and the schema check); the probe tables are made by test fixtures only.
 # tenancy.0002 (plan M4c-2a): the guard key tables, owned by the NOLOGIN roles. M4c-6a replaces
@@ -103,17 +111,23 @@ def test_every_table_is_in_the_closed_global_list() -> None:
     assert {name for (name,) in rows} - TEST_ONLY_TABLES == GLOBAL_TABLES
 
 
-def test_app_role_acl_entries_on_the_auth_tables_are_exactly_the_plan_list() -> None:
-    rows = separate(
-        "SELECT c.relname, a.privilege_type FROM pg_class c, aclexplode(c.relacl) a"
-        " WHERE c.relname = ANY(%s) AND a.grantee = %s::regrole",
+def test_acl_entries_on_the_auth_tables_are_exactly_the_plan_list() -> None:
+    # Every grantee but the owner (M3c-1 filtered on skiw_app, so another grantee went unseen).
+    owners = separate(
+        "SELECT DISTINCT c.relowner::regrole::text FROM pg_class c WHERE c.relname = ANY(%s)",
         list(AUTH_TABLES),
-        APP_ROLE,
     )
-    granted: dict[str, set[str]] = defaultdict(set)
-    for relname, privilege in rows:
-        granted[relname].add(privilege)
-    assert granted == AUTH_TABLES
+    assert owners == [("skiw_migrator",)]
+    rows = separate(
+        "SELECT c.relname, a.grantee::regrole::text, a.privilege_type"
+        " FROM pg_class c, aclexplode(c.relacl) a"
+        " WHERE c.relname = ANY(%s) AND a.grantee <> c.relowner",
+        list(AUTH_TABLES),
+    )
+    granted: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for relname, grantee, privilege in rows:
+        granted[relname, grantee].add(privilege)
+    assert granted == AUTH_TABLE_GRANTS
 
 
 def test_app_role_acl_entries_on_queue_relations_are_exactly_the_spec_list() -> None:
@@ -136,6 +150,16 @@ def test_app_role_effective_table_privileges(table: str) -> None:
         if separate("SELECT has_table_privilege(%s, %s, %s)", APP_ROLE, table, privilege)[0][0]
     }
     assert held == (TABLES | AUTH_TABLES)[table]
+
+
+@pytest.mark.parametrize("table", AUTH_TABLES)
+def test_lookup_role_effective_table_privileges(table: str) -> None:
+    held = {
+        privilege
+        for privilege in TABLE_PRIVILEGES
+        if separate("SELECT has_table_privilege(%s, %s, %s)", LOOKUP_ROLE, table, privilege)[0][0]
+    }
+    assert held == AUTH_TABLE_GRANTS.get((table, LOOKUP_ROLE), set())
 
 
 @pytest.mark.parametrize("sequence", SEQUENCES)
@@ -189,16 +213,17 @@ def test_app_role_deletes_only_from_the_allow_list() -> None:
     assert {name for (name,) in rows} == DELETE_ALLOW_LIST
 
 
-def test_evidence_tables_that_exist_are_append_only_for_the_app_role() -> None:
+@pytest.mark.parametrize("role", [APP_ROLE, LOOKUP_ROLE])
+def test_evidence_tables_that_exist_are_append_only_for_the_writers(role: str) -> None:
     assert separate("SELECT to_regclass('security_event') IS NOT NULL") == [(True,)]
     rows = separate(
         "SELECT t FROM unnest(%s::text[]) t WHERE to_regclass(t) IS NOT NULL AND ("
         " has_table_privilege(%s, t, 'UPDATE') OR has_table_privilege(%s, t, 'DELETE')"
         " OR has_table_privilege(%s, t, 'TRUNCATE'))",
         TEN03_EVIDENCE_TABLES,
-        APP_ROLE,
-        APP_ROLE,
-        APP_ROLE,
+        role,
+        role,
+        role,
     )
     assert rows == []
 

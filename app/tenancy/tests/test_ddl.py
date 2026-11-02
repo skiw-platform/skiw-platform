@@ -45,10 +45,20 @@ def test_forward_and_reverse_run_as_the_owner_and_hand_create_back(role: str) ->
         assert statements == (
             f"GRANT CREATE ON SCHEMA guard TO {role}",
             f"SET LOCAL ROLE {role}",
+            f"DO $$BEGIN IF current_user <> '{role}' THEN RAISE EXCEPTION"
+            f" 'as_owner: current_user is not {role}; use an atomic migration'; END IF; END$$",
             body,
             "RESET ROLE",
             f"REVOKE CREATE ON SCHEMA guard FROM {role}",
         )
+
+
+def test_no_statement_holds_a_percent_sign_or_a_line_break() -> None:
+    # The linter reads sqlmigrate output line by line; `%` would meet any params formatting.
+    op = as_owner("skiw_auth_lookup", ["SELECT 1"], ["SELECT 2"])
+    statements = [*op.sql, *(op.reverse_sql or ())]
+    assert len(statements) == 12
+    assert [s for s in statements if not isinstance(s, str) or "%" in s or "\n" in s] == []
 
 
 def test_the_lint_skipped_migration_name_is_unique() -> None:

@@ -12,6 +12,8 @@ import psycopg
 import pytest
 from psycopg import sql
 
+from tenancy.ddl import GUARD_OWNERS, as_owner
+
 pytestmark = pytest.mark.live
 
 # Built with zip(), not a literal dict: gitleaks reads a key name next to a long value as a secret.
@@ -182,3 +184,46 @@ def test_the_unlinted_key_table_migration_reverses_and_reapplies_exactly() -> No
     finally:
         migrate()
     assert rows(SNAPSHOT) == before
+
+
+PROBE_TABLE = "guard.as_owner_probe"
+
+
+def owner_probe(role: str) -> list[sql.SQL]:
+    op = as_owner(role, [f"CREATE TABLE {PROBE_TABLE} (x int)"], [f"DROP TABLE {PROBE_TABLE}"])
+    return [sql.SQL(statement) for statement in op.sql if isinstance(statement, str)]
+
+
+@pytest.mark.parametrize("role", sorted(GUARD_OWNERS))
+def test_as_owner_in_a_transaction_creates_the_object_as_the_role(role: str) -> None:
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        for statement in owner_probe(role):
+            conn.execute(statement)
+        owner = conn.execute(
+            "SELECT relowner::regrole::text FROM pg_class WHERE oid = %s::regclass", (PROBE_TABLE,)
+        ).fetchall()
+        assert owner == [(role,)]
+        assert conn.execute("SELECT current_user::text").fetchall() == [("skiw_migrator",)]
+        conn.rollback()
+
+
+@pytest.mark.parametrize("role", sorted(GUARD_OWNERS))
+def test_as_owner_outside_a_transaction_stops_before_the_first_object(role: str) -> None:
+    # A non-atomic migration: SET LOCAL ROLE is a no-op there (only a notice), so the DO check
+    # must raise before the CREATE runs as the migrator. The GRANT before it has committed and
+    # is left behind (docs/DECISIONS.md "M4c-2b"); the finally takes it back.
+    try:
+        with (
+            psycopg.connect(os.environ["MIGRATION_DATABASE_URL"], autocommit=True) as conn,
+            pytest.raises(psycopg.errors.RaiseException, match="as_owner: current_user"),
+        ):
+            for statement in owner_probe(role):
+                conn.execute(statement)
+        assert rows("SELECT to_regclass(%s)", PROBE_TABLE) == [(None,)]
+        assert rows("SELECT has_schema_privilege(%s, 'guard', 'CREATE')", role) == [(True,)]
+    finally:
+        with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"], autocommit=True) as conn:
+            conn.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(sql.SQL(PROBE_TABLE)))
+            conn.execute(
+                sql.SQL("REVOKE CREATE ON SCHEMA guard FROM {}").format(sql.Identifier(role))
+            )
