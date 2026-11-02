@@ -1,0 +1,63 @@
+# The tenancy boundaries (spec §4.2 "Tenant binding", TEN-06, TEN-09, TEN-10; plan M4c-2a). One rule
+# per allowed-path set. Semgrep matches a metavariable-regex from the start of the value, so ^.*?
+# lets the verb sit anywhere in the string (PR 80 P2).
+rules:
+  - id: tenancy-guard-key-sql
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only tenancy.keys (the migrate-time key writes, M4c-3) and migrations name a guard.*_key
+      table in SQL (spec §4.1, §4.2 TEN-10 row: DB-side only guard.* functions read key tables).
+      The bare names in a list are fine; SQL that reads or writes the keys is not.
+    # accounts/migrations is allowed on purpose: M3e's guard.auth_lookup_login and M3g's
+    # guard.auth_lookup_credential live there and read guard.lookup_decoy_key (plan M4c-2a; the
+    # auth-tables-accounts-only rule allows the same path for their security_event insert).
+    paths:
+      exclude:
+        - /app/tenancy/keys.py
+        - /app/tenancy/migrations/
+        - /app/accounts/migrations/
+        - /app/tenancy/tests/
+        - /app/accounts/tests/
+    patterns:
+      - pattern: '"$SQL"'
+      - metavariable-regex:
+          metavariable: $SQL
+          regex: (?is)^.*?\b(select|insert|update|delete|truncate|copy|merge|alter|drop|grant|revoke|lock|create|from|into|join|table)\b.*?\bguard"?\s*\.\s*"?\w*_key\b
+  - id: tenancy-token-setting
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only tenancy.binding.with_agency() sets app.tenant_token (spec §4.2 item 2: tokens are
+      minted only in with_agency() / async_with_agency()).
+    paths:
+      exclude:
+        - /app/tenancy/binding.py
+        - /app/tenancy/async_binding.py
+    patterns:
+      - pattern: '"$SQL"'
+      - metavariable-regex:
+          metavariable: $SQL
+          regex: (?is)^.*?(set_config\s*\(\s*'app\.tenant_token'|\bset\s+local\s+"?app\.tenant_token)
+  - id: tenancy-async-pool
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only tenancy.async_binding holds an AsyncConnectionPool (spec D26, plan M4c-8): every pooled
+      async transaction must go through async_with_agency().
+    paths:
+      exclude:
+        - /app/tenancy/async_binding.py
+    pattern-regex: \bAsyncConnectionPool\b
+  - id: tenancy-no-session-setting
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A session-level app.* setting leaks across pooled connections (TEN-09): use only
+      set_config(name, value, true) inside with_agency(); plain SET and set_config(..., false)
+      are banned everywhere.
+    patterns:
+      - pattern: '"$SQL"'
+      - metavariable-regex:
+          metavariable: $SQL
+          regex: (?is)^.*?(set_config\s*\([^)]*,\s*(false|'f'|'false'|0)\s*\)|\bset\s+(session\s+)?"?app\.)
