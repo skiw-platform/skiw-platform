@@ -63,6 +63,11 @@ SKIW_TENANT_SOURCE_KEYS = partial(env.versioned_keys, "TENANT_SOURCE_KEY")
 # Lazy for the same reason (migrate has no login_blob_key mount). The login blobs (plan M3b) carry
 # the version in two bytes, so a higher version is refused at start-up.
 SKIW_LOGIN_BLOB_KEYS = partial(env.versioned_keys, "LOGIN_BLOB_KEY", max_version=0xFFFF)
+# The two guard key tables' sources (spec §4.1, §8.4 H4; plan M4c-3): read only by the
+# migrate-time writes in tenancy.keys. Lazy, so web and worker (no lookup_decoy_key mount) still
+# import settings. The cap matches the tables' version CHECK (1 to 999999).
+SKIW_TENANT_TOKEN_KEYS = partial(env.versioned_keys, "TENANT_TOKEN_KEY", max_version=999_999)
+SKIW_LOOKUP_DECOY_KEYS = partial(env.versioned_keys, "LOOKUP_DECOY_KEY", max_version=999_999)
 
 # Interim deployment-wide auth values until a spec change adds §8.1 rows (owner Q6 (a), plan M3b);
 # the step-up age moves into `setting` in M5. Values: T5 (Argon2id), Flow 5.1 and T18 (limits,

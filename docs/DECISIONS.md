@@ -575,3 +575,10 @@
 - **Versions:** none new (PostgreSQL 17.11, django-migration-linter 6.0.0, Semgrep 1.179.0).
 - **Exception to a rule?** no.
 - **Decided by:** builder (deep tier), within plan M4c-2b and the PR 84 review P3 #1 disposition (option (a), the coordinator's pick); the committed-and-revoked USAGE in the probe is a builder choice, explained above.
+
+## 2026-11-03 — M4c-3a: wiring for the guard key writes (readers, `migrate` key files, generated local keys)
+- **Decision:** First half of plan M4c-3, split off by the plan §1 size rule (the whole change was past ≈ 450 lines). It adds no behaviour: (1) lazy readers `SKIW_TENANT_TOKEN_KEYS` and `SKIW_LOOKUP_DECOY_KEYS` in `config.settings` (`partial(env.versioned_keys, …, max_version=999_999)`, matching the tables' version CHECK), lazy so web and worker (no `lookup_decoy_key` mount) still import settings; (2) host `migrate` gains `TENANT_TOKEN_KEY_FILE` and `LOOKUP_DECOY_KEY_FILE` (both secrets were already mounted), with a new Compose check `file_secrets`: every `*_FILE` names a secret the same service mounts, with two planted cases; (3) `make .env` appends generated `TENANT_TOKEN_KEY=v1:` and `LOOKUP_DECOY_KEY=v1:` lines (no literal value in the repo, UNI-07).
+- **Order:** M4c-3b (the key writes, `tenancy.keys`) needs this merged first: without the `.env` lines `make migrate` would fail, and without the Compose variables the host `migrate` would. Runbooks (UNI-16) land with M4c-3b, because they describe its behaviour.
+- **Why:** plan `docs/plans/2026-11-01-m4-core.md` §3 M4c-3, §1; spec §4.1, §8.4 H4; UNI-07–09.
+- **Versions:** none new. **Exception to a rule?** no.
+- **Decided by:** builder (deep tier sub-agent), within plan M4c-3.

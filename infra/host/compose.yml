@@ -126,6 +126,9 @@ services:
       SKIW_TOTP_SKEW_STEPS: ${SKIW_TOTP_SKEW_STEPS:?}
       SKIW_LOGIN_PENDING_MIN: ${SKIW_LOGIN_PENDING_MIN:?}
       SKIW_ENROL_LINK_MIN: ${SKIW_ENROL_LINK_MIN:?}
+      # The guard key writes after every migrate (tenancy.keys, plan M4c-3).
+      TENANT_TOKEN_KEY_FILE: /run/secrets/tenant_token_key
+      LOOKUP_DECOY_KEY_FILE: /run/secrets/lookup_decoy_key
     secrets:
       [django_secret_key, skiw_migrator_password, tenant_token_key, approval_mac_key, lookup_decoy_key]
     healthcheck: {disable: true}

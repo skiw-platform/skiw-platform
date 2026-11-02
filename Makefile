@@ -89,13 +89,15 @@ web-dev: check-node
 build: web-build
 	docker compose build
 
-# The local tenant_source_key and login_blob_key are generated, never committed (UNI-07; the
-# gitleaks rule flags any literal value for them); an older .env without them:
-# docs/runbooks/local-dev.md.
+# The local tenant_source_key, login_blob_key, tenant_token_key and lookup_decoy_key are
+# generated, never committed (UNI-07; the gitleaks rule flags any literal value for them); an
+# older .env without them: docs/runbooks/local-dev.md.
 .env:
 	cp .env.example .env
 	printf 'TENANT_SOURCE_KEY=v1:%s\n' "$$(openssl rand -base64 32)" >> .env
 	printf 'LOGIN_BLOB_KEY=v1:%s\n' "$$(openssl rand -base64 32)" >> .env
+	printf 'TENANT_TOKEN_KEY=v1:%s\n' "$$(openssl rand -base64 32)" >> .env
+	printf 'LOOKUP_DECOY_KEY=v1:%s\n' "$$(openssl rand -base64 32)" >> .env
 
 dev: .env web-build
 	docker compose up -d --wait db
