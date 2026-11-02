@@ -245,7 +245,16 @@ def services(config: Config) -> list[tuple[str, Config]]:
 
 
 CHECKS = [
-    *(ports, egress, unpinned, unhardened, mounts, secrets, owners, environment, file_secrets, hba),
+    ports,
+    egress,
+    unpinned,
+    unhardened,
+    mounts,
+    secrets,
+    owners,
+    environment,
+    file_secrets,
+    hba,
 ]
 
 
