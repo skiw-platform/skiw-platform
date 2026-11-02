@@ -30,6 +30,7 @@ URL_PASSWORD = re.compile(r"://[^/@:]*:[^/@]*@")
 BACKUPS = "/srv/skiw/backups"
 HBA_TARGET = "/etc/skiw/pg_hba.conf"
 PLANTED = token.token_urlsafe(24)  # generated per run; no fake secret is committed
+MIGRATE_KEY = "lookup_decoy_key"  # a planted case drops it from migrate (M4c-3)
 FILES_READ_ONLY = {"web": False, "worker": False, "backup": True}  # FILE-03 M1 part, UNI-04
 
 # H4 inventory (skiw_host.secrets, used by bootstrap-secrets): the only services that may hold
@@ -211,6 +212,19 @@ def environment(config: Config) -> list[str]:
     return problems
 
 
+def file_secrets(config: Config) -> list[str]:
+    """Every *_FILE names a secret the same service mounts (plan M4c-3): a path to a secret it does
+    not hold would fail only at run time, in the one service that reads it."""
+    return [
+        f"{n}: {key} names a secret it does not mount"
+        for n, s in services(config)
+        for key, value in (s.get("environment") or {}).items()
+        if key.endswith("_FILE")
+        and str(value).removeprefix("/run/secrets/")
+        not in {x["source"] for x in s.get("secrets", [])}
+    ]
+
+
 def hba(config: Config) -> list[str]:
     """`db` reads the pg_hba.conf that `bootstrap-db prepare` renders (H6), as a Compose config."""
     expected = {"db": [{"source": "pg_hba", "target": HBA_TARGET}]}
@@ -230,7 +244,18 @@ def services(config: Config) -> list[tuple[str, Config]]:
     return sorted(config["services"].items())
 
 
-CHECKS = [ports, egress, unpinned, unhardened, mounts, secrets, owners, environment, hba]
+CHECKS = [
+    ports,
+    egress,
+    unpinned,
+    unhardened,
+    mounts,
+    secrets,
+    owners,
+    environment,
+    file_secrets,
+    hba,
+]
 
 
 @pytest.mark.parametrize("check", CHECKS)
@@ -270,6 +295,18 @@ PLANTS: list[tuple[Callable[[Config], list[str]], Callable[[Config], None]]] = [
     (
         environment,
         lambda c: c["services"]["worker"]["environment"].update(DJANGO_SECRET_KEY=PLANTED),
+    ),
+    (
+        file_secrets,
+        lambda c: c["services"]["migrate"]["environment"].update(
+            TENANT_SOURCE_KEY_FILE="/run/secrets/tenant_source_key"
+        ),
+    ),
+    (
+        file_secrets,
+        lambda c: c["services"]["migrate"].update(
+            secrets=[x for x in c["services"]["migrate"]["secrets"] if x["source"] != MIGRATE_KEY]
+        ),
     ),
     (hba, lambda c: c["services"]["db"].update(command=["postgres"])),
     (hba, lambda c: c["configs"]["pg_hba"].update(file="./db/pg_hba.conf")),
@@ -350,6 +387,20 @@ def test_only_web_and_worker_read_the_app_key_from_its_secret_file(
         assert key in {s["source"] for s in config["services"][name]["secrets"]}
     for _, service in services(config):
         assert variable not in (service.get("environment") or {})
+
+
+def test_migrate_reads_both_guard_keys_from_their_secret_files(config: Config) -> None:
+    """Plan M4c-3: the key writes after `migrate` (tenancy.keys) read these two files; migrate is
+    the only reader of lookup_decoy_key (H4)."""
+    env = config["services"]["migrate"]["environment"]
+    keys = {k: v for k, v in env.items() if k.endswith("_FILE") and "KEY" in k}
+    names = ("tenant_token_key", "lookup_decoy_key", "django_secret_key")
+    assert keys == {f"{name.upper()}_FILE": f"/run/secrets/{name}" for name in names}
+    assert not [
+        k
+        for k in env
+        if k.removesuffix("_FILE") in {n.upper() for n in names[:2]} and not k.endswith("_FILE")
+    ]
 
 
 def test_profiles_and_networks(config: Config) -> None:
