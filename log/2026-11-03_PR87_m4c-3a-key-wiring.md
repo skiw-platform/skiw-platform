@@ -38,3 +38,49 @@ First half of plan M4c-3, split off by the plan §1 size rule (whole change was 
 - Still open from earlier rounds: PR 85 P3 long-string regex → M4c-4b; PR 78 P2 → M3d; PR 78, 77, 81 items → M3e; M2c deferred P2 → first M3 PR.
 
 ## Appendix — final review round
+# Review — PR #87
+
+## Round 2 — 2026-11-03 · scope: slice (M4c-3a, first half of plan M4c-3)
+- **Code review:** base (merge base) 2e5fc3acc15ff5c113fd2c447290d27570e7a1c6 · head 4fd3f5c22e1140b1bf5f69ae0a9f677e7b06a361 (descends from R1 head 7c3dc251; one commit `4fd3f5c Review R1 fix: settings comment names a module not in this PR; CHECKS wrapper`) · head re-checked at end: yes (unchanged); review checkout clean
+- **Spec:** v1.20, hash 92841ba5 (unchanged).
+
+**Verdict:** Approved with conditions
+**Model used:** Claude Opus 5.5 (deep tier) · **Switch model next step?** No. Next is `approved 87` (builder), then the M4c-3b build and its deep-tier review.
+
+### Findings (R1 status, re-inspected)
+- **[P1] UNI-03 row missing: resolved.** The PR body now has a UNI-03 row. Its evidence is `env.py:121-134`, `env.py:25` and `settings.py:69-70`. That matches what the reviewer verified in R1. The line numbers still hold at this head: the settings lines moved by one, and `SKIW_TENANT_TOKEN_KEYS`/`SKIW_LOOKUP_DECOY_KEYS` are now at `settings.py:70-71`. That is cosmetic, not a finding.
+- **[P2] UNI-16 `local-dev.md` text: open, deferred to M4c-3b (unchanged disposition).** The self-check now records it as "deferred (review R1 P2)", and the required content (the two `printf` lines for an older `.env`) is named. The M4c-3b review will verify it.
+- **[P3] settings comment: resolved.** `settings.py:66-69` now says "read by the migrate-time key writes (M4c-3b); M4c-4 adds web and worker as readers of the token key".
+- **[P3] `CHECKS` wrapper: resolved.** `test_compose_config.py:247-258` is a plain list. The parametrized check set is unchanged: still 10 checks, and the host-test count is unchanged at 841.
+- **[P3] plan §5 "every PR" rows: resolved.** UNI-15 and the PROJECT §9 TEN-06 / schema / second-agency rows are present as n-a, each with a reason.
+
+No new findings. No prompt-injection text in the new commit or the edited PR body.
+
+### Self-check audit
+Same applicability list as R1. The table now covers every applicable rule. UNI-16 is recorded as deferred with the R1 disposition. No other disagreement.
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| `git diff 7c3dc25 4fd3f5c` | only the settings comment and the `CHECKS` layout; no behaviour change |
+| `make -o check-node host-test` (fresh detached checkout at 4fd3f5c) | 841 passed, 35 deselected |
+| pytest python part of `make test` (TOOL_ENV, `PYTHONPATH=app:infra/host`) | 1466 passed, 222 deselected |
+| mypy app infra/host scripts/deploy-prod | no issues, 147 files |
+| ruff check / format --check | clean / 198 files |
+| lint-imports | 10 kept, 0 broken |
+| `git diff --check` merge-base...head | clean |
+| CI run 41487946662, headSha 4fd3f5c | success (checks, security, image, host) |
+| Not run locally | web steps, test-live, host-test-live, gitleaks, Semgrep re-run (as R1; the delta touches no `app/` code Semgrep matches beyond a comment; CI green on this SHA) |
+
+### Residual risks and test gaps
+- Unchanged from R1. All key-write behaviour is in M4c-3b.
+
+### Required before merge
+- None.
+
+### Deferred conditions
+- P2 UNI-16: M4c-3b's `local-dev.md` gives the `printf` lines for `TENANT_TOKEN_KEY` and `LOOKUP_DECOY_KEY` for an older `.env` (pattern `local-dev.md:44-45`), and its `host-rebuild.md` carries the plan's rotation / restore / rollback text.
+
+### Optional improvements
+- None.
+
