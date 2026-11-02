@@ -36,6 +36,7 @@ EXPECTED: dict[str, list[str]] = {
 def _excludes(text: str | None = None) -> dict[str, list[str]]:
     """Map each rule id to its `paths.exclude` entries, read line by line (no YAML library).
 
+    A `paths` key must be exactly `    paths:` (a flow value, a quoted key or trailing text fails).
     Inside a `paths:` block only `exclude:` and its `- /app/...` items (and comments) are known.
     Anything else raises AssertionError, so a new key or a flow-style list cannot slip by.
     """
@@ -53,7 +54,10 @@ def _excludes(text: str | None = None) -> dict[str, list[str]]:
             rule = m.group(1)
             found[rule] = []
             in_paths = in_exclude = False
-        elif line == "    paths:":
+        elif (m := re.match(r"    [\"']?paths[\"']?\s*:(.*)$", line)) is not None:
+            # Any other spelling (flow value, quoted key, trailing text) would turn the rule off
+            # without the reader seeing it.
+            assert line == "    paths:", f"paths must be a plain block key in {rule}: {line!r}"
             in_paths = True
         elif in_paths and line == "      exclude:":
             in_exclude = True
@@ -116,4 +120,24 @@ def test_the_reader_refuses_a_second_paths_key() -> None:
         "      exclude:\n        - /app/tenancy/async_binding.py\n      foo: bar"
     )
     with pytest.raises(AssertionError, match="unknown line under paths"):
+        _excludes(text)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "    paths: {exclude: [/app/]}",
+        '    "paths":',
+        "    'paths':",
+        "    paths:   ",
+        "    paths: # note",
+        "    paths: null",
+    ],
+)
+def test_the_reader_refuses_any_other_spelling_of_the_paths_key(line: str) -> None:
+    text = RULES.read_text().replace(
+        "    paths:\n      exclude:\n        - /app/tenancy/async_binding.py\n", f"{line}\n", 1
+    )
+    assert text != RULES.read_text()
+    with pytest.raises(AssertionError, match="paths must be a plain block key"):
         _excludes(text)
