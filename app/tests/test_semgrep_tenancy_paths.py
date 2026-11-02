@@ -3,14 +3,21 @@
 `semgrep --test` runs fixtures from semgrep/, outside app/, so it cannot see a `paths.exclude`
 list. Widening one (for example to `/app/`) would turn a boundary off and every check would stay
 green. These tests read the rule file as text and compare each exclude list with the plan's table.
+The reader refuses any line under a rule's `paths:` that it does not know (an `include:` key, a
+flow list such as `exclude: [/app/]`), so those ways to turn a rule off cannot pass either
+(PR 85 review R1 P3).
 """
 
 import re
 from pathlib import Path
 
+import pytest
+
 RULES = Path(__file__).resolve().parents[2] / "semgrep" / "tenancy-boundaries.yml"
 
-# Allowed paths per rule: plan docs/plans/2026-11-01-m4-core.md §3 M4c-2a, "Semgrep" table.
+# Allowed paths per rule: plan docs/plans/2026-11-01-m4-core.md §3 M4c-2a, "Semgrep" table, with one
+# difference: the plan lists only tenancy/binding.py for the token rule. Spec line 380 (TEN-09 row)
+# says both with_agency() and async_with_agency() set the token, so async_binding.py is allowed too.
 # accounts/migrations is there on purpose: M3e's and M3g's lookup functions read lookup_decoy_key.
 EXPECTED: dict[str, list[str]] = {
     "tenancy-guard-key-sql": [
@@ -26,23 +33,37 @@ EXPECTED: dict[str, list[str]] = {
 }
 
 
-def _excludes() -> dict[str, list[str]]:
-    """Map each rule id to its `paths.exclude` entries, read line by line (no YAML library)."""
+def _excludes(text: str | None = None) -> dict[str, list[str]]:
+    """Map each rule id to its `paths.exclude` entries, read line by line (no YAML library).
+
+    Inside a `paths:` block only `exclude:` and its `- /app/...` items (and comments) are known.
+    Anything else raises AssertionError, so a new key or a flow-style list cannot slip by.
+    """
     found: dict[str, list[str]] = {}
     rule = None
+    in_paths = False
     in_exclude = False
-    for line in RULES.read_text().splitlines():
+    for line in (RULES.read_text() if text is None else text).splitlines():
+        if re.match(r"\s*(#|$)", line):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if in_paths and indent <= 4:
+            in_paths = in_exclude = False
         if (m := re.match(r"  - id: (\S+)$", line)) is not None:
             rule = m.group(1)
             found[rule] = []
-            in_exclude = False
-        elif re.match(r"      exclude:$", line):
+            in_paths = in_exclude = False
+        elif line == "    paths:":
+            in_paths = True
+        elif in_paths and line == "      exclude:":
             in_exclude = True
-        elif in_exclude and (m := re.match(r"        - (\S+)$", line)) is not None:
+        elif (
+            in_paths and in_exclude and (m := re.match(r"        - (/app/\S+)$", line)) is not None
+        ):
             assert rule is not None
             found[rule].append(m.group(1))
-        elif not re.match(r"\s*#", line) and not re.match(r"        - ", line):
-            in_exclude = False
+        else:
+            assert not in_paths, f"unknown line under paths: in {rule}: {line!r}"
     return found
 
 
@@ -64,3 +85,35 @@ def test_no_exclude_is_a_wide_path() -> None:
 def test_accounts_migrations_is_allowed_only_for_the_key_sql_rule() -> None:
     for rule, paths in _excludes().items():
         assert ("/app/accounts/migrations/" in paths) == (rule == "tenancy-guard-key-sql"), rule
+
+
+def _with_paths_block(block: str) -> str:
+    return RULES.read_text().replace(
+        "    paths:\n      exclude:\n        - /app/tenancy/async_binding.py\n    pattern-regex",
+        f"    paths:\n{block}\n    pattern-regex",
+    )
+
+
+def test_the_reader_refuses_a_flow_style_exclude() -> None:
+    text = _with_paths_block("      exclude: [/app/]")
+    assert text != RULES.read_text()
+    with pytest.raises(AssertionError, match="unknown line under paths"):
+        _excludes(text)
+
+
+def test_the_reader_refuses_an_include_key() -> None:
+    text = _with_paths_block(
+        "      include:\n        - /app/nothing/\n"
+        "      exclude:\n        - /app/tenancy/async_binding.py"
+    )
+    assert text != RULES.read_text()
+    with pytest.raises(AssertionError, match="unknown line under paths"):
+        _excludes(text)
+
+
+def test_the_reader_refuses_a_second_paths_key() -> None:
+    text = _with_paths_block(
+        "      exclude:\n        - /app/tenancy/async_binding.py\n      foo: bar"
+    )
+    with pytest.raises(AssertionError, match="unknown line under paths"):
+        _excludes(text)

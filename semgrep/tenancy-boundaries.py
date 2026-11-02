@@ -34,6 +34,23 @@ def token(cursor, value):
     cursor.execute("SELECT set_config('app.agency_id', %s, 'false')", [value])
     # ruleid: tenancy-no-session-setting
     cursor.execute("SELECT set_config('app.agency_id', %s, 0)", [value])
+    # PR 85 review R1 P2: forms the first regex let through.
+    # ruleid: tenancy-no-session-setting
+    cursor.execute("SELECT set_config('app.agency_id', guard.mint_token(%s), false)", [value])
+    # ruleid: tenancy-no-session-setting
+    cursor.execute("SELECT set_config('app.agency_id', %s, 'off')", [value])
+    # ruleid: tenancy-no-session-setting
+    cursor.execute("SELECT set_config('app.agency_id', %s, 'no')", [value])
+    # ruleid: tenancy-no-session-setting
+    cursor.execute("SELECT set_config('app.agency_id', %s, '0')", [value])
+    # ruleid: tenancy-no-session-setting
+    cursor.execute("SELECT set_config('app.agency_id', %s, %s)", [value, False])
+    # ruleid: tenancy-no-session-setting
+    cursor.execute("SELECT set_config('app.agency_id', f(%s, true), false)", [value])
+    # ruleid: tenancy-no-session-setting
+    cursor.execute("SELECT set_config('a', %s, false), set_config('b', %s, true)", [value, value])
+    # ruleid: tenancy-no-session-setting
+    cursor.execute("SELECT set_config('a', %s, true), set_config('b', %s, 'off')", [value, value])
     # ruleid: tenancy-no-session-setting
     cursor.execute("SET app.agency_id = 'b'")
     # ruleid: tenancy-no-session-setting
@@ -52,5 +69,9 @@ def allowed(cursor):
     # ok: tenancy-no-session-setting
     local = "SELECT set_config('app.other', %s, true)"
     # ok: tenancy-no-session-setting
+    nested = "SELECT set_config('app.other', guard.mint_token(%s, true), true)"
+    # ok: tenancy-no-session-setting
+    two = "SELECT set_config('a', %s, TRUE), set_config('b', f(%s), true) AS x"
+    # ok: tenancy-no-session-setting
     cursor.execute("SET LOCAL lock_timeout = '5s'")
-    return names, query, read, local
+    return names, query, read, local, nested, two

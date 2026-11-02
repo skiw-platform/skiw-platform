@@ -54,10 +54,14 @@ rules:
     severity: ERROR
     message: >-
       A session-level app.* setting leaks across pooled connections (TEN-09): use only
-      set_config(name, value, true) inside with_agency(); plain SET and set_config(..., false)
-      are banned everywhere.
+      set_config(name, value, true) inside with_agency(); plain SET and any set_config() whose last
+      argument is not the literal true are banned everywhere (PR 85 review R1 P2: a nested call in the
+      value, 'off', 'no', 0 and a bind parameter all give a session-level setting).
+    # Two branches. (1) The string holds set_config( and it is NOT made only of calls that end in
+    # ", true)": (?1) matches a balanced nested bracket, so a nested call in the value
+    # cannot hide the real last argument. (2) Plain SET [SESSION] app.* .
     patterns:
       - pattern: '"$SQL"'
       - metavariable-regex:
           metavariable: $SQL
-          regex: (?is)^.*?(set_config\s*\([^)]*,\s*(false|'f'|'false'|0)\s*\)|\bset\s+(session\s+)?"?app\.)
+          regex: (?is)^(?:(?=.*?set_config\s*\()(?!(?:(?!set_config\s*\().)*(?:set_config\s*\((?:[^()]|(\((?:[^()]|(?1))*\)))*?,\s*true\s*\)(?:(?!set_config\s*\().)*)*$)|.*?\bset\s+(?:session\s+)?"?app\.)
