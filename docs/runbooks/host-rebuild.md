@@ -144,6 +144,33 @@ job re-seals the blobs (spec T16; not built yet). Removing a version that still 
 makes that account's password login, or that passkey, fail as if the account were unknown.
 Restart `web` and `worker` after each change, then escrow (spec §8.4 H4).
 
+### `tenant_token_key` and `lookup_decoy_key` (the guard key tables, M4c-3)
+`migrate` reads both files (`TENANT_TOKEN_KEY_FILE`, `LOOKUP_DECOY_KEY_FILE`; `migrate` is the only
+service that mounts `lookup_decoy_key`) and, after every run, writes them into
+`guard.tenant_mac_key` and `guard.lookup_decoy_key` as the tables' NOLOGIN owners, in one
+transaction (`tenancy.keys`; spec §4.1, §8.4 H4). `skiw-deploy` runs `migrate` on every forward
+deploy; `migrate --plan` writes nothing. A missing or malformed file, a version whose bytes changed,
+or a retired `tenant_token_key` version listed again stops `migrate` without writing anything and
+without printing a key (the message names the key and version). `skiw-deploy` then reports
+``failed: `migrate` exited <n>``, stops before the switch, and the old digest keeps serving.
+- **Rotation:** add a new, higher `v<n>` line, deploy (`migrate` inserts it), restart `web` and
+  `worker`, then remove the old line and deploy again: `migrate` sets `retired_at` on an unlisted
+  `tenant_mac_key` version (`guard.current_agency()`, from M4c-4a, refuses a retired version) and
+  deletes an unlisted `lookup_decoy_key` version. Never change a line's value in place (plan M4c-3:
+  changed bytes stop `migrate`), and never list a retired `tenant_token_key` version again: it stops
+  `migrate` whatever its bytes, with no override (owner decision 2026-11-03). The fix is to remove
+  that line; a key that turns out to be safe goes back only under a new, higher version number,
+  never by un-retiring the old one. Rotate yearly and on suspicion (spec §8.4 H4, T16). Escrow
+  after each change (spec §8.4 H4).
+  Until M4c-4a nothing but `migrate` reads `tenant_token_key`, so the restart changes nothing yet.
+- **After a restore:** dumps leave both tables' rows out (spec §8.4 H6; `predeploy` `EXCLUDE`), so a
+  restored database has no key rows until `migrate` runs. Run a forward deploy (it runs `migrate`)
+  before serving; with the restored secret store it rewrites both tables from the same files. The
+  tables start empty, so no retired row exists that a listed version could conflict with: every
+  listed version is written as active.
+- **Rollback:** `skiw-deploy rollback` runs no `migrate`, so the tables keep what the last forward
+  deploy wrote. A key file changed since then is written only by the next forward deploy.
+
 ### Before you start
 - `age` v1.3.2 at `/usr/local/bin/age`, installed from `age-v1.3.2-linux-amd64.tar.gz` after
   checking its SHA-256 against the value in `docs/DECISIONS.md` (2026-10-14, M1d). The script
