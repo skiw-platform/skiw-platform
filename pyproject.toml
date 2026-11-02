@@ -68,13 +68,15 @@ markers = [
 ]
 
 [tool.importlinter]
-root_packages = ["config", "health", "shell", "jobs", "documents", "accounts", "skiw_host"]
+root_packages = [
+    "config", "health", "shell", "jobs", "documents", "accounts", "tenancy", "skiw_host",
+]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Apps do not reach into config internals"
 type = "forbidden"
-source_modules = ["health", "shell", "jobs", "documents", "accounts"]
+source_modules = ["health", "shell", "jobs", "documents", "accounts", "tenancy"]
 forbidden_modules = ["config"]
 
 [[tool.importlinter.contracts]]
@@ -86,13 +88,14 @@ forbidden_modules = ["psycopg"]
 [[tool.importlinter.contracts]]
 name = "Apps other than jobs do not import Procrastinate (spec D5)"
 type = "forbidden"
-source_modules = ["health", "shell", "documents", "accounts"]
+source_modules = ["health", "shell", "documents", "accounts", "tenancy"]
 forbidden_modules = ["procrastinate"]
 
 [[tool.importlinter.contracts]]
-name = "config sits above the apps"
+# tenancy is the shared bottom layer (plan M4-core): every app may import it, it imports none.
+name = "config sits above the apps, tenancy below them"
 type = "layers"
-layers = ["config", "health | shell | jobs | documents | accounts"]
+layers = ["config", "health | shell | jobs | documents | accounts", "tenancy"]
 
 [[tool.importlinter.contracts]]
 name = "App modules are independent of each other"
@@ -104,14 +107,14 @@ name = "Host tooling imports no app package or app dependency (UNI-04; stdlib on
 type = "forbidden"
 source_modules = ["skiw_host"]
 forbidden_modules = [
-    "config", "health", "shell", "jobs", "documents", "accounts", "django", "psycopg",
-    "procrastinate",
+    "config", "health", "shell", "jobs", "documents", "accounts", "tenancy", "django",
+    "psycopg", "procrastinate",
 ]
 
 [[tool.importlinter.contracts]]
 name = "App packages do not import host tooling (UNI-04)"
 type = "forbidden"
-source_modules = ["config", "health", "shell", "jobs", "documents", "accounts"]
+source_modules = ["config", "health", "shell", "jobs", "documents", "accounts", "tenancy"]
 forbidden_modules = ["skiw_host"]
 
 # The files volume (spec §8.4 H5, UNI-04). import-linter sees imports, not setting use: the
@@ -120,7 +123,7 @@ forbidden_modules = ["skiw_host"]
 [[tool.importlinter.contracts]]
 name = "Only documents may import documents.storage, the files volume module (UNI-04)"
 type = "forbidden"
-source_modules = ["config", "health", "shell", "jobs", "accounts", "skiw_host"]
+source_modules = ["config", "health", "shell", "jobs", "accounts", "tenancy", "skiw_host"]
 forbidden_modules = ["documents.storage"]
 
 [[tool.importlinter.contracts]]
@@ -137,7 +140,7 @@ forbidden_modules = ["psycopg", "procrastinate"]
 [[tool.importlinter.contracts]]
 name = "Only accounts may import the session store and its model (TEN-10)"
 type = "forbidden"
-source_modules = ["config", "health", "shell", "jobs", "documents", "skiw_host"]
+source_modules = ["config", "health", "shell", "jobs", "documents", "tenancy", "skiw_host"]
 forbidden_modules = ["accounts.session", "accounts.session_model", "accounts.models"]
 ignore_imports = ["config.urls -> accounts.views"]
 unmatched_ignore_imports_alerting = "warn"

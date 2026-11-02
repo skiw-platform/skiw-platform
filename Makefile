@@ -111,10 +111,13 @@ e2e: .env web-build
 db-up: .env
 	docker compose up -d --wait db
 
+# lintmigrations skips one migration by name (any app, so the name is unique: tenancy test_ddl):
+# the linter flags its reverse DROP TABLE; docs/DECISIONS.md "M4c-2a".
 migrate: .env
 	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py migrate
 	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py makemigrations --check --dry-run
-	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py lintmigrations --settings config.settings_migration_lint --warnings-as-errors --exclude-apps procrastinate --no-cache --quiet ignore
+	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py lintmigrations --settings config.settings_migration_lint --warnings-as-errors --exclude-apps procrastinate \
+		--ignore-name 0002_guard_key_tables_unlinted --no-cache --quiet ignore
 
 clean:
 	docker compose down -v

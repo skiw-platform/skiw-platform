@@ -25,12 +25,6 @@ GRANT pg_read_all_data TO skiw_backup;
 -- NOLOGIN function owners (D18, §4.1): only skiw_auth_lookup bypasses RLS, for the pre-tenant lookups.
 ALTER ROLE skiw_tenant_guard NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
 ALTER ROLE skiw_auth_lookup NOLOGIN NOSUPERUSER BYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
--- SET-only membership for migrations (owner Q1 (a), plan M4c-1): no inherited privileges, only an
--- explicit SET ROLE, so `migrate` can create, replace and hand over the guard objects these roles
--- own. BYPASSRLS applies only after SET ROLE skiw_auth_lookup. One role per GRANT: check-hardening
--- reads these lines. A re-run with the same options changes nothing.
-GRANT skiw_tenant_guard TO skiw_migrator WITH INHERIT FALSE, SET TRUE;
-GRANT skiw_auth_lookup TO skiw_migrator WITH INHERIT FALSE, SET TRUE;
 
 ALTER DATABASE :"db" OWNER TO skiw_migrator;
 ALTER SCHEMA public OWNER TO skiw_migrator;
@@ -41,9 +35,11 @@ GRANT CONNECT ON DATABASE :"db" TO skiw_app, skiw_readonly, skiw_backup;
 -- belongs to another role would keep its reach. Allowed, with exactly these options (admin,
 -- inherit, set): skiw_backup in pg_read_all_data (f, t, t) and skiw_migrator in skiw_tenant_guard
 -- and skiw_auth_lookup (f, f, t). Any other membership with one of the six roles on either side,
--- or other options (ADMIN OPTION; a GRANT above resets INHERIT and SET of its own grant), aborts
--- the whole run, rolled back; a person decides what to revoke. A second grant of a pair needs a
--- grantor holding ADMIN OPTION on the role, a membership this check already refuses.
+-- or other options (ADMIN OPTION, INHERIT TRUE, SET FALSE), aborts the whole run, rolled back; a
+-- person decides what to revoke. It runs before the migrator's GRANTs below, because a GRANT from
+-- the same grantor rewrites INHERIT and SET in place and would hide that drift (PR 83 P3). A
+-- second grant of a pair needs a grantor holding ADMIN OPTION on the role, a membership this check
+-- already refuses.
 DO $$
 DECLARE
     extra text;
@@ -69,5 +65,13 @@ BEGIN
     END IF;
 END
 $$;
+
+-- SET-only membership for migrations (owner Q1 (a), plan M4c-1): no inherited privileges, only an
+-- explicit SET ROLE, so `migrate` can create, replace and drop the guard objects these roles own.
+-- BYPASSRLS applies only after SET ROLE skiw_auth_lookup. After the drift guard: a host without the
+-- membership gets it, drifted options stop the run above. One role per GRANT: check-hardening
+-- reads these lines. A re-run with the same options changes nothing.
+GRANT skiw_tenant_guard TO skiw_migrator WITH INHERIT FALSE, SET TRUE;
+GRANT skiw_auth_lookup TO skiw_migrator WITH INHERIT FALSE, SET TRUE;
 
 COMMIT;

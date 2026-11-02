@@ -58,7 +58,10 @@ AUTH_TABLES = {
 }
 # Every relation the migrations create is in spec §4.1's closed global list until M4 adds
 # tenant-owned tables (and the schema check); the probe tables are made by test fixtures only.
-GLOBAL_TABLES = {*TABLES, *AUTH_TABLES, "django_session", "django_migrations"}
+# tenancy.0002 (plan M4c-2a): the guard key tables, owned by the NOLOGIN roles. M4c-6a replaces
+# this set with the schema-qualified spec list.
+GUARD_KEY_TABLES = {"tenant_mac_key", "lookup_decoy_key"}
+GLOBAL_TABLES = {*TABLES, *AUTH_TABLES, *GUARD_KEY_TABLES, "django_session", "django_migrations"}
 TEST_ONLY_TABLES = {"jobs_probe", "files_probe"}
 # Spec §4.2 TEN-03 row: append-only evidence tables, each checked as it lands.
 TEN03_EVIDENCE_TABLES = [

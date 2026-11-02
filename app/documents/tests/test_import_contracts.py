@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[3]
-ROOTS = ("config", "health", "shell", "jobs", "documents", "accounts", "skiw_host")
+ROOTS = ("config", "health", "shell", "jobs", "documents", "accounts", "tenancy", "skiw_host")
 STORAGE = "Only documents may import documents.storage, the files volume module (UNI-04)"
 NO_DB = "documents.storage and documents.clamd touch no database (TEN-10)"
 SESSION = "Only accounts may import the session store and its model (TEN-10)"
@@ -44,7 +44,7 @@ def test_the_stub_tree_keeps_every_contract(tmp_path: Path) -> None:
     assert "0 broken" in out
 
 
-@pytest.mark.parametrize("root", ["config", "health", "shell", "jobs"])
+@pytest.mark.parametrize("root", ["config", "health", "shell", "jobs", "tenancy"])
 def test_a_planted_storage_import_breaks_the_contract(tmp_path: Path, root: str) -> None:
     out = lint(tmp_path, {f"{root}/planted.py": "from documents import storage\n"})
     assert f"{STORAGE} BROKEN" in out
@@ -56,7 +56,9 @@ def test_a_planted_db_import_breaks_the_contract(tmp_path: Path, module: str) ->
     assert f"{NO_DB} BROKEN" in out
 
 
-@pytest.mark.parametrize("root", ["config", "health", "shell", "jobs", "documents", "skiw_host"])
+@pytest.mark.parametrize(
+    "root", ["config", "health", "shell", "jobs", "documents", "tenancy", "skiw_host"]
+)
 @pytest.mark.parametrize(
     "target", ["accounts.session", "accounts.session_model", "accounts.models"]
 )
@@ -97,3 +99,32 @@ def test_accounts_views_outside_config_urls_breaks_the_contract(
     tmp_path: Path, module: str
 ) -> None:
     assert f"{SESSION} BROKEN" in lint(tmp_path, {**VIEWS, module: "from accounts import views\n"})
+
+
+# tenancy is the bottom layer (plan M4c-2a): it imports no app, config, host tooling or
+# Procrastinate. The apps may import it; host tooling may not.
+LAYERS = "config sits above the apps, tenancy below them"
+
+
+def test_an_app_may_import_tenancy(tmp_path: Path) -> None:
+    out = lint(tmp_path, {"accounts/planted.py": "import tenancy\n"})
+    assert f"{LAYERS} KEPT" in out and "0 broken" in out
+
+
+@pytest.mark.parametrize(
+    ("plant", "contract"),
+    [
+        ({"tenancy/planted.py": "import accounts\n"}, LAYERS),
+        ({"tenancy/planted.py": "import jobs\n"}, LAYERS),
+        ({"tenancy/planted.py": "import config\n"}, "Apps do not reach into config internals"),
+        ({"tenancy/planted.py": "import skiw_host\n"}, "App packages do not import host tooling"),
+        ({"skiw_host/planted.py": "import tenancy\n"}, "Host tooling imports no app package"),
+        ({"tenancy/planted.py": "import procrastinate\n"}, "Apps other than jobs do not import"),
+    ],
+    ids=["accounts", "jobs", "config", "host", "host-to-tenancy", "procrastinate"],
+)
+def test_tenancy_edges_break_their_contract(
+    tmp_path: Path, plant: dict[str, str], contract: str
+) -> None:
+    out = lint(tmp_path, plant)
+    assert any(line.startswith(contract) and line.endswith("BROKEN") for line in out.splitlines())
