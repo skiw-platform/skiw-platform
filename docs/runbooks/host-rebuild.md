@@ -324,7 +324,9 @@ uuid; the owner gave the staging and production names (2026-11-03).
   stops before `web` switches. Put the old id back. A second agency needs the PROJECT §9 gate first.
 - **After a restore:** the `agency` row is ordinary data and comes back with the dump, so the
   configured id must be the one the dump holds.
-- `web` and `worker` take both now; `/readyz` binds to the agency from M4c-5-3.
+- **`/readyz`** binds `with_agency()` to the configured agency and answers 503 unless the verifier
+  gives it back and its row is visible. A `tenant_token_key` that differs from the stored one, or a
+  missing row, then fails the deploy health check and the deploy switches back.
 
 ## Database roles (`bootstrap-db`, spec §8.4 H4, H6)
 

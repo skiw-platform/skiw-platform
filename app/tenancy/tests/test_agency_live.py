@@ -17,8 +17,9 @@ import psycopg
 import pytest
 from django.core.management.base import CommandError
 from django.db import ProgrammingError, connection
+from django.test import Client
 
-from tenancy import seed
+from tenancy import binding, seed
 from tenancy.binding import with_agency
 
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
@@ -247,3 +248,13 @@ def test_the_table_matches_the_root_template() -> None:
             ("agency_sel", "PERMISSIVE", "SELECT", "{skiw_app}", PREDICATE, None),
             ("agency_tenant", "RESTRICTIVE", "ALL", "{skiw_app}", PREDICATE, PREDICATE),
         ]
+
+
+def test_readyz_is_503_when_the_agency_row_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SKIW_DEPLOYMENT_AGENCY_ID", str(uuid.uuid4()))
+    assert Client().get("/readyz").status_code == 503
+
+
+def test_readyz_is_503_when_the_token_key_differs(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(binding, "_token_keys", lambda: ((1, os.urandom(32)),))
+    assert Client().get("/readyz").status_code == 503

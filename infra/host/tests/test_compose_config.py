@@ -350,7 +350,7 @@ AUTH_VALUES = (
     "SKIW_LOGIN_PENDING_MIN",
     "SKIW_ENROL_LINK_MIN",
 )
-# The one deployment agency (plan M4c-5): migrate seeds it (web's /readyz binds to it in M4c-5-3).
+# The one deployment agency (plan M4c-5): migrate seeds it, web's /readyz binds to it.
 AGENCY_VALUES = ("SKIW_DEPLOYMENT_AGENCY_ID", "SKIW_DEPLOYMENT_AGENCY_NAME")
 SETTINGS_VALUES = SESSION_LIFETIME + AUTH_VALUES + AGENCY_VALUES
 DB_ROLE = {"web": "skiw_app", "worker": "skiw_app", "migrate": "skiw_migrator"}
