@@ -1,8 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor
 
+from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DatabaseError, connection
 from django.db.migrations.executor import MigrationExecutor
+
+from tenancy.binding import with_agency
 
 APP_ROLE = "skiw_app"
 
@@ -31,12 +34,29 @@ def pending_migrations() -> list[str]:
     return [f"{migration.app_label}.{migration.name}" for migration, _ in plan]
 
 
+def tenant_bound() -> bool:
+    """`with_agency(<deployment agency>)` binds: the verifier gives that agency back and its row is
+    visible (plan M4c-5). A tenant_token_key that differs from the stored one, or a missing seed,
+    then fails the deploy check (and the deploy switches back) instead of every read silently
+    returning no rows."""
+    agency_id, _ = settings.SKIW_DEPLOYMENT_AGENCY()
+    with with_agency(agency_id), connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT guard.current_agency(), (SELECT count(*) FROM agency WHERE id = %s)",
+            [agency_id],
+        )
+        row: tuple[object, ...] | None = cursor.fetchone()
+    return row == (agency_id, 1)
+
+
 def database_ready() -> bool:
-    """`/readyz` (spec §8.3): the database answers as skiw_app and no migration is unapplied."""
+    """`/readyz` (spec §8.3): the database answers as skiw_app, no migration is unapplied, and
+    the deployment agency binds."""
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT current_user")
             row = cursor.fetchone()
-        return row == (APP_ROLE,) and not pending_migrations()
-    except (DatabaseError, ImproperlyConfigured):
+        return row == (APP_ROLE,) and not pending_migrations() and tenant_bound()
+    except (DatabaseError, ImproperlyConfigured, RuntimeError):
+        # RuntimeError: config.env's missing or invalid key errors.
         return False

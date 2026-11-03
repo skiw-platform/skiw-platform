@@ -671,3 +671,13 @@
 - **Versions:** none new.
 - **Exception to a rule?** no.
 - **Decided by:** owner (names, 2026-11-03; Q2 (a), 2026-11-01); builder (deep tier, Opus 5.5), within plan M4c-5, for the rest.
+
+## 2026-11-03 — M4c-5-3: `/readyz` checks that the deployment agency binds
+- **Decision:** `jobs.startup.database_ready()` gains `tenant_bound()`: inside `with_agency(<SKIW_DEPLOYMENT_AGENCY_ID>)` it runs `SELECT guard.current_agency(), (SELECT count(*) FROM agency WHERE id = %s)` and is ready only for `(agency_id, 1)`. So a `tenant_token_key` that differs from the stored version (the verifier gives NULL) or a missing seed answers 503 and fails the deploy health check (the deploy switches back), instead of every tenant read quietly returning no rows. `ImproperlyConfigured` and `RuntimeError` (a missing or invalid id or key) also give 503; the body stays `not ready`.
+- **Tests:** `test_readyz.py` (the parametrized readiness table gains `bound`; ImproperlyConfigured, RuntimeError and OperationalError from the bind give `False`); `test_agency_live.py` (503 for an unseeded configured id; 503 for a different token key). `make host-test-live` starts the real stack, whose health check is `/readyz`. Mutant: `database_ready()` without `tenant_bound()` → 6 fail.
+- **Why:** plan M4c-5 ("`/readyz` binds to the deployment agency"); spec §8.3 `/readyz`.
+- **Alternatives rejected:** a check at process start only (a key change on a running host would go unnoticed until the next restart; `/readyz` is what the deploy switch reads).
+- **Scope / affects:** `app/jobs/startup.py`, `app/jobs/tests/test_readyz.py`, `app/tenancy/tests/test_agency_live.py`, `app/config/settings.py` (comment), `infra/host/compose.yml` (comment), `infra/host/tests/test_compose_config.py` (comment), `docs/runbooks/host-rebuild.md`, `docs/runbooks/local-dev.md`, `docs/DECISIONS.md`.
+- **Versions:** none new.
+- **Exception to a rule?** no.
+- **Decided by:** builder (deep tier, Opus 5.5), within plan M4c-5.

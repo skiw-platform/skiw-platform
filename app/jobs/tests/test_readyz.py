@@ -16,11 +16,16 @@ def raises(exc: Exception) -> Callable[[], None]:
 
 
 @pytest.mark.parametrize(
-    ("role", "pending", "ready"),
-    [("skiw_app", [], True), ("skiw_app", ["jobs.0001"], False), ("skiw_migrator", [], False)],
+    ("role", "pending", "bound", "ready"),
+    [
+        ("skiw_app", [], True, True),
+        ("skiw_app", ["jobs.0001"], True, False),
+        ("skiw_migrator", [], True, False),
+        ("skiw_app", [], False, False),
+    ],
 )
-def test_ready_only_as_skiw_app_with_nothing_pending(
-    monkeypatch: pytest.MonkeyPatch, role: str, pending: list[str], ready: bool
+def test_ready_only_as_skiw_app_with_nothing_pending_and_the_agency_bound(
+    monkeypatch: pytest.MonkeyPatch, role: str, pending: list[str], bound: bool, ready: bool
 ) -> None:
     class Cursor:
         def __enter__(self) -> "Cursor":
@@ -37,7 +42,34 @@ def test_ready_only_as_skiw_app_with_nothing_pending(
 
     monkeypatch.setattr(connection, "cursor", Cursor)
     monkeypatch.setattr(startup, "pending_migrations", lambda: pending)
+    monkeypatch.setattr(startup, "tenant_bound", lambda: bound)
     assert startup.database_ready() is ready
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [ImproperlyConfigured("no agency id"), RuntimeError("no key"), OperationalError("lock")],
+)
+def test_not_ready_when_the_agency_cannot_bind(
+    monkeypatch: pytest.MonkeyPatch, exc: Exception
+) -> None:
+    class Cursor:
+        def __enter__(self) -> "Cursor":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def execute(self, sql: str) -> None:
+            pass
+
+        def fetchone(self) -> tuple[str]:
+            return ("skiw_app",)
+
+    monkeypatch.setattr(connection, "cursor", Cursor)
+    monkeypatch.setattr(startup, "pending_migrations", list)
+    monkeypatch.setattr(startup, "tenant_bound", raises(exc))
+    assert startup.database_ready() is False
 
 
 @pytest.mark.parametrize("exc", [OperationalError("down"), ImproperlyConfigured("unreadable")])
