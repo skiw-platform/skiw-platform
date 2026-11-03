@@ -1,17 +1,27 @@
-"""The tenant-table template (plan M4c-6a): the SQL is the spec §4.2 text, each step reverses
-exactly, and names are checked."""
+"""The tenant-table template and `TenantModel` (plan M4c-6a): the SQL is the spec §4.2 text, each
+step reverses exactly, names are checked, and `makemigrations` sees a lost unique constraint."""
 
 import re
 from pathlib import Path
 
 import pytest
+from django.db import models
+from django.db.migrations.autodetector import MigrationAutodetector
+from django.db.migrations.graph import MigrationGraph
+from django.db.migrations.operations import RemoveConstraint
+from django.db.migrations.questioner import MigrationQuestioner
+from django.db.migrations.state import ModelState, ProjectState
+from django.test.utils import isolate_apps
 from django_migration_linter.sql_analyser.analyser import analyse_sql_statements
 from django_migration_linter.sql_analyser.postgresql import PostgresqlAnalyser
 
+from tenancy.models import TenantModel
 from tenancy.template import PREDICATE, Step, tenant_table, tenant_table_sql
 
 SPEC = Path(__file__).resolve().parents[3] / "docs/specs/2026-10-05-skiw-platform-stack-design.md"
 ALL = {"SELECT", "INSERT", "UPDATE", "DELETE"}
+# The empty graph has no tenancy leaf; naming the app keeps its changes (`makemigrations tenancy`).
+ASK_INITIAL = MigrationQuestioner(specified_apps={"tenancy"})
 
 
 def steps(table: str, **kwargs: object) -> list[tuple[list[str], list[str]]]:
@@ -126,6 +136,17 @@ def test_bad_names_and_arguments_are_refused(table: str, kwargs: dict[str, objec
         tenant_table(table, **{"commands": ALL, **kwargs})  # type: ignore[arg-type]
 
 
+def test_the_name_limit_is_63_at_the_longest_derived_name() -> None:
+    """`t_<column>_fk` is the longest name here: 63 characters is accepted, 64 refused (Postgres
+    truncates a 64th character with only a NOTICE)."""
+    fits, over = "c" * 58, "c" * 59
+    (_, (forward, _), *_) = steps("t", commands=ALL, composite_fks=[(fits, "p")])
+    assert f"ADD CONSTRAINT t_{fits}_fk " in forward[0]
+    assert len(f"t_{fits}_fk") == 63
+    with pytest.raises(ValueError, match="constraint"):
+        tenant_table_sql("t", commands=ALL, composite_fks=[(over, "p")])
+
+
 def test_the_migration_linter_passes_both_directions() -> None:
     pairs = steps("client_note", commands=ALL, composite_fks=[("client_id", "client")])
     for forward, reverse in pairs:
@@ -142,3 +163,40 @@ def test_tenant_table_wraps_each_step_in_one_reversible_runsql() -> None:
         "client_note", **kwargs
     )
     assert all(op.reversible for op in operations)
+
+
+@isolate_apps("tenancy")
+def test_makemigrations_sees_a_lost_unique_constraint() -> None:
+    class Note(TenantModel):
+        id = models.UUIDField(primary_key=True)
+
+        class Meta(TenantModel.Meta):
+            app_label = "tenancy"
+
+    class Broken(TenantModel):
+        """A Meta that does not inherit TenantModel.Meta drops the constraint."""
+
+        id = models.UUIDField(primary_key=True)
+
+        class Meta:
+            app_label = "tenancy"
+
+    (constraint,) = Note._meta.constraints
+    assert isinstance(constraint, models.UniqueConstraint)
+    assert (constraint.fields, constraint.name) == (
+        ("agency_id", "id"),
+        "tenancy_note_agency_id_id_uq",
+    )
+    assert Broken._meta.constraints == []
+
+    migrated = ModelState.from_model(Note)
+    drifted = ModelState.from_model(Note)
+    drifted.options["constraints"] = []
+    before, after = ProjectState(), ProjectState()
+    before.add_model(migrated)
+    after.add_model(drifted)
+    changes = MigrationAutodetector(before, after, ASK_INITIAL).changes(graph=MigrationGraph())
+    operations = [op for migration in changes["tenancy"] for op in migration.operations]
+    assert [type(op) for op in operations] == [RemoveConstraint]
+    assert isinstance(operations[0], RemoveConstraint)
+    assert operations[0].deconstruct()[2]["name"] == "tenancy_note_agency_id_id_uq"

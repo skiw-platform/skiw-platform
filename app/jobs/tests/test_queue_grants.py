@@ -6,6 +6,8 @@ from collections import defaultdict
 import psycopg
 import pytest
 
+from tenancy.schema import GLOBAL_TABLES, ROOT_TABLE
+
 from .conftest import separate
 
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
@@ -64,16 +66,8 @@ AUTH_TABLE_GRANTS = {
     **{(table, APP_ROLE): privileges for table, privileges in AUTH_TABLES.items()},
     ("security_event", LOOKUP_ROLE): {"INSERT"},
 }
-# Every relation the migrations create is in spec §4.1's closed global list until M4 adds
-# tenant-owned tables (and the schema check); the probe tables are made by test fixtures only.
-# tenancy.0002 (plan M4c-2a): the guard key tables, owned by the NOLOGIN roles. M4c-6a replaces
-# this set with the schema-qualified spec list.
-GUARD_KEY_TABLES = {"tenant_mac_key", "lookup_decoy_key"}
-GLOBAL_TABLES = {*TABLES, *AUTH_TABLES, *GUARD_KEY_TABLES, "django_session", "django_migrations"}
-# tenancy.0004 (plan M4c-5): the tenant root, the one named non-global table until M4c-6b's schema
-# check classifies every table.
-ROOT_TABLES = {"agency"}
-TEST_ONLY_TABLES = {"jobs_probe", "files_probe"}
+# Made by test fixtures only; tenancy.schema holds the closed global list (plan M4c-6a).
+TEST_ONLY_TABLES = {"public.jobs_probe", "public.files_probe"}
 # Spec §4.2 TEN-03 row: append-only evidence tables, each checked as it lands.
 TEN03_EVIDENCE_TABLES = [
     "audit_event",
@@ -85,6 +79,10 @@ TEN03_EVIDENCE_TABLES = [
     "outbox_approval",
     "outbox_send",
 ]
+HAS_AGENCY_ID = (
+    "EXISTS (SELECT FROM pg_attribute a"
+    " WHERE a.attrelid = c.oid AND a.attname = 'agency_id' AND NOT a.attisdropped)"
+)
 USER_RELATIONS = """
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE NOT starts_with(n.nspname, 'pg_') AND n.nspname <> 'information_schema'
@@ -109,9 +107,26 @@ def test_queue_objects_are_exactly_the_audited_ones() -> None:
     )
 
 
-def test_every_table_is_in_the_closed_global_list_or_the_root() -> None:
-    rows = separate("SELECT c.relname" + USER_RELATIONS + " AND c.relkind IN ('r', 'p')")
-    assert {name for (name,) in rows} - TEST_ONLY_TABLES == GLOBAL_TABLES | ROOT_TABLES
+def test_every_existing_global_table_is_in_the_closed_list() -> None:
+    """Plan M4c-6a: every existing table, schema-qualified, minus the test-only tables, the root
+    and the tenant tables (an `agency_id` column; M4c-6b checks their shape), is in the spec
+    §4.1 list. A listed table that does not exist yet is not a failure."""
+    rows = separate(
+        "SELECT n.nspname || '.' || c.relname, "
+        + HAS_AGENCY_ID
+        + USER_RELATIONS
+        + " AND c.relkind IN ('r', 'p')"
+    )
+    existing = {name for name, _ in rows}
+    assert {"public.django_migrations", "guard.tenant_mac_key", ROOT_TABLE} <= existing
+    tenant = {name for name, has_agency_id in rows if has_agency_id}
+    assert existing - TEST_ONLY_TABLES - {ROOT_TABLE} - tenant <= GLOBAL_TABLES
+
+
+def test_the_audited_tables_are_on_the_closed_list() -> None:
+    assert {
+        f"public.{name}" for name in (*TABLES, *AUTH_TABLES, *DELETE_ALLOW_LIST)
+    } <= GLOBAL_TABLES
 
 
 def test_acl_entries_on_the_auth_tables_are_exactly_the_plan_list() -> None:
