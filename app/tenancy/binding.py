@@ -3,9 +3,10 @@ item 2, TEN-09; plan M4c-4b). The token names the agency and this transaction's 
 newest tenant_token_key version; `guard.current_agency()` (tenancy/0003) is its only reader.
 
 The keys are read once per process, newest first, as accounts.source_key does: config.asgi and
-`runworker` call token_keys() at start-up, so a missing or malformed key stops the process before
-it serves. Rotation (item 1) adds a version and restarts web and worker, so the cache never holds
-a version `migrate` has not written. The token is never logged or returned.
+`runworker` call require_token_key() at start-up, so a missing or malformed key stops the process
+before it serves. It returns nothing: only with_agency() holds the key (PR 93 review R1 P3).
+Rotation (item 1) adds a version and restarts web and worker, so the cache never holds a version
+`migrate` has not written. The token is never logged or returned.
 """
 
 import functools
@@ -21,10 +22,15 @@ from tenancy import token
 
 
 @functools.cache
-def token_keys() -> tuple[tuple[int, bytes], ...]:
+def _token_keys() -> tuple[tuple[int, bytes], ...]:
     """The tenant_token_key versions, newest first, read once. Raises (fail closed) when the key
-    is missing or malformed."""
+    is missing or malformed. Private: Semgrep `tenancy-token-key-reader` refuses it elsewhere."""
     return tuple(settings.SKIW_TENANT_TOKEN_KEYS())
+
+
+def require_token_key() -> None:
+    """The start-up check: read (and cache) the key, return nothing."""
+    _token_keys()
 
 
 @contextmanager
@@ -36,7 +42,7 @@ def with_agency(agency_id: uuid.UUID) -> Iterator[None]:
         raise TypeError("with_agency() takes a uuid.UUID")
     if connection.in_atomic_block:
         raise TransactionManagementError("with_agency() cannot run inside an atomic block")
-    version, key = token_keys()[0]
+    version, key = _token_keys()[0]
     with transaction.atomic():
         with connection.cursor() as cursor:
             cursor.execute("SELECT pg_current_xact_id()::text, current_database()")

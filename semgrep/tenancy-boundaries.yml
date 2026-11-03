@@ -84,7 +84,8 @@ rules:
       Only config.settings (which defines it), tenancy.keys (the migrate-time write) and
       tenancy.binding (and async_binding) read SKIW_TENANT_TOKEN_KEYS: with the key, any module could
       mint a token for any agency outside with_agency(), import rule or not (PR 92 review R1 P3).
-      Elsewhere, call tenancy.binding.token_keys() only for the start-up check.
+      Elsewhere, call tenancy.binding.require_token_key(), which returns nothing; the cached
+      binding._token_keys() is private to the binding modules (PR 93 review R1 P3).
     # The string literal catches getattr(settings, "...") and keys.py's KeyTable.setting; the
     # attribute pattern catches settings under any alias. A comment or docstring is not flagged.
     paths:
@@ -97,6 +98,28 @@ rules:
     pattern-either:
       - pattern: $S.SKIW_TENANT_TOKEN_KEYS
       - pattern: '"SKIW_TENANT_TOKEN_KEYS"'
+      - pattern: $S._token_keys
+      - pattern: from tenancy.binding import _token_keys
+      - pattern: from tenancy.binding import _token_keys as $A
+      - pattern: from .binding import _token_keys
+  - id: tenancy-token-key-source
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only config.settings (its reader) and tenancy.keys name the TENANT_TOKEN_KEY variables: any
+      other module could read the key from the environment or the secret file (PR 93 review R1 P3).
+      The listed tests set or check the variables themselves.
+    paths:
+      exclude:
+        - /app/config/settings.py
+        - /app/tenancy/keys.py
+        - /app/tenancy/tests/
+        - /app/tests/test_env_wiring.py
+        - /app/tests/test_startup_key.py
+        - /app/jobs/tests/test_worker_key_check.py
+    pattern-either:
+      - pattern: '"TENANT_TOKEN_KEY"'
+      - pattern: '"TENANT_TOKEN_KEY_FILE"'
   - id: tenancy-async-pool
     languages: [python]
     severity: ERROR
