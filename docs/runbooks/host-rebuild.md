@@ -162,7 +162,13 @@ without printing a key (the message names the key and version). `skiw-deploy` th
   that line; a key that turns out to be safe goes back only under a new, higher version number,
   never by un-retiring the old one. Rotate yearly and on suspicion (spec §8.4 H4, T16). Escrow
   after each change (spec §8.4 H4).
-  Until M4c-4a nothing but `migrate` reads `tenant_token_key`, so the restart changes nothing yet.
+  **Keep the two steps in separate deploys.** From M4c-4a `guard.current_agency()` reads
+  `guard.tenant_mac_key` and refuses a retired version. If one deploy both adds the new line and
+  removes the old one, `migrate` retires the old version before the switch, while the running
+  `web` and `worker` still mint under it. Their tenant transactions then see no agency until they
+  restart, and if the deploy stops after `migrate`, the old digest keeps serving with a key the
+  database refuses. Remove the old line only after every `web` and `worker` container has
+  restarted on the new key. Until M4c-4b (`with_agency()`) nothing mints a token yet.
 - **After a restore:** dumps leave both tables' rows out (spec §8.4 H6; `predeploy` `EXCLUDE`), so a
   restored database has no key rows until `migrate` runs. Run a forward deploy (it runs `migrate`)
   before serving; with the restored secret store it rewrites both tables from the same files. The
