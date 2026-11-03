@@ -34,6 +34,9 @@ def line(size: int = 32, version: int = 1) -> str:
     return f"v{version}:" + base64.b64encode(secrets.token_bytes(size)).decode()
 
 
+VALID = {"TENANT_SOURCE_KEY": line(), "LOGIN_BLOB_KEY": line(), "TENANT_TOKEN_KEY": line()}
+
+
 def test_require_key_refuses_a_missing_key() -> None:
     with pytest.raises(env.MissingSettingError, match="TENANT_SOURCE_KEY"):
         require_key()
@@ -108,7 +111,7 @@ def test_asgi_refuses_a_seven_digit_version_without_echoing_the_key() -> None:
 
 
 def test_asgi_with_valid_keys_goes_on_to_the_migration_check() -> None:
-    result = start("import config.asgi", TENANT_SOURCE_KEY=line(), LOGIN_BLOB_KEY=line())
+    result = start("import config.asgi", **VALID)
     assert result.returncode != 0 and "cannot verify migrations" in result.stderr
 
 
@@ -123,5 +126,25 @@ def test_asgi_refuses_a_bad_login_blob_key_without_echoing_it(value: str | None)
     result = start("import config.asgi", TENANT_SOURCE_KEY=line(), **extra)
     assert result.returncode != 0
     assert "LOGIN_BLOB_KEY" in result.stderr.splitlines()[-1]
+    assert "cannot verify migrations" not in result.stderr
+    assert value is None or value.rpartition(":")[2] not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, line(16), line(version=1_000_000), line()[3:]],
+    ids=["missing", "short", "seven-digit-version", "no-version"],
+)
+def test_asgi_refuses_a_bad_tenant_token_key_without_echoing_it(value: str | None) -> None:
+    """Plan M4c-4b: with_agency() mints under it, so web checks it before serving."""
+    extra = {
+        "TENANT_SOURCE_KEY": VALID["TENANT_SOURCE_KEY"],
+        "LOGIN_BLOB_KEY": VALID["LOGIN_BLOB_KEY"],
+    }
+    if value is not None:
+        extra["TENANT_TOKEN_KEY"] = value
+    result = start("import config.asgi", **extra)
+    assert result.returncode != 0
+    assert "TENANT_TOKEN_KEY" in result.stderr.splitlines()[-1]
     assert "cannot verify migrations" not in result.stderr
     assert value is None or value.rpartition(":")[2] not in result.stderr

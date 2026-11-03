@@ -1,5 +1,5 @@
-"""`runworker` checks tenant_source_key and login_blob_key before the migration check, as `web`
-does (plan M3 (j), M3b).
+"""`runworker` checks tenant_source_key, login_blob_key and tenant_token_key before the migration
+check, as `web` does (plan M3 (j), M3b, M4c-4b).
 
 It reads the keys through settings (SKIW_TENANT_SOURCE_KEYS, SKIW_LOGIN_BLOB_KEYS), so jobs
 still imports no accounts.
@@ -68,7 +68,24 @@ def test_runworker_refuses_a_missing_or_malformed_login_blob_key(value: str | No
     assert KEY not in result.stderr and SHORT not in result.stderr
 
 
+@pytest.mark.parametrize(
+    "value",
+    [None, f"v1:{SHORT}", f"v1000000:{KEY}", KEY],
+    ids=["missing", "short", "seven-digit-version", "no-version"],
+)
+def test_runworker_refuses_a_missing_or_malformed_tenant_token_key(value: str | None) -> None:
+    """Plan M4c-4b: the worker's with_agency() mints under it, so it is checked at start-up."""
+    extra = {} if value is None else {"TENANT_TOKEN_KEY": value}
+    result = runworker(TENANT_SOURCE_KEY=f"v1:{KEY}", LOGIN_BLOB_KEY=f"v1:{KEY}", **extra)
+    assert result.returncode != 0
+    assert "TENANT_TOKEN_KEY" in result.stderr.splitlines()[-1]
+    assert "cannot verify migrations" not in result.stderr
+    assert KEY not in result.stderr and SHORT not in result.stderr
+
+
 def test_runworker_with_valid_keys_goes_on_to_the_migration_check() -> None:
-    result = runworker(TENANT_SOURCE_KEY=f"v1:{KEY}", LOGIN_BLOB_KEY=f"v1:{KEY}")
+    result = runworker(
+        TENANT_SOURCE_KEY=f"v1:{KEY}", LOGIN_BLOB_KEY=f"v1:{KEY}", TENANT_TOKEN_KEY=f"v1:{KEY}"
+    )
     assert result.returncode != 0 and "cannot verify migrations" in result.stderr
     assert KEY not in result.stderr

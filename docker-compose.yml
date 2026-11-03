@@ -45,6 +45,7 @@ services:
       SKIW_LOGIN_PENDING_MIN: ${SKIW_LOGIN_PENDING_MIN:?set in .env}
       SKIW_ENROL_LINK_MIN: ${SKIW_ENROL_LINK_MIN:?set in .env}
       LOGIN_BLOB_KEY: ${LOGIN_BLOB_KEY:?set in .env}
+      TENANT_TOKEN_KEY: ${TENANT_TOKEN_KEY:?set in .env}
     volumes:
       - ./app:/srv/app:ro
       - ./web/dist:/srv/web/dist:ro
@@ -76,6 +77,7 @@ services:
       SKIW_LOGIN_PENDING_MIN: ${SKIW_LOGIN_PENDING_MIN:?set in .env}
       SKIW_ENROL_LINK_MIN: ${SKIW_ENROL_LINK_MIN:?set in .env}
       LOGIN_BLOB_KEY: ${LOGIN_BLOB_KEY:?set in .env}
+      TENANT_TOKEN_KEY: ${TENANT_TOKEN_KEY:?set in .env}
     # The image's HEALTHCHECK probes the web port, which the worker does not serve.
     healthcheck:
       disable: true
