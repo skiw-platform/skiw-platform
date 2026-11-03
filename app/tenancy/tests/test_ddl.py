@@ -2,11 +2,15 @@
 
 import re
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
+import psycopg
 import pytest
 from django.db.migrations.loader import MigrationLoader
+from psycopg import pq
 
-from tenancy.ddl import GUARD_OWNERS, as_owner
+from tenancy.ddl import GUARD_OWNERS, as_owner, owner_role
 
 UNLINTED = "0002_guard_key_tables_unlinted"
 MAKEFILE = Path(__file__).resolve().parents[3] / "Makefile"
@@ -33,6 +37,40 @@ def test_the_owner_set_is_exactly_the_two_nologin_roles() -> None:
 def test_any_other_role_is_refused(role: str) -> None:
     with pytest.raises(ValueError, match="not a guard owner role"):
         as_owner(role, ["SELECT 1"], ["SELECT 2"])
+    # owner_role (plan M4c-3) refuses before it touches the cursor, so no database is needed.
+    with (
+        pytest.raises(ValueError, match="not a guard owner role"),
+        owner_role(cast("psycopg.Cursor[Any]", None), role),
+    ):
+        pass
+
+
+class FakeCursor:
+    """Records statements; `current_user` reads back as the role, the status is set per test."""
+
+    def __init__(self, role: str, status: pq.TransactionStatus) -> None:
+        self.role, self.sent = role, list[str]()
+        self.connection = SimpleNamespace(info=SimpleNamespace(transaction_status=status))
+
+    def execute(self, query: object) -> "FakeCursor":
+        self.sent.append(query if isinstance(query, str) else "SET LOCAL ROLE")
+        return self
+
+    def fetchone(self) -> tuple[str]:
+        return (self.role,)
+
+
+@pytest.mark.parametrize(
+    ("status", "reset"),
+    [(pq.TransactionStatus.INTRANS, True), (pq.TransactionStatus.INERROR, False)],
+)
+def test_owner_role_resets_on_an_exception_unless_the_transaction_is_in_error(
+    status: pq.TransactionStatus, reset: bool
+) -> None:
+    fake = FakeCursor("skiw_tenant_guard", status)
+    with pytest.raises(LookupError), owner_role(cast("psycopg.Cursor[Any]", fake), fake.role):
+        raise LookupError
+    assert fake.sent == ["SET LOCAL ROLE", "SELECT current_user::text", *["RESET ROLE"] * reset]
 
 
 @pytest.mark.parametrize("role", sorted(GUARD_OWNERS))

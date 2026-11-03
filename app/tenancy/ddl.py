@@ -7,14 +7,41 @@ over, so nothing relies on inherited ownership. Use it only in atomic migrations
 `SET LOCAL ROLE` has no effect outside a transaction block, so the statement after it raises unless
 `current_user` is the owner (plan M4c-2b, PR 84 review P3). In a non-atomic run the GRANT before it
 has already committed; a re-run in an atomic migration revokes it (docs/DECISIONS.md "M4c-2b").
+
+`owner_role` is the same switch for code that runs outside a migration operation, the migrate-time
+key writes (`tenancy.keys`, plan M4c-3): `as_owner` returns a `RunSQL`, which a `post_migrate`
+receiver cannot run. These two are the only places the migrator issues `SET ROLE` (plan §9 item 2).
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from typing import Any
 
+import psycopg
 from django.db import migrations
+from psycopg import pq, sql
 
 # The closed list of guard object owners (spec D4, §4.1). Nothing else may own a guard object.
 GUARD_OWNERS = frozenset({"skiw_tenant_guard", "skiw_auth_lookup"})
+
+
+@contextmanager
+def owner_role(cursor: "psycopg.Cursor[Any]", role: str) -> Iterator[None]:
+    """Run the block as `role` (`SET LOCAL ROLE`), then `RESET ROLE`, also when the block raises.
+    Only inside an open transaction: outside one `SET LOCAL` does nothing, so the check after it
+    raises. If the transaction is in error no reset is sent: only a rollback can follow, and it
+    undoes the `SET LOCAL` too."""
+    if role not in GUARD_OWNERS:
+        raise ValueError(f"owner_role: {role!r} is not a guard owner role")
+    cursor.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
+    row = cursor.execute("SELECT current_user::text").fetchone()
+    if row is None or row[0] != role:
+        raise RuntimeError(f"owner_role: current_user is not {role}; open a transaction first")
+    try:
+        yield
+    finally:
+        if cursor.connection.info.transaction_status != pq.TransactionStatus.INERROR:
+            cursor.execute("RESET ROLE")
 
 
 def as_owner(role: str, statements: Sequence[str], reverse: Sequence[str]) -> migrations.RunSQL:

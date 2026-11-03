@@ -115,7 +115,14 @@ def test_the_migrator_reads_a_key_table_only_after_set_role(table: str, owner: s
 @pytest.mark.parametrize(("table", "owner"), sorted(KEY_TABLES.items()))
 @pytest.mark.parametrize(
     ("version", "length", "ok"),
-    [(1, 32, True), (999_999, 64, True), (0, 32, False), (1_000_000, 32, False), (1, 31, False)],
+    # 999_998 and 999_999, not v1: `migrate` writes v1 from the key files from M4c-3 on.
+    [
+        (999_998, 32, True),
+        (999_999, 64, True),
+        (0, 32, False),
+        (1_000_000, 32, False),
+        (1, 31, False),
+    ],
 )
 def test_key_table_checks(table: str, owner: str, version: int, length: int, ok: bool) -> None:
     insert = sql.SQL("INSERT INTO guard.{} (version, key) VALUES (%s, %s)").format(
