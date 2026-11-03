@@ -1,5 +1,289 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 24 — 2026-11-03 · scope: spec-change slice (v1.21: M4-core plan §9 items 2 and 6, retired-key rule; text changes only)
+- **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.21 · hash
+  9a351deefb84c45725aa83a640b733eb8c9e9b26. **Uncommitted** in the main checkout on `main`
+  (`git status`: ` M`). The reviewer snapshotted the file to the session scratchpad and reviewed the snapshot;
+  the working file's hash was re-checked at the end and is unchanged.
+- **Previous approved version:** v1.20, hash 92841ba555e9e857ac70e86a5b043cf9729ed371 (Round 23; = PROJECT.md §2).
+- **Source of the change:** plan `docs/plans/2026-11-01-m4-core.md` §9 items 2 and 6; owner decisions
+  M4-core Q1 (a) and the 2026-11-03 retired-version rule (`docs/DECISIONS.md` "M4c-3b"); deadline "before
+  M4c-4a merges" (PR 88 review R2 deferred condition).
+- **Delta:** 10 lines changed (changelog, D4, §4.1 `tenant_mac_key` and `lookup_decoy_key` rows, §4.2
+  "Tenant binding" items 1 and 2, TEN-02, TEN-10). Everything else is byte-identical to v1.20.
+- **Mode:** read only. No file written except this one.
+- **Model used:** Claude Opus 5.5 (deep tier). **Switch model next step?** No. The fix is text, and the
+  re-review stays on the deep tier because it is tenancy security text.
+
+**Verdict:** Revision required
+
+### Findings
+
+### [P1] Retiring a key has no verifier-side effect in the spec
+- **Category:** spec defect (a security control that is neither stated nor testable)
+- **Evidence:** v1.21 §4.2 "Tenant binding" item 1 (`spec:283`) now defines retiring ("`migrate` then
+  sets `retired_at` on it") and keeps "rotate … on suspicion". But item 3 (`spec:290-295`, "Verifying")
+  only says `guard.current_agency()` "recomputes the MAC with key version `v`". It never says a retired, or
+  absent, version gives NULL. The TEN-09 row's forged-tenant tests (`spec:381`) list "wrong-version" but not
+  "retired version". The M4-core plan has the rule (M4c-4a step 3, "Load the key version, which must not be
+  retired"; plan line 203 "`retired_at = now()`, which `current_agency()` refuses"), but the spec is the
+  source of truth and M4c-4a is built and reviewed against it.
+- **Failure scenario:** a key is retired on suspicion of a leak. A verifier built to the spec text accepts
+  tokens MAC'd with that key, because the version row still exists with the same bytes. So an attacker
+  holding the leaked key can still mint a token for any agency. The rotation's whole purpose (T16) fails
+  silently, and no listed test catches it.
+- **Required correction:** item 3 says the key version must exist in `guard.tenant_mac_key` with
+  `retired_at IS NULL`, otherwise NULL. The TEN-09 tests add "a token MAC'd with a retired key version
+  (correct bytes) → denied". Optionally, also say that `approval_mac_key` verification (§4.3) refuses
+  retired versions the same way.
+- **Owner:** builder (spec text)
+- **Verification:** re-read items 3 and TEN-09 at the new hash.
+- **Status:** open
+
+### [P2] The H6 role-set test still says the old role set
+- **Category:** inconsistency
+- **Evidence:** plan §9 item 2 names "D4, **the H6 role-set test** and the TEN-02 row". v1.21 updates D4
+  (`spec:88`) and TEN-02 (`spec:376`: "`skiw_migrator` is a member of `skiw_tenant_guard` and
+  `skiw_auth_lookup` only (`INHERIT FALSE, SET TRUE`)"). §8.4 H6 "Role-set test" (`spec:916-918`) is
+  unchanged and lists only "`skiw_app` is a member of no role". The changelog doesn't list H6.
+- **Failure scenario:** someone writing the host role-set test, or a drill, from H6 (it runs "M1, M4
+  re-run, every drill") misses the migrator membership assertion, or treats the membership as drift.
+- **Required correction:** add the same clause to the H6 bullet, and H6 to the changelog line.
+- **Owner:** builder
+- **Disposition:** before merge
+- **Status:** open
+
+### [P2] The token encoding is not concrete enough to implement twice the same way
+- **Category:** ambiguity (testability)
+- **Evidence:** the new "Encoding (v1.21)" line (`spec:289`) says "length-prefixed fields" but gives:
+  - no length-prefix width or byte order;
+  - no text encoding for `skiw-tenant-v1` and `current_database()`;
+  - no form for the token's `<agency uuid>` (canonical lowercase hyphenated?) or `<xid>` (decimal?);
+  - no answer on base64url padding.
+
+  Item 2's formula (`spec:286`) still uses `‖`, which reads as plain concatenation unless tied to the new line.
+  The plan marks the encoding "[A]" (builder's assumption), so v1.21 is where it becomes binding.
+- **Failure scenario:** the Python minter (`tenancy/token.py`) and the plpgsql verifier are written to
+  this text with different prefix widths, or one keeps padding and one strips it. Every token then fails,
+  or a later second implementation (the bridge, M14) disagrees. A vector test catches a mismatch only if
+  both sides start from the same definition.
+- **Required correction:** state each field's exact bytes, for example "each field is preceded by its
+  length as a 4-byte big-endian unsigned integer; text fields UTF-8". Give the token's uuid form
+  (lowercase, hyphenated), xid (unsigned decimal), MAC (base64url, no padding) and `n` (decimal, 1–999999),
+  and say `‖` in item 2 means this length-prefixed concatenation. Or say the encoding is fixed by a
+  committed test vector and name its file. Either way, one definition both sides must match.
+- **Owner:** builder
+- **Disposition:** before merge
+- **Status:** open
+
+### [P3] Decoy row: "a missing version is deleted" reads both ways
+- **Evidence:** `spec:192`. "Missing" could mean missing from the table (which is actually inserted).
+  The `tenant_mac_key` row says "a version missing from the key file".
+- **Correction:** "a version no longer in the key file is deleted; a new one is inserted".
+
+### [P3] `approval_mac_key` row is not aligned with "follows the same pattern"
+- **Evidence:** `spec:191` keeps the v1.20 text, while item 1 says `approval_mac_key` "follows the same
+  pattern". The `SET ROLE` read/write path, `retired_at` and the stop-on-changed or retired rules are stated
+  only for `tenant_mac_key`.
+- **Correction:** one clause on the row: "written and retired by `migrate` exactly as `guard.tenant_mac_key`
+  (from M9)". Or state that M9 decides.
+
+No prompt-injection text in the delta.
+
+### Checks
+- **Consistency:** D4 ↔ TEN-02 ↔ §4.1 ↔ §4.2 item 1 ↔ TEN-10 agree on "owner, plus the migrator through
+  `SET ROLE`, no standing grant". H6 doesn't (P2).
+- **Matches the code that merged:** the §4.1 rows and the item 1 rotation text match PR 88 (`tenancy.keys`):
+  insert new, retire or delete unlisted, stop on changed bytes, stop on a retired version re-listed, no
+  override, errors without values. TEN-10's "`tenancy.keys`, the single allow-listed module" matches the
+  Semgrep rule `tenancy-guard-key-sql` (it also allows migrations, which the row's "migrations" entry covers).
+- **Owner decisions reflected:** the 2026-11-03 retired-version rule appears verbatim in substance.
+- **Scope / invented values:** none. The encoding is the plan's own [A] text.
+- **Not covered by v1.21 (fine, out of plan §9 items 2 and 6):** items 1, 3–5 and 7–11 stay owed for later
+  revisions.
+
+### Required before approval
+- P1 retired-version refusal in item 3 + TEN-09 test.
+- P2 H6 role-set bullet + changelog.
+- P2 concrete token encoding (or a named test vector).
+
+### After approval
+- Commit the approved file byte-identical (the hash is what's approved), then run `setup` (Part B reconcile).
+  PROJECT.md §9 TEN-10 still says "DB-side only `guard.*` functions read key tables" and needs the v1.21
+  wording, and §2's hash goes to the new one.
+
+## Round 23 — 2026-10-26 · scope: spec-change slice (v1.20: Hostinger replaces iCore, text changes only)
+- **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.20 · hash
+  92841ba555e9e857ac70e86a5b043cf9729ed371 (main checkout = `origin/main` = `5f4fc58cb6420df7e746ca4be78308d193f6cc21`,
+  the PR 66 merge, parents `550b622…` and `ecf85e0…`; the file is the same blob as PR 66's reviewed head `ecf85e0`).
+- **Previous approved version:** v1.19, hash 75ac19f61466445c35e4ff9341a0d0984a55249f (Round 22).
+- **Source of the change:** amendment `docs/specs/2026-10-25-hostinger-vps-vendor.md` v1.2, hash
+  `2ef0bb3aaf6509025c324058f4a3b0dee8e950d6` (amendment review Round 3 Approved at that hash; the same
+  blob at `origin/main`).
+- **Mode:** read only on the main checkout (the file is committed and unmodified). No file written
+  except this one. No worktree needed.
+- **Model used:** Claude Opus 5.5. **Switch model next step?** No.
+
+**Verdict:** Approved
+
+The approval covers the v1.20 text. Everything outside the changed places is as approved in Round 22.
+It does not approve a purchase, a plan size (Q43), a term (Q44) or Hostinger as a processor:
+G-VENDOR and the other H12 gates still decide that, before any real data.
+
+### Findings
+No P0, P1 or P2.
+
+### [P3] `PROJECT.md` does not tell the reader to load the Hostinger amendment
+- **Evidence:** `agents/PROJECT.md` line 35 "Other standards" lists only the alert amendment. The
+  Hostinger amendment holds detail that v1.20 states only in short form: the buying flow and its
+  failure path (§5: "if a Malaysian location is not offered for the chosen plan at purchase time, the
+  owner does not buy"), the S3 and S4 done-when tests (§9) and the threat rows (§7).
+- **Effect:** small. D19, §8.2 and H6 already hold the rules (Malaysian location, backups off or
+  blocking). A reader of only the main spec may miss the amendment's step order at purchase.
+- **Suggested correction:** at the coming `setup`, add the amendment to "Other standards" (for example
+  "load it for the Hostinger purchase (S3) and the G-VENDOR record (S4, M1k)").
+- **Owner:** owner (setup). **Status:** open (non-blocking).
+
+### Change audit (v1.19 → v1.20)
+`git diff --stat 75ac19f6… 92841ba5…`: 89 insertions, 59 deletions. I checked every changed place
+against the amendment's decision 10 in the PR 66 review (`.agent/reviews/PR-66.md`, inventory table)
+against this same blob: all listed, nothing extra, cost figures re-computed (36.04, 61.46, 26.61,
+49.16, 62.65, 110.62; 24 × 8.79 = 210.96, 24 × 6.49 = 155.76). No hard rule, data model, role,
+permission or milestone changes.
+
+### Whole-spec consistency checks (this round)
+- **Stale vendor text:** a search of the whole spec finds `icore` only at line 5 (changelog) and
+  line 1244 (Q1 history); `debian` only at line 5 and line 686 ("Debian 12 dropped"); `NODE1/2` only
+  in the changelog; no "CJ1", "Cyberjaya" or "AIMS" (the three "aims" hits are the word "claims"). The
+  only "Kuala Lumpur" (D19, line 103) is marked [A], not verified.
+- **Memory:** H1 (lines 704–711) matches `infra/host/env/*.env`: production caps 6656 MiB without
+  `migrate` (8192 with it) against 7168 MiB on KVM 2; staging 3328 MiB against 3072 MiB on KVM 1,
+  with the 256 MiB rule. "OS about 1 GB plus the limits about 7.5 GB of 8 GB" agrees
+  (6656 + 1024 = 7680 MiB). D17 "an 8 GB host" still holds for KVM 2.
+- **CPU:** H1, §8.2 step-2 triggers, H12 G-LOAD, Q43 and G-VENDOR item 8 agree: 2 vCPU on KVM 2,
+  G-LOAD on the production plan is the CPU test, KVM 4 is the fallback by a reviewed change.
+- **OS:** the host code already targets Ubuntu 24.04 (`infra/host/apt/docker.sources` "Suites:
+  noble", `skiw-docker.pref` pins `~ubuntu.24.04~noble`, the Python 3.12 runtime). This agrees with
+  H1 and G4 = (a). No host code change follows from v1.20.
+- **Staging:** H8 (KVM 1 or 2; one account only if G-VENDOR item 11 accepts it) agrees with §8.2,
+  §8.3, H1 and the amendment decision 7.
+- **Residency:** D19, §8.2 provider-backup row, H6 and G-VENDOR items 1, 3, 6, 7 agree: Malaysian
+  location in writing, provider backups off or blocking, no PDPA claim, cross-border access is
+  blocking until a D19 basis exists.
+- **Testability:** each new control has a test in the amendment §7 and §9 (G-VENDOR record, order
+  page, `git grep -i icore`, G-LOAD, M1k memory peak).
+- **`agents/PROJECT.md`** still names iCore at lines 17, 50 and 202. This is expected: `setup` (S2)
+  changes them.
+
+### Self-check audit
+A spec change has no builder self-check table. Applicability for this delta: UNI-07 (hard), UNI-11,
+UNI-16, D3, D19, D24, H1, H2, H4, H6, H8, H12. Each is addressed (PR 66 review and above).
+
+### Injection check
+No text in the changed lines addresses an AI agent or asks to skip a gate.
+
+### Verification performed
+| Check | Result |
+|---|---|
+| `git hash-object` of the working file and of `origin/main:` the file | both `92841ba5…` |
+| Spec blob at PR 66 head `ecf85e0` | `92841ba5…` (same) |
+| Amendment blob at `origin/main` | `2ef0bb3a…` = approved |
+| `git diff --stat` v1.19 blob → v1.20 blob | 89 insertions, 59 deletions |
+| Stale-term search over the whole spec (icore, debian, bookworm, NODE1/2, Cyberjaya, AIMS, Kuala Lumpur) | only allowed hits |
+| Memory caps in the spec vs `infra/host/env/production.env` and `staging.env` | match |
+| PROJECT §7 secret-scan pattern on added lines | 0 hits |
+
+Not re-read by me in this round: the Hostinger web pages (read in amendment review Round 1,
+2026-10-25; prices may change).
+
+### Residual risks
+- Every Hostinger [A] item (city, CPU dedication, default backups, clean Ubuntu image, 2FA, static
+  IPv4, contracting entity) waits for G-VENDOR. One blocking answer returns the choice to the owner
+  (Q38).
+- A prepaid term (Q44) can lock in a vendor that later fails a gate.
+- If staging takes KVM 1, the staging caps must drop by at least 256 MiB in a reviewed PR before
+  the purchase.
+
+### Next step
+The owner runs `setup` (Part B reconcile: spec hash `92841ba5…`; PROJECT.md lines 17, 50, 202 and
+the P3 above). Then the owner answers Q43 and Q44 and buys (S3).
+
+## Round 22 — 2026-10-25 · scope: spec-change slice (v1.19: Q20 answered, text changes only)
+- **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.19 · hash
+  75ac19f61466445c35e4ff9341a0d0984a55249f (main checkout = `origin/main` = `2f9288ce82c39344210aa85494f578255cbb4b39`,
+  the PR 63 merge; the file is the same blob as PR 63's reviewed head `e921022`).
+- **Previous approved version:** v1.18, hash 0edfb3cdc514e1d5bbd3ae3d34875cd16c037644 (Round 21).
+- **Source of the change:** amendment `docs/specs/2026-10-24-alert-channel-and-uptime-ping.md`
+  (review Round 2 Approved at v1.1 `ea6ee2fb…`; v1.2 `2e4333ea…` adds only the Round 2 P3 fixes,
+  checked in the PR 63 review).
+- **Mode:** read only on the main checkout (the file is committed and unmodified). No file written
+  except this one.
+- **Model used:** Claude Opus 5.5. **Switch model next step?** No.
+
+**Verdict:** Approved
+
+The approval covers the v1.19 text. Everything outside the ten changed lines is as approved in
+Round 21. No host, deployment or alert delivery is approved by this round; M1j-2 and M1k prove them.
+
+### Findings
+No P0, P1 or P2.
+
+### [P3] The main spec does not tell the reader to load the amendment
+- **Evidence:** v1.19 names the amendment only in the changelog (line 5). H7 (line 1035) and D17
+  (line 101) do not point to it. `agents/PROJECT.md` §2 "Other standards" is `none`. The amendment
+  holds the M1j-2 details that v1.19 does not: decisions 10–14 (heartbeat state rule,
+  `alert_credential` rule, `SEND_S` 10 s), the §7 tests (proxy, token format, plain text) and its
+  milestone table.
+- **Effect:** a builder or reviewer that loads only the files `PROJECT.md` names may miss those
+  rules when building M1j-2.
+- **Suggested correction:** at the coming `setup`, list the amendment in `PROJECT.md` §2 (for example
+  in "Other standards", with "M1j-2 design detail for H7"). Or add "(design detail: the amendment
+  spec)" to H7 in a later spec change.
+- **Owner:** owner (setup) or builder. **Status:** open (non-blocking).
+
+### Change audit (v1.18 → v1.19)
+`git diff --stat 0edfb3cd… 75ac19f6…`: 10 insertions, 10 deletions (ten lines replaced). The places are
+the version line, the changelog, D17, D19 (5), the cost line (637), H4 (799), H7 (1035–1036),
+UNI-11 (1107) and Q20 (1235). This is the list in the amendment's decision 8. I read each one in
+the PR 63 review (`.agent/reviews/PR-63.md`, inventory table) against the same blob. Every Q20
+mention reads as answered or adopted. No hard rule, data model, role, permission or milestone
+changes.
+
+### Consistency checks
+- D17, D19 (5), H7, UNI-11 and Q20 agree with each other and with the DECISIONS entry
+  "2026-10-24 — Q20 answered …" (services, data lists, PDPA rule (a) with its limit).
+- H4 inventory: `alert_credential` is owner-supplied, root, not escrowed, one per environment. This
+  matches the `ghcr_read_token` pattern in `infra/host/skiw_host/secrets.py` and the amendment's
+  decision 13 (required only when the channel is `telegram`).
+- H7 keeps the H6 off-site freshness sentence, which agrees with the amendment's §2 non-goal (the
+  H6 alarm is not dropped).
+- Testability: the heartbeat, token, proxy and plain-text controls have concrete values and named
+  tests in the amendment §7. The Telegram API facts stay [A] until the builder checks them, before
+  M1j-2.
+
+### Self-check audit
+A spec change has no builder self-check table. Applicability for this delta: UNI-07 (hard),
+UNI-08, UNI-09, UNI-11, UNI-16, D17, D19, H4, H6, H7. Each is addressed (PR 63 review table and
+above). The rest of the spec is unchanged since Round 21.
+
+### Injection check
+No text in the changed lines addresses an AI agent or asks to skip a gate.
+
+### Verification performed
+| Check | Result |
+|---|---|
+| `git hash-object` of the working file and of `origin/main:` the file | both `75ac19f6…` |
+| `git diff --stat` v1.18 blob → v1.19 blob | 10 lines changed |
+| Changed places vs the amendment's decision 8 | all listed, nothing extra |
+| PR 63 review of the same blob | Approved, `.agent/reviews/PR-63.md` |
+
+### Residual risks
+- As in the amendment rounds: a blocking DNS lookup can outlast the 10 s send deadline; the 280 s
+  unit timeout bounds the run. The heartbeat bounds a silent channel to about 7 days.
+
+### Next step
+The owner runs `setup` (Part B reconcile: spec hash `75ac19f6…`), then `build` for M1j-2.
+
 ## Round 21 — 2026-10-12 · scope: spec-change slice (v1.18 iCore adoption final correction, PR 22)
 - **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.18 · hash 0edfb3cdc514e1d5bbd3ae3d34875cd16c037644.
 - **Pinned PR:** base 896eb4cf519a2fbdf573d349d0ce98a85b273521 · head 3c7ecf56efed49876fdba8574c5d7bc0f38d17cf · final host head unchanged, OPEN.
