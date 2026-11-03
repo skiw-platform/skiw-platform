@@ -32,11 +32,9 @@ pytestmark = pytest.mark.live
 ACTIVE, RETIRED, ABSENT = 999_996, 999_997, 999_998
 OTHER = uuid.UUID("11111111-2222-4333-8444-555555555555")
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"  # base64url order
-# The setting name is a bound parameter: Semgrep `tenancy-token-setting` allows only
-# tenancy.binding to name it in SQL, and these tests set hand-made and forged tokens on purpose
-# (docs/DECISIONS.md "M4c-4a").
-SETTING = "app.tenant_token"
-SET_TOKEN: LiteralString = "SELECT set_config(%s, %s, true)"
+# Hand-made and forged tokens, set on purpose: Semgrep `tenancy-token-setting` allows
+# tenancy/tests (docs/DECISIONS.md "M4c-4b-1", PR 91 review R1 P3).
+SET_TOKEN: LiteralString = "SELECT set_config('app.tenant_token', %s, true)"
 
 
 def migrator(query: LiteralString, *params: object) -> list[tuple[Any, ...]]:
@@ -73,7 +71,7 @@ def verify(make: Any, *, assign: bool = True) -> uuid.UUID | None:
         assert row is not None
         value = make(int(row[0]), row[1])
         if value is not None:
-            conn.execute(SET_TOKEN, (SETTING, value))
+            conn.execute(SET_TOKEN, (value,))
         result = conn.execute("SELECT guard.current_agency()").fetchone()
         assert result is not None
         agency: uuid.UUID | None = result[0]

@@ -15,10 +15,11 @@ import pytest
 
 RULES = Path(__file__).resolve().parents[2] / "semgrep" / "tenancy-boundaries.yml"
 
-# Allowed paths per rule: plan docs/plans/2026-11-01-m4-core.md §3 M4c-2a, "Semgrep" table, with one
-# difference: the plan lists only tenancy/binding.py for the token rule. Spec line 380 (TEN-09 row)
-# says both with_agency() and async_with_agency() set the token, so async_binding.py is allowed too.
-# accounts/migrations is there on purpose: M3e's and M3g's lookup functions read lookup_decoy_key.
+# Allowed paths per rule: plan docs/plans/2026-11-01-m4-core.md §3 M4c-2a, "Semgrep" table (M4c-4b
+# rows added there). Spec TEN-09 row: both with_agency() and async_with_agency() set the token, so
+# async_binding.py is allowed for the token rules. tenancy/tests sets forged tokens on purpose
+# (PR 91 review R1 P3). accounts/migrations is there on purpose: M3e's and M3g's lookup functions
+# read lookup_decoy_key.
 EXPECTED: dict[str, list[str]] = {
     "tenancy-guard-key-sql": [
         "/app/tenancy/keys.py",
@@ -27,7 +28,17 @@ EXPECTED: dict[str, list[str]] = {
         "/app/tenancy/tests/",
         "/app/accounts/tests/",
     ],
-    "tenancy-token-setting": ["/app/tenancy/binding.py", "/app/tenancy/async_binding.py"],
+    "tenancy-token-setting": [
+        "/app/tenancy/binding.py",
+        "/app/tenancy/async_binding.py",
+        "/app/tenancy/tests/",
+    ],
+    "tenancy-set-config-name": [],
+    "tenancy-token-mint-import": [
+        "/app/tenancy/binding.py",
+        "/app/tenancy/async_binding.py",
+        "/app/tenancy/tests/",
+    ],
     "tenancy-async-pool": ["/app/tenancy/async_binding.py"],
     "tenancy-no-session-setting": [],
 }
@@ -71,7 +82,7 @@ def _excludes(text: str | None = None) -> dict[str, list[str]]:
     return found
 
 
-def test_the_rule_set_is_exactly_the_four_boundaries() -> None:
+def test_the_rule_set_is_exactly_the_planned_boundaries() -> None:
     assert set(_excludes()) == set(EXPECTED)
 
 

@@ -30,15 +30,52 @@ rules:
     message: >-
       Only tenancy.binding.with_agency() sets app.tenant_token (spec §4.2 item 2: tokens are
       minted only in with_agency() / async_with_agency()).
+    # tenancy/tests sets hand-made and forged tokens on purpose (TEN-09 forged-tenant tests; PR 91
+    # review R1 P3), with the literal name so tenancy-set-config-name stays without excludes.
     paths:
       exclude:
         - /app/tenancy/binding.py
         - /app/tenancy/async_binding.py
+        - /app/tenancy/tests/
     patterns:
       - pattern: '"$SQL"'
       - metavariable-regex:
           metavariable: $SQL
           regex: (?is)^.*?(set_config\s*\(\s*'app\.tenant_token'|\bset\s+local\s+"?app\.tenant_token)
+  - id: tenancy-set-config-name
+    languages: [python]
+    severity: ERROR
+    message: >-
+      set_config() must name its setting as a quoted literal: a bound or computed name hides
+      app.tenant_token from tenancy-token-setting (PR 91 review R1 P3). Banned everywhere.
+    patterns:
+      - pattern: '"$SQL"'
+      - metavariable-regex:
+          metavariable: $SQL
+          regex: (?is)^.*?\bset_config\s*\((?!\s*'[a-z0-9_.]+'\s*,)
+  - id: tenancy-token-mint-import
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only tenancy.binding (and async_binding) may import tenancy.token: the key is in settings, so
+      any module holding mint() could make a token for any agency outside with_agency() (PR 91
+      review R1 P3; spec §4.2 item 2).
+    paths:
+      exclude:
+        - /app/tenancy/binding.py
+        - /app/tenancy/async_binding.py
+        - /app/tenancy/tests/
+    pattern-either:
+      - pattern: import tenancy.token
+      - pattern: import tenancy.token as $X
+      - pattern: from tenancy.token import $X
+      - pattern: from tenancy.token import $X as $Y
+      - pattern: from tenancy import token
+      - pattern: from tenancy import token as $X
+      - pattern: from . import token
+      - pattern: from .token import $X
+      - pattern: importlib.import_module("tenancy.token")
+      - pattern: __import__("tenancy.token", ...)
   - id: tenancy-async-pool
     languages: [python]
     severity: ERROR
@@ -57,11 +94,20 @@ rules:
       set_config(name, value, true) inside with_agency(); plain SET and any set_config() whose last
       argument is not the literal true are banned everywhere (PR 85 review R1 P2: a nested call in the
       value, 'off', 'no', 0 and a bind parameter all give a session-level setting).
-    # Two branches. (1) The string holds set_config( and it is NOT made only of calls that end in
+    # Branch A. (1) The string holds set_config( and it is NOT made only of calls that end in
     # ", true)": (?1) matches a balanced nested bracket, so a nested call in the value
     # cannot hide the real last argument. (2) Plain SET [SESSION] app.* .
-    patterns:
-      - pattern: '"$SQL"'
-      - metavariable-regex:
-          metavariable: $SQL
-          regex: (?is)^(?:(?=.*?set_config\s*\()(?!(?:(?!set_config\s*\().)*(?:set_config\s*\((?:[^()]|(\((?:[^()]|(?1))*\)))*?,\s*true\s*\)(?:(?!set_config\s*\().)*)*$)|.*?\bset\s+(?:session\s+)?"?app\.)
+    # Branch B is the first, linear regex (PR 85 review R1 P3, option (a)): branch A hits the
+    # engine's backtrack limit on a string over about 10,000 characters and then reports no match
+    # and no error, so B still flags every flat false / 'f' / 'false' / 0 and plain SET at any length.
+    pattern-either:
+      - patterns:
+          - pattern: '"$SQL"'
+          - metavariable-regex:
+              metavariable: $SQL
+              regex: (?is)^(?:(?=.*?set_config\s*\()(?!(?:(?!set_config\s*\().)*(?:set_config\s*\((?:[^()]|(\((?:[^()]|(?1))*\)))*?,\s*true\s*\)(?:(?!set_config\s*\().)*)*$)|.*?\bset\s+(?:session\s+)?"?app\.)
+      - patterns:
+          - pattern: '"$SQL"'
+          - metavariable-regex:
+              metavariable: $SQL
+              regex: (?is)^.*?(set_config\s*\([^)]*,\s*(false|'f'|'false'|0)\s*\)|\bset\s+(session\s+)?"?app\.)
