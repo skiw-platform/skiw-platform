@@ -13,9 +13,9 @@ from django.conf import settings  # noqa: E402
 
 from accounts.source_key import require_key  # noqa: E402
 from jobs.startup import require_migrated  # noqa: E402
-from tenancy.binding import token_keys  # noqa: E402
+from tenancy.binding import require_token_key  # noqa: E402
 
 require_key()
 settings.SKIW_LOGIN_BLOB_KEYS()
-token_keys()
+require_token_key()
 require_migrated()

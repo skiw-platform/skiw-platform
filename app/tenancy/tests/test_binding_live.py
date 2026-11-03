@@ -81,8 +81,8 @@ def test_an_error_inside_rolls_back_and_leaves_no_token() -> None:
 
 
 def test_it_mints_under_the_newest_key(vector_keys: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    keys = binding.token_keys()
-    monkeypatch.setattr(binding, "token_keys", lambda: ((ACTIVE, VECTOR_KEY), *keys))
+    keys = binding._token_keys()
+    monkeypatch.setattr(binding, "_token_keys", lambda: ((ACTIVE, VECTOR_KEY), *keys))
     with with_agency(A):
         assert setting().startswith(f"v{ACTIVE}.{A}.")
         assert current() == A

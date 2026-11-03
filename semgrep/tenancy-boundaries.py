@@ -1,11 +1,14 @@
 # Fixture for `semgrep --test semgrep/` (rules in tenancy-boundaries.yml). Each import line of the
 # token rule is a case, so unused and unsorted imports are the point here.
-# ruff: noqa: F401, I001
+# ruff: noqa: F401, I001, E402
 import importlib
+import os
 from importlib import import_module
 
 from django.conf import settings
 from django.conf import settings as conf
+
+from tenancy import binding
 
 # ruleid: tenancy-async-pool
 from psycopg_pool import AsyncConnectionPool
@@ -69,6 +72,27 @@ decoy = settings.SKIW_LOOKUP_DECOY_KEYS()
 
 # ok: tenancy-token-key-reader
 blob = getattr(settings, "SKIW_LOGIN_BLOB_KEYS")  # noqa: B009 - the getattr spelling is the case
+
+# ruleid: tenancy-token-key-reader
+cached = binding._token_keys()
+
+# ruleid: tenancy-token-key-reader
+from tenancy.binding import _token_keys
+
+# ruleid: tenancy-token-key-reader
+from tenancy.binding import _token_keys as hidden
+
+# ok: tenancy-token-key-reader
+from tenancy.binding import require_token_key
+
+# ruleid: tenancy-token-key-source
+from_env = os.environ["TENANT_TOKEN_KEY"]
+
+# ruleid: tenancy-token-key-source
+from_file = os.environ.get("TENANT_TOKEN_KEY_FILE")
+
+# ok: tenancy-token-key-source
+source_key = os.environ.get("TENANT_SOURCE_KEY")
 
 
 def key_sql(cursor, version):

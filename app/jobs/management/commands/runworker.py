@@ -5,7 +5,7 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandParser
 
 from jobs.startup import require_migrated
-from tenancy.binding import token_keys
+from tenancy.binding import require_token_key
 
 
 class Command(BaseCommand):
@@ -20,6 +20,6 @@ class Command(BaseCommand):
         # accounts. tenant_token_key through tenancy.binding, which caches it (plan M4c-4b).
         settings.SKIW_TENANT_SOURCE_KEYS()
         settings.SKIW_LOGIN_BLOB_KEYS()
-        token_keys()
+        require_token_key()
         require_migrated()
         call_command("procrastinate", "worker", *options["worker_args"])

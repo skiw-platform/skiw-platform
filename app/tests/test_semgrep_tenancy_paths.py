@@ -47,6 +47,14 @@ EXPECTED: dict[str, list[str]] = {
         "/app/tenancy/async_binding.py",
         "/app/tenancy/tests/",
     ],
+    "tenancy-token-key-source": [
+        "/app/config/settings.py",
+        "/app/tenancy/keys.py",
+        "/app/tenancy/tests/",
+        "/app/tests/test_env_wiring.py",
+        "/app/tests/test_startup_key.py",
+        "/app/jobs/tests/test_worker_key_check.py",
+    ],
     "tenancy-async-pool": ["/app/tenancy/async_binding.py"],
     "tenancy-no-session-setting": [],
 }

@@ -70,6 +70,9 @@ AUTH_TABLE_GRANTS = {
 # this set with the schema-qualified spec list.
 GUARD_KEY_TABLES = {"tenant_mac_key", "lookup_decoy_key"}
 GLOBAL_TABLES = {*TABLES, *AUTH_TABLES, *GUARD_KEY_TABLES, "django_session", "django_migrations"}
+# tenancy.0004 (plan M4c-5): the tenant root, the one named non-global table until M4c-6b's schema
+# check classifies every table.
+ROOT_TABLES = {"agency"}
 TEST_ONLY_TABLES = {"jobs_probe", "files_probe"}
 # Spec §4.2 TEN-03 row: append-only evidence tables, each checked as it lands.
 TEN03_EVIDENCE_TABLES = [
@@ -106,9 +109,9 @@ def test_queue_objects_are_exactly_the_audited_ones() -> None:
     )
 
 
-def test_every_table_is_in_the_closed_global_list() -> None:
+def test_every_table_is_in_the_closed_global_list_or_the_root() -> None:
     rows = separate("SELECT c.relname" + USER_RELATIONS + " AND c.relkind IN ('r', 'p')")
-    assert {name for (name,) in rows} - TEST_ONLY_TABLES == GLOBAL_TABLES
+    assert {name for (name,) in rows} - TEST_ONLY_TABLES == GLOBAL_TABLES | ROOT_TABLES
 
 
 def test_acl_entries_on_the_auth_tables_are_exactly_the_plan_list() -> None:
