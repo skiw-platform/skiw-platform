@@ -1,5 +1,61 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 25 — 2026-11-03 · scope: re-review of the Round 24 fixes (v1.21 draft 2; text changes only)
+- **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.21 · hash
+  d95cb2717bd1cfabf62d3dbe6cd4af2f1e4c73fd. **Uncommitted** (`git status`: ` M`) on branch
+  `docs/spec-v1.21`. The reviewer snapshotted the file to the session scratchpad and reviewed the snapshot;
+  the working file's hash was re-checked at the end and is unchanged.
+- **Previous approved version:** v1.20, hash 92841ba555e9e857ac70e86a5b043cf9729ed371 (Round 23; = PROJECT.md §2).
+- **Reviewed against:** Round 24 snapshot (v1.21 draft 1, hash 9a351dee). Delta: 8 lines (changelog; §4.1
+  `approval_mac_key` and `lookup_decoy_key` rows; §4.2 items 2, the Encoding line and 3; TEN-09; §8.4 H6).
+  Everything else is byte-identical to draft 1, so the Round 24 checks against v1.20 and PR 88 still hold.
+- **Mode:** read only. No file written except this one.
+- **Model used:** Claude Opus 5.5 (deep tier). **Switch model next step?** No.
+
+**Verdict:** Approved
+
+### Round 24 findings, re-checked
+- **[P1] verifier ignores retirement — fixed.** Item 3 (`spec:293-294`): "The key version `v` must exist in
+  `guard.tenant_mac_key` with `retired_at IS NULL`; an absent or retired version gives NULL", tied back to
+  "on suspicion" in item 1. TEN-09 (`spec:381`) adds "a token whose MAC is correct but whose key version is
+  retired (v1.21) or absent". Matches plan M4c-4a step 3. **Status:** closed.
+- **[P2] H6 role-set test — fixed.** `spec:918` carries the same clause as D4 and TEN-02; the changelog lists
+  "§8.4 H6 role-set test". **Status:** closed.
+- **[P2] token encoding — fixed.** The Encoding line (`spec:289`) now fixes `n` (decimal 1–999999, no leading
+  zeros; matches `env.versioned_keys`), the uuid text form (lowercase, hyphenated), the xid (unsigned decimal
+  in the token; 8 bytes big-endian in the MAC, which fits `xid8` from `pg_current_xact_id()`), base64url
+  without padding, the field order, the field bytes (ASCII, UTF-8, 16 raw bytes, 8 bytes) and a 4-byte
+  big-endian unsigned length before each field. Item 2 says its `‖` is that concatenation. A committed test
+  vector pins the bytes; it need not be named in the spec now that the text alone is exact. **Status:** closed.
+- **[P3] decoy wording — fixed** (`spec:192`: "no longer in the key file is deleted; a new one is inserted").
+- **[P3] `approval_mac_key` row — fixed** (`spec:191`: "from M9 written, retired and guarded exactly as
+  `guard.tenant_mac_key`").
+
+### New findings
+
+### [P3] Version not bumped after the Round 24 fix
+- **Evidence:** `agents/START.md` fix step 3 says bump the spec's Version. The draft keeps "1.21" and folds the
+  fixes into the 1.21 changelog line without naming Round 24. Earlier rounds bumped (1.16–1.18).
+- **Impact:** low. 1.21 was never committed or approved, and this file records both draft hashes, so no
+  approved text is ambiguous.
+- **Correction:** none now. Changing the file would change the approved hash. Accepted as is; next time,
+  bump on every fix round.
+- **Owner:** builder · **Disposition:** accepted, no change · **Status:** closed
+
+### Checks
+- Snapshot diff against Round 24's snapshot (word level): only the lines above changed.
+- Each Round 24 required correction compared with the new text; consistency with plan M4c-4a step 3,
+  `app/tenancy/keys.py` (PR 88) and `env.versioned_keys` (`n` range).
+- Working file hash re-checked after the review: d95cb271, unchanged.
+
+### After approval (owner / builder)
+1. Commit the spec **byte-identical** to hash d95cb271 (the commit's `git hash-object` must match), on
+   `docs/spec-v1.21`, through the usual PR.
+2. Run `setup` to reconcile: PROJECT.md §2 spec hash → d95cb271 / v1.21; §9 TEN-10 line, which still says
+   "DB-side only `guard.*` functions read key tables", gains the `migrate` key write as the owner through
+   `SET ROLE` (spec TEN-10 row).
+3. This closes the PR 88 R2 condition (spec v1.21 reviewed and reconciled) once both land before M4c-4a merges.
+
 ## Round 24 — 2026-11-03 · scope: spec-change slice (v1.21: M4-core plan §9 items 2 and 6, retired-key rule; text changes only)
 - **Spec:** docs/specs/2026-10-05-skiw-platform-stack-design.md · v1.21 · hash
   9a351deefb84c45725aa83a640b733eb8c9e9b26. **Uncommitted** in the main checkout on `main`
