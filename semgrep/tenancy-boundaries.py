@@ -2,6 +2,10 @@
 # token rule is a case, so unused and unsorted imports are the point here.
 # ruff: noqa: F401, I001
 import importlib
+from importlib import import_module
+
+from django.conf import settings
+from django.conf import settings as conf
 
 # ruleid: tenancy-async-pool
 from psycopg_pool import AsyncConnectionPool
@@ -35,6 +39,36 @@ from tenancy import ddl
 
 # ruleid: tenancy-token-mint-import
 loaded = importlib.import_module("tenancy.token")
+
+# ruleid: tenancy-token-mint-import
+loaded_from = importlib.import_module("tenancy.token", package=None)
+
+# ruleid: tenancy-token-mint-import
+relative = importlib.import_module(".token", "tenancy")
+
+# ruleid: tenancy-token-mint-import
+bare = import_module(".token", package="tenancy")
+
+# ok: tenancy-token-mint-import
+other = importlib.import_module("tenancy.binding")
+
+# ruleid: tenancy-token-key-reader
+keys = settings.SKIW_TENANT_TOKEN_KEYS()
+
+# ruleid: tenancy-token-key-reader
+aliased = conf.SKIW_TENANT_TOKEN_KEYS
+
+# ruleid: tenancy-token-key-reader
+by_name = getattr(settings, "SKIW_TENANT_TOKEN_KEYS")  # noqa: B009 - the getattr spelling is the case
+
+# ruleid: tenancy-token-key-reader
+by_default = getattr(settings, "SKIW_TENANT_TOKEN_KEYS", None)
+
+# ok: tenancy-token-key-reader
+decoy = settings.SKIW_LOOKUP_DECOY_KEYS()
+
+# ok: tenancy-token-key-reader
+blob = getattr(settings, "SKIW_LOGIN_BLOB_KEYS")  # noqa: B009 - the getattr spelling is the case
 
 
 def key_sql(cursor, version):

@@ -1,15 +1,12 @@
 """`guard.current_agency()` after `make migrate` (spec §4.2 "Tenant binding" items 2 and 3, v1.21;
 TEN-06, TEN-09, TEN-12; plan M4c-4a). Tokens are minted by hand with `tenancy.token` and set as
-skiw_app on a plain psycopg connection; `with_agency()` (M4c-4b) is not used yet.
-
-The vector key goes in under two high test versions, one active and one retired, committed as the
-owner (skiw_app sees only committed rows) and deleted again by the fixture."""
+skiw_app on a plain psycopg connection; `with_agency()` is tested in test_binding_live.py.
+The vector key goes in under two high test versions (the `vector_keys` fixture, conftest.py)."""
 
 import base64
 import importlib
 import os
 import uuid
-from collections.abc import Iterator
 from typing import Any, LiteralString
 
 import psycopg
@@ -17,7 +14,7 @@ import pytest
 from django.conf import settings
 
 from tenancy import token
-from tenancy.ddl import owner_role
+from tenancy.tests.conftest import ABSENT, ACTIVE, RETIRED
 from tenancy.tests.test_token import (
     VECTOR,
     VECTOR_AGENCY,
@@ -29,7 +26,6 @@ from tenancy.tests.test_token import (
 
 pytestmark = pytest.mark.live
 
-ACTIVE, RETIRED, ABSENT = 999_996, 999_997, 999_998
 OTHER = uuid.UUID("11111111-2222-4333-8444-555555555555")
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"  # base64url order
 # Hand-made and forged tokens, set on purpose: Semgrep `tenancy-token-setting` allows
@@ -41,25 +37,6 @@ def migrator(query: LiteralString, *params: object) -> list[tuple[Any, ...]]:
     with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
         cursor = conn.execute(query, params)
         return cursor.fetchall() if cursor.description else []
-
-
-@pytest.fixture
-def vector_keys() -> Iterator[None]:
-    def write(statement: LiteralString, *params: object) -> None:
-        with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
-            cursor = psycopg.Cursor(conn)
-            with owner_role(cursor, "skiw_tenant_guard"):
-                cursor.execute(statement, params)
-
-    write(
-        "INSERT INTO guard.tenant_mac_key (version, key, retired_at)"
-        " VALUES (%s, %s, NULL), (%s, %s, now())",
-        ACTIVE, VECTOR_KEY, RETIRED, VECTOR_KEY,
-    )  # fmt: skip
-    try:
-        yield
-    finally:
-        write("DELETE FROM guard.tenant_mac_key WHERE version = ANY(%s)", [ACTIVE, RETIRED])
 
 
 def verify(make: Any, *, assign: bool = True) -> uuid.UUID | None:

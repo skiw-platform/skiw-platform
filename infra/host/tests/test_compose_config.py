@@ -389,6 +389,23 @@ def test_only_web_and_worker_read_the_app_key_from_its_secret_file(
         assert variable not in (service.get("environment") or {})
 
 
+def test_web_worker_and_migrate_read_the_tenant_token_key_from_its_secret_file(
+    config: Config,
+) -> None:
+    """Plan M4c-4b: web and worker mint under it (with_agency()); migrate writes it into
+    guard.tenant_mac_key (M4c-3). No service takes the key value from the environment."""
+    holders = {
+        name: service["environment"]["TENANT_TOKEN_KEY_FILE"]
+        for name, service in services(config)
+        if "TENANT_TOKEN_KEY_FILE" in (service.get("environment") or {})
+    }
+    assert holders == dict.fromkeys(("web", "worker", "migrate"), "/run/secrets/tenant_token_key")
+    for name in holders:
+        assert "tenant_token_key" in {s["source"] for s in config["services"][name]["secrets"]}
+    for _, service in services(config):
+        assert "TENANT_TOKEN_KEY" not in (service.get("environment") or {})
+
+
 def test_migrate_reads_both_guard_keys_from_their_secret_files(config: Config) -> None:
     """Plan M4c-3: the key writes after `migrate` (tenancy.keys) read these two files; migrate is
     the only reader of lookup_decoy_key (H4)."""

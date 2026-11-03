@@ -47,6 +47,8 @@ x-app-env: &app-env
   # web and worker only: migrate mounts neither key (H4); settings read them lazily.
   TENANT_SOURCE_KEY_FILE: /run/secrets/tenant_source_key
   LOGIN_BLOB_KEY_FILE: /run/secrets/login_blob_key
+  # with_agency() mints under it (plan M4c-4b); migrate reads it too, for the key table (M4c-3).
+  TENANT_TOKEN_KEY_FILE: /run/secrets/tenant_token_key
 
 x-app-secrets: &app-secrets
   - django_secret_key

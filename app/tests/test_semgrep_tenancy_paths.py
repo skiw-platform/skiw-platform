@@ -18,8 +18,9 @@ RULES = Path(__file__).resolve().parents[2] / "semgrep" / "tenancy-boundaries.ym
 # Allowed paths per rule: plan docs/plans/2026-11-01-m4-core.md §3 M4c-2a, "Semgrep" table (M4c-4b
 # rows added there). Spec TEN-09 row: both with_agency() and async_with_agency() set the token, so
 # async_binding.py is allowed for the token rules. tenancy/tests sets forged tokens on purpose
-# (PR 91 review R1 P3). accounts/migrations is there on purpose: M3e's and M3g's lookup functions
-# read lookup_decoy_key.
+# (PR 91 review R1 P3). Only settings, keys and the binding modules read the token key (PR 92
+# review R1 P3). accounts/migrations is there on purpose: M3e's and M3g's lookup functions read
+# lookup_decoy_key.
 EXPECTED: dict[str, list[str]] = {
     "tenancy-guard-key-sql": [
         "/app/tenancy/keys.py",
@@ -35,6 +36,13 @@ EXPECTED: dict[str, list[str]] = {
     ],
     "tenancy-set-config-name": [],
     "tenancy-token-mint-import": [
+        "/app/tenancy/binding.py",
+        "/app/tenancy/async_binding.py",
+        "/app/tenancy/tests/",
+    ],
+    "tenancy-token-key-reader": [
+        "/app/config/settings.py",
+        "/app/tenancy/keys.py",
         "/app/tenancy/binding.py",
         "/app/tenancy/async_binding.py",
         "/app/tenancy/tests/",

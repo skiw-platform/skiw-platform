@@ -168,7 +168,11 @@ without printing a key (the message names the key and version). `skiw-deploy` th
   `web` and `worker` still mint under it. Their tenant transactions then see no agency until they
   restart, and if the deploy stops after `migrate`, the old digest keeps serving with a key the
   database refuses. Remove the old line only after every `web` and `worker` container has
-  restarted on the new key. Until M4c-4b (`with_agency()`) nothing mints a token yet.
+  restarted on the new key.
+- **web and worker (M4c-4b):** both read `TENANT_TOKEN_KEY_FILE` once at start-up and refuse to start
+  when it is missing or malformed (the message names the key, never the value). `with_agency()`
+  mints every token under the **newest** listed version, so after the first deploy of a rotation
+  the restarted containers already mint under the new version that `migrate` has just inserted.
 - **After a restore:** dumps leave both tables' rows out (spec §8.4 H6; `predeploy` `EXCLUDE`), so a
   restored database has no key rows until `migrate` runs. Run a forward deploy (it runs `migrate`)
   before serving; with the restored secret store it rewrites both tables from the same files. The
