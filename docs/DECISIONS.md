@@ -681,3 +681,16 @@
 - **Versions:** none new.
 - **Exception to a rule?** no.
 - **Decided by:** builder (deep tier, Opus 5.5), within plan M4c-5.
+
+## 2026-11-03 — M4c-6a-1: the `tenant_table()` template
+- **Decision:** **`tenancy.template.tenant_table(table, *, commands, composite_fks=())`** returns one `RunSQL` per step, each with its exact reverse: the FK to `agency(id)`; one composite FK `(agency_id, col) → parent(agency_id, id)` per pair; ENABLE + FORCE and the restrictive `<table>_tenant`; one permissive policy per granted command (`_sel` USING, `_ins` WITH CHECK, `_upd` both, `_del` USING; an append-only table passes no UPDATE/DELETE, TEN-03); `GRANT <commands>` to `skiw_app`. `tenant_table_sql()` gives the same steps as typed `(forward, reverse)` tuples, so tests and the live check read the SQL without Django. Names are checked (`[a-z_][a-z0-9_]*`, ≤ 63 including the derived constraint and policy names), never quoted, so a name cannot carry SQL; `agency` as a table or parent and a second FK on one column are refused. Every statement is one line with no `%`.
+- **Reverse and ACLs:** the reverse REVOKEs exactly what was granted. The first GRANT turns a NULL (default) ACL into an explicit owner entry, which a REVOKE leaves behind, so the live test compares effective ACLs (`coalesce(relacl, acldefault('r', relowner))`). The same holds for `tenancy/0004`.
+- **Tests:** `test_template.py` (15 unit): the RLS statements equal the spec §4.2 code block (read from the spec, whitespace collapsed, `(…same…)` written out); every step and reverse exactly; append-only shape; 11 refusals; the migration linter passes both directions; `tenant_table` wraps each step in a reversible `RunSQL`. `test_template_live.py` (2): on scratch tables, as the migrator, in a rolled-back transaction: the catalog shape (constraints, ACL, deparsed policies), the exact reverse, and a composite FK refusing another agency's parent plus the `agency` FK refusing an unknown agency.
+- **Mutation table:** see the PR body (run on this branch).
+- **Not in this PR:** `TenantModel` and the closed global list `tenancy.schema.GLOBAL_TABLES` (M4c-6a-2, stacked on this one); the schema check (M4c-6b); isolation registry and EXPLAIN tests (M4c-7); the first real tenant table (M3d).
+- **Why:** spec v1.21 §4 conventions, §4.2 template; plan `docs/plans/2026-11-01-m4-core.md` §3 M4c-6a. Split in two because the whole of M4c-6a came to ≈ 550 lines against the ≈ 450 split rule (plan estimate ≈ 200).
+- **Alternatives rejected:** quoting names with `psycopg.sql` (migrations take plain strings, and the linter reads them line by line); adding `unique (agency_id, id)` in `tenant_table()` SQL (Django would not know it, so `makemigrations --check` could not catch drift; `TenantModel` carries it in M4c-6a-2).
+- **Scope / affects:** `app/tenancy/template.py` (new), `app/tenancy/tests/test_template.py` (new), `app/tenancy/tests/test_template_live.py` (new), `docs/DECISIONS.md`.
+- **Versions:** none new.
+- **Exception to a rule?** no.
+- **Decided by:** builder (deep tier, Opus 5.5), within plan M4c-6a and spec v1.21.
