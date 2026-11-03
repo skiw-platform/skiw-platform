@@ -3,9 +3,9 @@ DEFINER function in `guard`, owned by skiw_auth_lookup, writes `security_event` 
 calls it, keeps its owner and ACL through `CREATE OR REPLACE`, and is dropped as its owner. It
 lives here because its SQL names `security_event` (Semgrep `auth-tables-accounts-only`).
 
-skiw_app has no USAGE on `guard` until M4c-4a, and a call from the skiw_app login sees only
-committed state, so the probe commits a USAGE grant for the call and the fixture revokes it,
-drops the function and deletes the probe rows, also when the test fails."""
+skiw_app has USAGE on `guard` from tenancy.0003 (M4c-4a). A call from the skiw_app login sees only
+committed state, so the probe commits the function, and the fixture drops it and deletes the
+probe rows, also when the test fails."""
 
 import os
 import uuid
@@ -92,7 +92,6 @@ def probe() -> Iterator[None]:
         yield
     finally:
         with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
-            conn.execute("REVOKE USAGE ON SCHEMA guard FROM skiw_app")
             conn.execute(
                 sql.SQL("REVOKE CREATE ON SCHEMA guard FROM {}").format(sql.Identifier(LOOKUP))
             )
@@ -107,10 +106,8 @@ def probe() -> Iterator[None]:
                 conn.execute(sql.SQL(f"DROP FUNCTION {FUNCTION}"))
         assert function_row() == []
         assert as_migrator(
-            "SELECT has_schema_privilege('skiw_app', 'guard', 'USAGE'),"
-            " count(*) FROM security_event WHERE kind = ANY(%s)",
-            list(KINDS),
-        ) == [(False, 0)]
+            "SELECT count(*) FROM security_event WHERE kind = ANY(%s)", list(KINDS)
+        ) == [(0,)]
 
 
 @pytest.mark.usefixtures("probe")
@@ -119,11 +116,6 @@ def test_a_definer_function_made_through_as_owner_writes_as_its_owner_and_keeps_
     created = function_row()
     assert [row[:3] for row in created] == [(LOOKUP, True, ["search_path=pg_catalog, pg_temp"])]
     assert created[0][3] == "{skiw_auth_lookup=X/skiw_auth_lookup,skiw_app=X/skiw_auth_lookup}"
-
-    # The negative control: without USAGE on guard skiw_app cannot reach it (M4c-4a grants it).
-    with pytest.raises(psycopg.errors.InsufficientPrivilege, match="schema guard"):
-        call_as_app()
-    as_migrator("GRANT USAGE ON SCHEMA guard TO skiw_app")  # the fixture revokes it
 
     who = {"current_user": LOOKUP, "session_user": "skiw_app"}
     assert events(call_as_app()) == [(KINDS[0], who)]

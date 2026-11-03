@@ -47,12 +47,13 @@ def test_the_schema_is_the_migrators_and_each_key_table_its_nologin_owners() -> 
     assert dict(owners) == KEY_TABLES
 
 
-def test_guard_acl_is_exactly_migrator_usage_create_and_owner_usage() -> None:
+def test_guard_acl_is_exactly_migrator_usage_create_owner_and_app_usage() -> None:
     acl = rows(
         "SELECT a.grantee::regrole::text, a.privilege_type FROM pg_namespace n,"
         " aclexplode(n.nspacl) a WHERE n.nspname = 'guard'"
     )
     assert sorted(acl) == [
+        ("skiw_app", "USAGE"),
         ("skiw_auth_lookup", "USAGE"),
         ("skiw_migrator", "CREATE"),
         ("skiw_migrator", "USAGE"),
@@ -60,12 +61,12 @@ def test_guard_acl_is_exactly_migrator_usage_create_and_owner_usage() -> None:
     ]
 
 
-def test_skiw_app_has_no_usage_on_guard_until_current_agency_exists() -> None:
-    # M4c-4a grants USAGE together with guard.current_agency().
+def test_skiw_app_has_usage_but_no_create_on_guard() -> None:
+    # tenancy.0003 grants USAGE together with guard.current_agency() (M4c-4a).
     assert rows(
         "SELECT has_schema_privilege('skiw_app', 'guard', 'USAGE'),"
         " has_schema_privilege('skiw_app', 'guard', 'CREATE')"
-    ) == [(False, False)]
+    ) == [(True, False)]
 
 
 def test_skiw_app_has_create_on_no_schema() -> None:
@@ -140,14 +141,15 @@ def test_key_table_checks(table: str, owner: str, version: int, length: int, ok:
 
 def test_pgcrypto_lives_in_guard() -> None:
     # A1: the migrator installs the trusted extension and owns it; its functions belong to the
-    # bootstrap superuser and keep PUBLIC EXECUTE (plan §9 item 9; unreachable without USAGE).
+    # bootstrap superuser and keep PUBLIC EXECUTE (plan §9 item 9: they only compute).
     assert rows(
         "SELECT extnamespace::regnamespace::text, extowner::regrole::text FROM pg_extension"
         " WHERE extname = 'pgcrypto'"
     ) == [("guard", "skiw_migrator")]
     assert rows(
-        "SELECT DISTINCT proowner::regrole::text FROM pg_proc"
-        " WHERE pronamespace = 'guard'::regnamespace"
+        "SELECT DISTINCT p.proowner::regrole::text FROM pg_proc p JOIN pg_depend d"
+        " ON d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'"
+        " WHERE p.pronamespace = 'guard'::regnamespace"
     ) == [("postgres",)]
     assert rows("SELECT to_regprocedure('guard.hmac(bytea,bytea,text)') IS NOT NULL") == [(True,)]
 
@@ -178,16 +180,24 @@ def migrate(*target: str) -> None:
 
 def test_the_unlinted_key_table_migration_reverses_and_reapplies_exactly() -> None:
     # make migrate skips 0002 in lintmigrations (docs/DECISIONS.md "M4c-2a"), so its forward
-    # and reverse are proven here: the reverse drops both tables as their owners and leaves the
-    # schema ACL as 0001 made it; the forward rebuilds the same tables.
+    # and reverse are proven here: the reverse (0003 first) drops the function and both tables
+    # as their owners and leaves the schema ACL as 0001 made it, without skiw_app's USAGE; the
+    # forward rebuilds the same objects.
     before = rows(SNAPSHOT)
     assert len(before) == 3
+    acl_0001 = [
+        (name, owner, acl.replace(",skiw_app=U/skiw_migrator", ""), *rest)
+        for name, owner, acl, *rest in before
+        if name == "acl:guard"
+    ]
+    assert "skiw_app" not in acl_0001[0][2]
     try:
         migrate("tenancy", "0001")
         assert rows(
-            "SELECT to_regclass('guard.tenant_mac_key'), to_regclass('guard.lookup_decoy_key')"
-        ) == [(None, None)]
-        assert rows(SNAPSHOT) == [row for row in before if row[0] == "acl:guard"]
+            "SELECT to_regclass('guard.tenant_mac_key'), to_regclass('guard.lookup_decoy_key'),"
+            " to_regprocedure('guard.current_agency()')"
+        ) == [(None, None, None)]
+        assert rows(SNAPSHOT) == acl_0001
     finally:
         migrate()
     assert rows(SNAPSHOT) == before
