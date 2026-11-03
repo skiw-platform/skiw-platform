@@ -1,6 +1,5 @@
 # The tenant root `agency` (spec §4.1, §4.2 schema check (2); plan M4c-5). Created by the migrator,
-# which owns it, so tenancy.seed's writes (the migrate-time seed, M4c-5-2) can lift FORCE inside
-# their own transaction.
+# which owns it, so the migrate-time seed (tenancy.seed) can lift FORCE inside its own transaction.
 # RLS: ENABLE + FORCE, the restrictive tenant policy on `id` and one permissive SELECT policy with
 # the same predicate (spec §4.2 "uses the same pattern on `id`, SELECT only"); skiw_app may only
 # SELECT. Writes outside the seed wait for ADMIN_TX_HELPER (M5). Each statement is one line (the

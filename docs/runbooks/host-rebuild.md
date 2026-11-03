@@ -312,6 +312,20 @@ has no `ignoreip` here: three failed status logins from production within 10 min
 a wrong key on staging) ban production for an hour, and production deploys are refused until the
 ban ends (`sudo fail2ban-client set sshd unbanip <address>` on staging lifts it).
 
+### The deployment agency (M4c-5)
+`SKIW_DEPLOYMENT_AGENCY_ID` and `SKIW_DEPLOYMENT_AGENCY_NAME` are non-secret host config in
+`infra/host/env/<env>.env`, passed to `migrate`, `web` and `worker`. Each environment has its own
+uuid; the owner gave the staging and production names (2026-11-03).
+- **First deploy:** `migrate` inserts the agency into the empty `agency` table.
+- **Every later deploy:** `migrate` finds the same id and writes nothing. The name is never updated
+  by `migrate`; a rename waits for the admin helper (M5).
+- **Never change the id on a host that holds data.** `migrate` then refuses (the message names the
+  configured id and PROJECT §9's second-agency gate), writes nothing and exits ≠ 0, so the deploy
+  stops before `web` switches. Put the old id back. A second agency needs the PROJECT §9 gate first.
+- **After a restore:** the `agency` row is ordinary data and comes back with the dump, so the
+  configured id must be the one the dump holds.
+- `web` and `worker` take both now; `/readyz` binds to the agency from M4c-5-3.
+
 ## Database roles (`bootstrap-db`, spec §8.4 H4, H6)
 
 Run it in this order on a new or rebuilt host. It needs root, for the same reason as

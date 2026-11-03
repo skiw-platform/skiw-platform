@@ -350,7 +350,9 @@ AUTH_VALUES = (
     "SKIW_LOGIN_PENDING_MIN",
     "SKIW_ENROL_LINK_MIN",
 )
-SETTINGS_VALUES = SESSION_LIFETIME + AUTH_VALUES
+# The one deployment agency (plan M4c-5): migrate seeds it (web's /readyz binds to it in M4c-5-3).
+AGENCY_VALUES = ("SKIW_DEPLOYMENT_AGENCY_ID", "SKIW_DEPLOYMENT_AGENCY_NAME")
+SETTINGS_VALUES = SESSION_LIFETIME + AUTH_VALUES + AGENCY_VALUES
 DB_ROLE = {"web": "skiw_app", "worker": "skiw_app", "migrate": "skiw_migrator"}
 
 
@@ -363,6 +365,21 @@ def test_every_settings_importer_gets_the_bounded_values_and_keeps_its_role(
         assert {k: env[k] for k in SETTINGS_VALUES} == {k: values[k] for k in SETTINGS_VALUES}
         assert env["DATABASE_URL"] == f"postgres://{role}@db:5432/{values['SKIW_POSTGRES_DB']}"
         assert env["DATABASE_PASSWORD_FILE"] == f"/run/secrets/{role}_password"
+
+
+def test_each_environment_has_its_own_single_agency_id() -> None:
+    """One canonical uuid per environment (PROJECT §9 gate), never shared between them, so a
+    staging id cannot reach production; the owner gave the staging and production names."""
+    files = ("ci.env", "staging.env", "production.env")
+    ids = [declared(name)["SKIW_DEPLOYMENT_AGENCY_ID"] for name in files]
+    assert all(re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", i) for i in ids)
+    assert len(set(ids)) == len(ids)
+    names = {name: declared(name)["SKIW_DEPLOYMENT_AGENCY_NAME"] for name in files}
+    assert names == {
+        "ci.env": "CI agency",
+        "staging.env": "SK iWealth (staging)",
+        "production.env": "SK iWealth Sdn. Bhd.",
+    }
 
 
 @pytest.mark.parametrize("name", SETTINGS_VALUES)
