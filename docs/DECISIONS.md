@@ -694,3 +694,15 @@
 - **Versions:** none new.
 - **Exception to a rule?** no.
 - **Decided by:** builder (deep tier, Opus 5.5), within plan M4c-6a and spec v1.21.
+
+## 2026-11-03 — M4c-6a-2: `TenantModel` and the closed global table list
+- **Decision:** (1) **`tenancy.models.TenantModel`** (abstract): `agency_id uuid` and the model constraint `UniqueConstraint(agency_id, id)` named `<app>_<model>_agency_id_id_uq`, so `makemigrations --check` fails if a subclass loses it. A subclass with its own `Meta` must inherit `TenantModel.Meta`. ORM FKs to tenant models use `db_constraint=False` (spec §4); the composite FKs come from `tenant_table()` (M4c-6a-1). (2) **`tenancy.schema.GLOBAL_TABLES`**: the spec §4.1 list, schema-qualified (`public.*`, `guard.*`), with `ROOT_TABLE = "public.agency"`. The waffle entries are django-waffle's three model tables (`waffle_flag`, `waffle_switch`, `waffle_sample`); the PR that installs waffle (M5) checks them against its migrations. (3) **`test_queue_grants.py`** imports the list. Its table test becomes "every existing global table is on the list": every existing table, minus the test-only tables, the root and tables with an `agency_id` column, must be on it; a listed table that does not exist yet is fine. A second test pins the audited grant tables to the list.
+- **Tests:** `test_template.py` gains one: `TenantModel` carries the named constraint, a `Meta` that does not inherit drops it, and the autodetector emits a single `RemoveConstraint` for the drift. `test_queue_grants.py`: the two tests above.
+- **Mutation table:** see the PR body (run on this branch).
+- **Not in this PR:** the schema check and `manage.py check_tenancy_schema` (M4c-6b); isolation registry and EXPLAIN tests (M4c-7); the first real tenant table (M3d).
+- **Why:** spec v1.21 §4 conventions, §4.1 global list; plan `docs/plans/2026-11-01-m4-core.md` §3 M4c-6a (second half of the split, see M4c-6a-1).
+- **Alternatives rejected:** an exact match of existing tables to the list (the list names tables later milestones create); adding `unique (agency_id, id)` in `tenant_table()` SQL (Django would not know it, so `makemigrations --check` could not catch drift).
+- **Scope / affects:** `app/tenancy/models.py`, `app/tenancy/schema.py` (new), `app/tenancy/tests/test_template.py`, `app/jobs/tests/test_queue_grants.py`, `docs/DECISIONS.md`.
+- **Versions:** none new.
+- **Exception to a rule?** no.
+- **Decided by:** builder (deep tier, Opus 5.5), within plan M4c-6a and spec v1.21.
