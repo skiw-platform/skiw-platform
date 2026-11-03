@@ -1,6 +1,8 @@
 """`migrate` writes the two guard key tables from the host secret files (spec §4.1, §8.4 H4;
 plan M4c-3). `TenancyConfig.ready()` connects `write_guard_keys` to `post_migrate`, which every
-`migrate` run sends, even with nothing to apply; `migrate --plan` sends none.
+`migrate` run sends, even with nothing to apply; `migrate --plan` sends none. Django `flush` and
+pytest-django `transaction=True` teardown send it too, so it would run there and refuse as a
+non-migrator role; no test uses either today.
 
 One transaction, run only as `skiw_migrator` (checked before the first `SET ROLE`, because after
 it `current_user` is the owner). The migrator holds no grant on either table (M4c-2a), so every

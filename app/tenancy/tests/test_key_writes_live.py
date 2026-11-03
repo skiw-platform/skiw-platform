@@ -213,7 +213,6 @@ def test_no_key_plan_and_runtime_role_write_nothing(
 def test_no_standing_grant_carries_the_writes(table: str) -> None:
     assert migrate({1: new_key()}, {1: new_key()}).returncode == 0
     with connect() as conn:
-        assert conn.execute("SELECT current_user::text").fetchall() == [("skiw_migrator",)]
         query = sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier("guard", table))
         with pytest.raises(psycopg.errors.InsufficientPrivilege, match="permission denied"):
             conn.execute(query)
@@ -228,6 +227,17 @@ def test_owner_role_switches_and_resets_inside_a_transaction(role: str) -> None:
             ("skiw_migrator", "skiw_migrator")
         ]
         conn.rollback()
+
+
+@pytest.mark.parametrize("table", [MAC, DECOY])
+def test_owner_role_resets_when_the_block_raises_and_is_caught(table: str) -> None:
+    query = sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier("guard", table))
+    with connect() as conn, conn.cursor() as cursor:
+        with pytest.raises(LookupError), owner_role(cursor, OWNER[table]):
+            raise LookupError
+        assert cursor.execute("SELECT current_user::text").fetchall() == [("skiw_migrator",)]
+        with pytest.raises(psycopg.errors.InsufficientPrivilege, match="permission denied"):
+            cursor.execute(query)
 
 
 @pytest.mark.parametrize("role", sorted(GUARD_OWNERS))

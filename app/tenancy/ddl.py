@@ -19,7 +19,7 @@ from typing import Any
 
 import psycopg
 from django.db import migrations
-from psycopg import sql
+from psycopg import pq, sql
 
 # The closed list of guard object owners (spec D4, §4.1). Nothing else may own a guard object.
 GUARD_OWNERS = frozenset({"skiw_tenant_guard", "skiw_auth_lookup"})
@@ -27,17 +27,21 @@ GUARD_OWNERS = frozenset({"skiw_tenant_guard", "skiw_auth_lookup"})
 
 @contextmanager
 def owner_role(cursor: "psycopg.Cursor[Any]", role: str) -> Iterator[None]:
-    """Run the block as `role` (`SET LOCAL ROLE`), then `RESET ROLE`. Only inside an open
-    transaction: outside one `SET LOCAL` does nothing, so the check after it raises. On an error
-    the block's transaction rolls back, which undoes the `SET LOCAL` too, so no reset is sent."""
+    """Run the block as `role` (`SET LOCAL ROLE`), then `RESET ROLE`, also when the block raises.
+    Only inside an open transaction: outside one `SET LOCAL` does nothing, so the check after it
+    raises. If the transaction is in error no reset is sent: only a rollback can follow, and it
+    undoes the `SET LOCAL` too."""
     if role not in GUARD_OWNERS:
         raise ValueError(f"owner_role: {role!r} is not a guard owner role")
     cursor.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
     row = cursor.execute("SELECT current_user::text").fetchone()
     if row is None or row[0] != role:
         raise RuntimeError(f"owner_role: current_user is not {role}; open a transaction first")
-    yield
-    cursor.execute("RESET ROLE")
+    try:
+        yield
+    finally:
+        if cursor.connection.info.transaction_status != pq.TransactionStatus.INERROR:
+            cursor.execute("RESET ROLE")
 
 
 def as_owner(role: str, statements: Sequence[str], reverse: Sequence[str]) -> migrations.RunSQL:
