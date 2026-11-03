@@ -2,6 +2,7 @@ import base64
 import binascii
 import os
 import re
+import uuid
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
 
@@ -23,6 +24,9 @@ STRICT_SSL_MODES = ("verify-ca", "verify-full")
 KEY_LINE = re.compile(r"v([1-9][0-9]{0,5}):([A-Za-z0-9+/]+={0,2})")
 WHOLE_NUMBER = re.compile(r"[0-9]{1,6}")  # ASCII digits only: int() also takes "+1", "1_0", " 1"
 MIN_KEY_BYTES = 32  # bootstrap-secrets mints 32 random bytes per key version (spec §8.4 H4)
+# One canonical lowercase uuid: no list, braces, urn: prefix or upper case (PROJECT §9 gate).
+AGENCY_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+AGENCY_NAME_MAX = 200  # tenancy.Agency.name max_length
 
 
 def require(name: str) -> str:
@@ -155,3 +159,21 @@ def database(require_tls: bool = False) -> dict[str, Any]:
             raise InvalidSettingError("DATABASE_PASSWORD_FILE must hold exactly one non-empty line")
         config["PASSWORD"] = password
     return config
+
+
+def deployment_agency() -> tuple[uuid.UUID, str]:
+    """The one deployment agency (plan M4c-5, Q2 (a)): SKIW_DEPLOYMENT_AGENCY_ID, exactly one
+    uuid while PROJECT §9's second-agency gate is locked, and SKIW_DEPLOYMENT_AGENCY_NAME."""
+    raw = os.environ.get("SKIW_DEPLOYMENT_AGENCY_ID", "")
+    if AGENCY_ID.fullmatch(raw) is None:
+        raise ImproperlyConfigured(
+            "SKIW_DEPLOYMENT_AGENCY_ID must be exactly one lowercase uuid (a second agency is"
+            " gated, PROJECT §9)"
+        )
+    name = os.environ.get("SKIW_DEPLOYMENT_AGENCY_NAME", "")
+    if not 0 < len(name) <= AGENCY_NAME_MAX or name != name.strip() or not name.isprintable():
+        raise ImproperlyConfigured(
+            f"SKIW_DEPLOYMENT_AGENCY_NAME must be 1 to {AGENCY_NAME_MAX} printable characters,"
+            " with no leading or trailing space"
+        )
+    return uuid.UUID(raw), name

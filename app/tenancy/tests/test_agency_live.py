@@ -1,11 +1,16 @@
-"""The tenant root `agency` (spec §4.1, §4.2 schema check (2); plan M4c-5). A and B are committed
-by `insert_agency` before each test and kept (no test flushes), until test_guard_schema_live's
-migrate-back drops the table. Rows are read as skiw_app through with_agency(), or as the migrator
-inside a rolled-back NO FORCE block."""
+"""The tenant root `agency` and the migrate-time seed (spec §4.1, §4.2 schema check (2); plan
+M4c-5, owner Q2 (a); PROJECT §9 second-agency gate). X is the configured agency `make migrate`
+seeded; A and B are committed by `insert_agency` before each test and kept (no test flushes; plan
+M4c-5), until test_guard_schema_live's migrate-back drops the table and the seed refills it with X
+only. Rows are read as skiw_app through with_agency(), or as the migrator inside a rolled-back
+NO FORCE block."""
 
 import os
+import subprocess
+import sys
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -18,9 +23,14 @@ from tenancy.binding import with_agency
 
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 
+MANAGE = Path(__file__).resolve().parents[2] / "manage.py"
 A = uuid.UUID("aaaaaaaa-0000-4000-8000-0000000000a1")
 B = uuid.UUID("bbbbbbbb-0000-4000-8000-0000000000b1")
 PREDICATE = "(id = ( SELECT guard.current_agency() AS current_agency))"
+
+
+def configured() -> uuid.UUID:
+    return uuid.UUID(os.environ["SKIW_DEPLOYMENT_AGENCY_ID"])
 
 
 def migrator() -> psycopg.Connection[Any]:
@@ -44,6 +54,12 @@ def visible() -> list[uuid.UUID]:
     with connection.cursor() as cursor:
         cursor.execute("SELECT id FROM agency ORDER BY id")
         return [agency for (agency,) in cursor.fetchall()]
+
+
+def migrate(**env: str) -> subprocess.CompletedProcess[str]:
+    run_env = {**os.environ, "DATABASE_URL": os.environ["MIGRATION_DATABASE_URL"], **env}
+    command = [sys.executable, str(MANAGE), "migrate"]
+    return subprocess.run(command, env=run_env, capture_output=True, text=True, check=False)
 
 
 @pytest.fixture(autouse=True)
@@ -101,9 +117,94 @@ def test_writes_refuse_autocommit() -> None:
     assert forced()
 
 
+def test_make_migrate_seeded_the_configured_agency() -> None:
+    with with_agency(configured()), connection.cursor() as cursor:
+        cursor.execute("SELECT id, name, timezone, data_region FROM agency")
+        rows = cursor.fetchall()
+    assert rows == [
+        (configured(), os.environ["SKIW_DEPLOYMENT_AGENCY_NAME"], "Asia/Kuala_Lumpur", "MY")
+    ]
+
+
+def test_the_seed_is_idempotent() -> None:
+    before = stored()
+    with migrator() as conn, conn.transaction(), conn.cursor() as cursor:
+        assert seed.seed_deployment_agency(cursor, configured(), "ignored") is False
+    assert stored() == before and forced()
+    assert migrate().returncode == 0
+    assert stored() == before and forced()
+
+
+def test_an_empty_table_gets_the_configured_agency() -> None:
+    """The branch every fresh database takes (CI's first `make migrate`), here inside a
+    transaction that empties the table and rolls back."""
+    other = uuid.uuid4()
+    with migrator() as conn, conn.transaction(force_rollback=True), conn.cursor() as cursor:
+        seed._lift(cursor)
+        cursor.execute("DELETE FROM agency")
+        seed._restore(cursor)
+        assert seed.seed_deployment_agency(cursor, other, "Fresh") is True
+        seed._lift(cursor)
+        assert seed.stored_ids(cursor) == {other}
+        seed._restore(cursor)
+    assert other not in stored()
+
+
+def test_a_seed_failure_after_no_force_leaves_force_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(cursor: Any) -> set[uuid.UUID]:
+        assert cursor.execute("SELECT relforcerowsecurity FROM pg_class WHERE relname = 'agency'")
+        raise RuntimeError("injected")
+
+    monkeypatch.setattr(seed, "stored_ids", fail)
+    with (
+        pytest.raises(RuntimeError, match="injected"),
+        migrator() as conn,
+        conn.transaction(),
+        conn.cursor() as cursor,
+    ):
+        seed.seed_deployment_agency(cursor, uuid.uuid4(), "Never")
+    assert forced()
+
+
+def test_a_second_agency_id_stops_migrate_and_writes_nothing() -> None:
+    before, other = stored(), uuid.uuid4()
+    result = migrate(SKIW_DEPLOYMENT_AGENCY_ID=str(other))
+    assert result.returncode != 0
+    assert str(other) in result.stderr and "PROJECT §9" in result.stderr
+    assert stored() == before and other not in before
+    assert forced()
+
+
+@pytest.mark.parametrize("value", ["", "not-a-uuid", "LIST"], ids=["empty", "malformed", "list"])
+def test_a_missing_list_or_malformed_id_stops_migrate(value: str) -> None:
+    before = stored()
+    if value == "LIST":
+        value = f"{configured()},{uuid.uuid4()}"
+    result = migrate(SKIW_DEPLOYMENT_AGENCY_ID=value)
+    assert result.returncode != 0 and "SKIW_DEPLOYMENT_AGENCY_ID" in result.stderr
+    assert stored() == before
+
+
+def test_the_seed_refuses_a_non_migrator_role() -> None:
+    with (
+        psycopg.connect(os.environ["DATABASE_URL"]) as conn,
+        conn.cursor() as cursor,
+        pytest.raises(CommandError, match="only as skiw_migrator"),
+    ):
+        seed.seed_deployment_agency(cursor, configured(), "x")
+
+
+def test_the_seed_refuses_autocommit() -> None:
+    with migrator() as conn:
+        conn.autocommit = True
+        with pytest.raises(RuntimeError, match="inside a transaction"):
+            seed.seed_deployment_agency(conn.cursor(), configured(), "x")
+    assert forced()
+
+
 def test_skiw_app_sees_only_the_bound_agency() -> None:
     assert visible() == []  # no token: the verifier gives NULL
-    for agency in (A, B):
+    for agency in (A, B, configured()):
         with with_agency(agency):
             assert visible() == [agency]
 

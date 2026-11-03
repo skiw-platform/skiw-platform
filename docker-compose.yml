@@ -44,6 +44,8 @@ services:
       SKIW_TOTP_SKEW_STEPS: ${SKIW_TOTP_SKEW_STEPS:?set in .env}
       SKIW_LOGIN_PENDING_MIN: ${SKIW_LOGIN_PENDING_MIN:?set in .env}
       SKIW_ENROL_LINK_MIN: ${SKIW_ENROL_LINK_MIN:?set in .env}
+      SKIW_DEPLOYMENT_AGENCY_ID: ${SKIW_DEPLOYMENT_AGENCY_ID:?set in .env}
+      SKIW_DEPLOYMENT_AGENCY_NAME: ${SKIW_DEPLOYMENT_AGENCY_NAME:?set in .env}
       LOGIN_BLOB_KEY: ${LOGIN_BLOB_KEY:?set in .env}
       TENANT_TOKEN_KEY: ${TENANT_TOKEN_KEY:?set in .env}
     volumes:
@@ -76,6 +78,8 @@ services:
       SKIW_TOTP_SKEW_STEPS: ${SKIW_TOTP_SKEW_STEPS:?set in .env}
       SKIW_LOGIN_PENDING_MIN: ${SKIW_LOGIN_PENDING_MIN:?set in .env}
       SKIW_ENROL_LINK_MIN: ${SKIW_ENROL_LINK_MIN:?set in .env}
+      SKIW_DEPLOYMENT_AGENCY_ID: ${SKIW_DEPLOYMENT_AGENCY_ID:?set in .env}
+      SKIW_DEPLOYMENT_AGENCY_NAME: ${SKIW_DEPLOYMENT_AGENCY_NAME:?set in .env}
       LOGIN_BLOB_KEY: ${LOGIN_BLOB_KEY:?set in .env}
       TENANT_TOKEN_KEY: ${TENANT_TOKEN_KEY:?set in .env}
     # The image's HEALTHCHECK probes the web port, which the worker does not serve.

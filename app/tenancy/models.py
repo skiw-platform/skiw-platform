@@ -1,6 +1,7 @@
 """The tenant root (spec §4.1 `agency`; plan M4c-5). Its RLS policies and grant are in
-tenancy/0004. Outside tests nothing writes it yet: the migrate-time seed follows in M4c-5-2.
-Django sends `post_migrate` only for apps that have a models module, and tenancy.keys needs it."""
+tenancy/0004. Outside tests only the migrate-time seed (tenancy.seed) writes it. Django sends
+`post_migrate` only for apps that have a models module, and tenancy.keys and tenancy.seed need
+it."""
 
 from django.db import models
 

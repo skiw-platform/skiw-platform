@@ -44,6 +44,8 @@ x-app-env: &app-env
   SKIW_TOTP_SKEW_STEPS: ${SKIW_TOTP_SKEW_STEPS:?}
   SKIW_LOGIN_PENDING_MIN: ${SKIW_LOGIN_PENDING_MIN:?}
   SKIW_ENROL_LINK_MIN: ${SKIW_ENROL_LINK_MIN:?}
+  SKIW_DEPLOYMENT_AGENCY_ID: ${SKIW_DEPLOYMENT_AGENCY_ID:?}  # /readyz (M4c-5-3)
+  SKIW_DEPLOYMENT_AGENCY_NAME: ${SKIW_DEPLOYMENT_AGENCY_NAME:?}
   # web and worker only: migrate mounts neither key (H4); settings read them lazily.
   TENANT_SOURCE_KEY_FILE: /run/secrets/tenant_source_key
   LOGIN_BLOB_KEY_FILE: /run/secrets/login_blob_key
@@ -128,6 +130,9 @@ services:
       SKIW_TOTP_SKEW_STEPS: ${SKIW_TOTP_SKEW_STEPS:?}
       SKIW_LOGIN_PENDING_MIN: ${SKIW_LOGIN_PENDING_MIN:?}
       SKIW_ENROL_LINK_MIN: ${SKIW_ENROL_LINK_MIN:?}
+      # The agency seed after every migrate (tenancy.seed, plan M4c-5).
+      SKIW_DEPLOYMENT_AGENCY_ID: ${SKIW_DEPLOYMENT_AGENCY_ID:?}
+      SKIW_DEPLOYMENT_AGENCY_NAME: ${SKIW_DEPLOYMENT_AGENCY_NAME:?}
       # The guard key writes after every migrate (tenancy.keys, plan M4c-3).
       TENANT_TOKEN_KEY_FILE: /run/secrets/tenant_token_key
       LOOKUP_DECOY_KEY_FILE: /run/secrets/lookup_decoy_key
