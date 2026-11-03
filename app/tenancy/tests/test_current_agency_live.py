@@ -5,6 +5,8 @@ skiw_app on a plain psycopg connection; `with_agency()` (M4c-4b) is not used yet
 The vector key goes in under two high test versions, one active and one retired, committed as the
 owner (skiw_app sees only committed rows) and deleted again by the fixture."""
 
+import base64
+import importlib
 import os
 import uuid
 from collections.abc import Iterator
@@ -16,7 +18,14 @@ from django.conf import settings
 
 from tenancy import token
 from tenancy.ddl import owner_role
-from tenancy.tests.test_token import VECTOR_AGENCY, VECTOR_KEY
+from tenancy.tests.test_token import (
+    VECTOR,
+    VECTOR_AGENCY,
+    VECTOR_DATABASE,
+    VECTOR_INPUT,
+    VECTOR_KEY,
+    VECTOR_XID,
+)
 
 pytestmark = pytest.mark.live
 
@@ -86,10 +95,44 @@ def test_a_token_under_the_migrate_written_key_gives_its_agency() -> None:
 
 
 @pytest.mark.usefixtures("vector_keys")
-def test_the_verifier_reproduces_the_vector_and_refuses_retired_and_absent_versions() -> None:
+def test_the_verifier_accepts_the_vector_key_and_refuses_retired_and_absent_versions() -> None:
     assert verify(vector(ACTIVE)) == VECTOR_AGENCY
     assert verify(vector(RETIRED)) is None
     assert verify(vector(ABSENT)) is None
+
+
+MIGRATION = importlib.import_module("tenancy.migrations.0003_current_agency")
+DATABASE = "pg_catalog.current_database()::text"
+
+
+def sql_mac_input(database: str, agency: uuid.UUID, xid: int) -> tuple[bytes, bytes]:
+    """The migration's own MAC-input expression, evaluated by PostgreSQL with literal inputs (the
+    database name swapped for a parameter), and `guard.hmac` over it under the vector key."""
+    assert MIGRATION.MAC_INPUT.count(DATABASE) == 2  # the length prefix and the value
+    expression = MIGRATION.MAC_INPUT.replace(DATABASE, "v.database")
+    query: LiteralString = (
+        f"SELECT m, guard.hmac(m, %s, 'sha256') FROM (SELECT {expression} AS m FROM (SELECT"  # noqa: S608 - the migration's constant
+        " %s::text AS database, %s::uuid AS agency, %s::pg_catalog.xid8 AS xact) v) w"
+    )
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        row = conn.execute(query, (VECTOR_KEY, database, str(agency), str(xid))).fetchone()
+    assert row is not None
+    return bytes(row[0]), bytes(row[1])
+
+
+def test_the_sql_encoding_reproduces_the_committed_vector() -> None:
+    """Spec v1.21 §4.2 item 2: both implementations reproduce the committed bytes."""
+    data, mac = sql_mac_input(VECTOR_DATABASE, VECTOR_AGENCY, VECTOR_XID)
+    assert data.hex() == VECTOR_INPUT
+    assert mac == base64.urlsafe_b64decode(VECTOR.rsplit(".", 1)[1] + "=")
+
+
+def test_the_sql_encoding_matches_the_minter_on_a_multibyte_name_and_the_largest_xid() -> None:
+    data, mac = sql_mac_input("é-skiw", OTHER, 2**64 - 1)
+    assert data == token.mac_input("é-skiw", OTHER, 2**64 - 1)
+    assert token.mint(1, VECTOR_KEY, "é-skiw", OTHER, 2**64 - 1).endswith(
+        "." + base64.urlsafe_b64encode(mac).rstrip(b"=").decode()
+    )
 
 
 def swap_mac(text: str, mac: str) -> str:
