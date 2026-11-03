@@ -136,6 +136,17 @@ def test_bad_names_and_arguments_are_refused(table: str, kwargs: dict[str, objec
         tenant_table(table, **{"commands": ALL, **kwargs})  # type: ignore[arg-type]
 
 
+def test_the_name_limit_is_63_at_the_longest_derived_name() -> None:
+    """`t_<column>_fk` is the longest name here: 63 characters is accepted, 64 refused (Postgres
+    truncates a 64th character with only a NOTICE)."""
+    fits, over = "c" * 58, "c" * 59
+    (_, (forward, _), *_) = steps("t", commands=ALL, composite_fks=[(fits, "p")])
+    assert f"ADD CONSTRAINT t_{fits}_fk " in forward[0]
+    assert len(f"t_{fits}_fk") == 63
+    with pytest.raises(ValueError, match="constraint"):
+        tenant_table_sql("t", commands=ALL, composite_fks=[(over, "p")])
+
+
 def test_the_migration_linter_passes_both_directions() -> None:
     pairs = steps("client_note", commands=ALL, composite_fks=[("client_id", "client")])
     for forward, reverse in pairs:
