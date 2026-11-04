@@ -1,5 +1,6 @@
 """`accounts.auth.login.login()` on the real session store (plan M3 §3 M3d; carry-overs (d) and
-(i)). A user object is enough: login() reads no table."""
+(i)). A user object is enough for a login over a session that holds none; a login over an
+authenticated session writes a marker, which needs the committed user."""
 
 import uuid
 from datetime import timedelta
@@ -13,7 +14,7 @@ from accounts.auth.login import AGENCY, AUTH_AT, FACTOR, SEEN_AT, USER, login
 from accounts.session import SessionStore
 from accounts.user_model import AppUser
 
-from .conftest import Clock, absolute, row_deadline
+from .conftest import Clock, absolute, committed_user, row_deadline
 from .test_session_hmac_live import assert_rejected, data_of, get, set_data, started
 
 pytestmark = [
@@ -70,7 +71,7 @@ def test_login_rotates_the_csrf_token() -> None:
 
 
 def test_the_same_users_session_keeps_its_data_and_another_users_is_flushed() -> None:
-    user, other = a_user(), a_user()
+    user, other = committed_user(), committed_user()
     _, key = logged_in(started(), user)
     _, again = logged_in(key, user)
     assert again != key and SessionStore(again).get("probe")  # rotated, data kept

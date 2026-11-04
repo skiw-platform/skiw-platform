@@ -157,6 +157,9 @@ LOGGING = {
     },
     "root": {"handlers": ["stderr"], "level": "WARNING"},
     "loggers": {
+        # Django's default `console` handler (DEBUG on, the local default) prints tracebacks with
+        # the stock Formatter, messages included; `django` propagates to root instead.
+        "django": {"handlers": [], "level": "INFO"},
         "django.security": {"handlers": ["stderr"], "level": "WARNING", "propagate": False},
         "django.request": {"handlers": ["stderr"], "level": "ERROR", "propagate": False},
     },

@@ -173,16 +173,19 @@ def test_a_credential_id_belongs_to_one_factor(cursor: CursorWrapper) -> None:
 
 
 def test_a_revocation_marks_one_session_or_the_whole_user(cursor: CursorWrapper) -> None:
+    """`revoked_at` is the insert's own statement time, not the transaction's start (PR 104 R1):
+    after a sleep in the same transaction it is later than now(). The user-wide check counts a
+    session signed in at or before it as revoked, so a later time only revokes more."""
     user = add_user(cursor)
     for key_hash in (KEY_HASH, None):
+        cursor.execute("SELECT pg_sleep(0.01)")
         row = add_revocation(cursor, user, key_hash)
         cursor.execute(
-            # Django's Now() is STATEMENT_TIMESTAMP(): the insert's own time, not the xact's.
-            "SELECT session_key_hash, revoked_at BETWEEN now() AND statement_timestamp()"
+            "SELECT session_key_hash, revoked_at > now(), revoked_at < statement_timestamp()"
             " FROM session_revocation WHERE id = %s",
             [row],
         )
-        assert cursor.fetchall() == [(key_hash, True)]
+        assert cursor.fetchall() == [(key_hash, True, True)]
 
 
 @pytest.mark.parametrize(

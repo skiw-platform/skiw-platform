@@ -11,8 +11,9 @@ rules:
         - /app/accounts/auth/login.py
         - /app/accounts/session.py
         - /app/accounts/tests/
+    # The attribute, not only its call: a bound-method alias is caught too (PR 106 review R1 P3 #2).
     pattern-either:
-      - pattern: $SESSION.start_new_lifetime(...)
-      - pattern: $SESSION.astart_new_lifetime(...)
+      - pattern: $SESSION.start_new_lifetime
+      - pattern: $SESSION.astart_new_lifetime
       - pattern: getattr($SESSION, "start_new_lifetime")
       - pattern: getattr($SESSION, "astart_new_lifetime")
