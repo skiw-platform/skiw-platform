@@ -860,3 +860,52 @@
 - **Versions:** none new.
 - **Exception to a rule?** no.
 - **Decided by:** builder (deep tier, Opus 5.5) within plan M3d.
+
+## 2026-11-04 — M3d-2b2: `authorized_action` (AUTH-01 order, idle timeout, the `status` and revocation checks)
+- **Split (see the M3d-2b1 entry):** with every item the M3d-2b1 entry gave it, M3d-2b2 came to 524 added lines of code and tests. Two changes bring it to ≈ 450: (1) the registration checks move to **M3d-2b3** with the route registry that needs them — refusing an empty `permission`, refusing an async handler, and a `TypeError` when the session is not the accounts store (until then, `SESSION_ENGINE` is the only thing that makes it the accounts store); (2) the end-to-end login-rotation test is dropped, because M3d-2b1's `test_revoke_live.py` covers the marker, and the idle and user-wide tests here cover a put-back row being refused through the wrapper. `skiw_action` itself stays here, so `permission` is not a dead parameter.
+- **Decision:**
+  - `app/accounts/auth/wrapper.py` `authorized_action(*, schema, permission)` decorates a sync handler `handler(request, signed, data)`. `Signed` (user id, agency id, factor, `auth_at`, `seen_at`) comes from the session only. `schema` is the action's own validator (owner Q3 (a)): it takes the parsed body and returns the handler's `data`, or raises `InvalidInput`. The view carries `skiw_action = permission`, which `functools.wraps` and `route()`'s `require_http_methods` keep.
+  - **Order (AUTH-01), each step a JSON `{"error": <code>}` answer:**
+    1. Session: `_skiw_user`, `_skiw_agency`, `_skiw_auth_at` and `_skiw_seen_at` present and parseable, else 401 `signed-out`. M3e's pending keys have other names, so a pending session is signed out here.
+    2. Tenant, in one `with_agency(<session's _skiw_agency>)`:
+       - idle (`now − _skiw_seen_at ≥ SKIW_SESSION_IDLE_MIN`): a key marker, then a flush, in the same transaction; 401 `idle`;
+       - the user is not `active`, or `revoked()`: a flush, 401 `signed-out`. A user who is not `active` gets no marker: status, not the marker, refuses them. So the flow that disables a user (M4-rest "Manage staff") must also call `revoke_user()`, or a put-back row works again once the user is active again.
+    3. Role/permission, interim until M4-rest (owner Q9 (a)): `_skiw_factor` must be a `user_factor` kind, else 403 `forbidden`. This doesn't log out. AUTH-03 is n/a until the §6 matrix exists; `permission` names the entry M4-rest will check.
+    4. Input (UNI-03): `GET`/`HEAD`/`OPTIONS` give the schema `{}`; any other method needs `Content-Type: application/json` and a JSON object (UTF-8). Anything else, or `InvalidInput`, is 400 `invalid` with no detail.
+    5. Idempotency: no M3 action needs it.
+    6. The handler, inside the same `with_agency()` transaction; an exception rolls it back.
+  - `_skiw_seen_at` is refreshed when it is ≥ 1 minute old (plan [A]), because each write re-seals the row. The session middleware saves it after the response. Django's `save()` on an existing key is `force_update` and raises `UpdateError` when the row is gone (`django/contrib/sessions/backends/db.py:114`, 5.2.17), so a refresh cannot bring back a row that a logout in another request deleted.
+  - The agency is never read from the request (TEN-11): the body, the query and headers are ignored for the binding and for `Signed`.
+  - `accounts` may not import `config` (import-linter), so the wrapper keeps its own `SAFE_METHODS`; M3d-2b3's registry test pins it against `config.routes.SAFE_METHODS`.
+- **Tests:**
+  - `app/accounts/tests/urls.py` gains a test-only `action` view. It records what it saw in `SEEN` (the `Signed`, the data, and `guard.current_agency()` inside the handler) instead of echoing it; CI's `reflected-data-httpresponse` rule would flag an echo.
+  - `app/accounts/tests/test_action_wrapper_live.py` (26 cases, committed users, kept):
+    - the handler gets the session's user, agency and factor, and the database binding is the session's agency;
+    - no session, or a session without a login: 401;
+    - **AUTH-01 order:** a request that fails a step and every later one gets that step's answer, and the handler never runs; only the tenant step logs out;
+    - not `active` (invited, disabled): 401 and the cookie deleted;
+    - an unknown or missing factor: 403 and still signed in;
+    - six bodies refused with 400: an array, a string, truncated JSON, non-UTF-8, a schema refusal, and JSON sent as a form;
+    - a safe method gives the schema `{}`;
+    - **TEN-11:** a forged agency in the query, the body and three headers is ignored (agency B exists); variant (i) through the wrapper: a row whose `_skiw_agency` was re-signed with `SECRET_KEY` is 401 and logged out;
+    - **idle** (frozen clock): 1 µs before the limit passes; at the limit, a marker and a logout; the saved row put back with a fresh idle clock is then refused as revoked;
+    - `_skiw_seen_at` is not written at 59 s, and is written at 60 s;
+    - **absolute 12 h:** activity every 29 minutes never moves the deadline, and the session ends at it;
+    - **user-wide marker:** two older sessions and one at exactly `revoked_at` are refused, also when their rows are put back; one 1 µs later passes. The web clock is set from the marker's own `revoked_at`;
+    - a failed idle marker (a key hash that breaks the CHECK) leaves the session alive.
+- **Mutants (bytecode off):** 19 killed, none survived:
+  - idle `>` for `≥`; no idle marker; no idle flush; idle measured from `_skiw_auth_at`;
+  - no status check; `invited` accepted; no revocation check; no flush on refusal;
+  - no role check; role checked after input;
+  - safe methods parse a body; no content-type check; no object check;
+  - refresh `>` for `≥`; never refresh; always refresh;
+  - the binding taken from the query; no `skiw_action`; the handler run outside `with_agency()`.
+  - Two `_signed()` checks (time zone present, a session key present) survived and were removed: a row that fails the MAC loads empty with no key, and only `login()` writes these keys, with UTC-aware times.
+- **Why:** spec D6 (idle 30 min, absolute 12 h), T5; AUTH-01, AUTH-02 (no middleware gate), AUTH-07, TEN-09, TEN-11, UNI-03; plan M3 §3 M3d and §4 M3d row; owner Q3 (a), Q9 (a).
+- **Alternatives rejected:**
+  - a 401 `signed-out` for idle as well: the SPA needs to tell "you were away" apart from a revoked session, and neither code says more than that;
+  - logging out on a 403: a missing factor is not an attack on the session, and M4-rest's real permission check must not sign people out.
+- **Scope / affects:** `app/accounts/auth/wrapper.py` (new), `app/accounts/tests/{urls.py,test_action_wrapper_live.py (new)}`, `docs/DECISIONS.md`.
+- **Versions:** none new.
+- **Exception to a rule?** no.
+- **Decided by:** builder (deep tier, Opus 5.5) within plan M3d.
