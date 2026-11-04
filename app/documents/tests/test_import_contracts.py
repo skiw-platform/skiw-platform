@@ -2,7 +2,8 @@
 edge, plan M3a, owner Q10 (a)) import-linter contracts fail on a planted import (UNI-04, TEN-10).
 
 lint-imports runs with this repository's own pyproject.toml on a stub tree that has every root
-package, so the contract text under test is exactly the one CI uses."""
+package, so the contract text under test is exactly the one CI uses. The stub tree has the one
+allowed edge too: since M3e-2b an unmatched `ignore_imports` entry is an error, not a warning."""
 
 import os
 import shutil
@@ -17,6 +18,9 @@ ROOTS = ("config", "health", "shell", "jobs", "documents", "accounts", "tenancy"
 STORAGE = "Only documents may import documents.storage, the files volume module (UNI-04)"
 NO_DB = "documents.storage and documents.clamd touch no database (TEN-10)"
 SESSION = "Only accounts may import the session store and its model (TEN-10)"
+# accounts.views stands in for the login views: it reaches the store, as accounts.auth does.
+VIEWS = {"accounts/views.py": "import accounts.session\n"}
+URLS = "from accounts import views\n"
 
 
 def lint(tmp_path: Path, plant: dict[str, str]) -> str:
@@ -30,7 +34,7 @@ def lint(tmp_path: Path, plant: dict[str, str]) -> str:
     (tmp_path / "accounts" / "session.py").write_text("from accounts import session_model\n")
     (tmp_path / "accounts" / "models.py").write_text("from accounts.session_model import *\n")
     (tmp_path / "jobs" / "uses.py").write_text("import psycopg\nimport procrastinate\n")
-    for path, source in plant.items():
+    for path, source in {**VIEWS, "config/urls.py": URLS, **plant}.items():
         (tmp_path / path).write_text(source)
     command = [str(Path(sys.executable).parent / "lint-imports"), "--no-cache"]
     env = {**os.environ, "PYTHONPATH": str(tmp_path)}
@@ -69,36 +73,39 @@ def test_a_planted_session_store_import_breaks_the_contract(
     assert f"{SESSION} BROKEN" in out
 
 
-# accounts.views stands in for the login views: it reaches the store, as accounts.auth will.
-VIEWS = {"accounts/views.py": "import accounts.session\n"}
-
-
 def test_config_urls_may_import_accounts_views(tmp_path: Path) -> None:
-    out = lint(tmp_path, {**VIEWS, "config/urls.py": "from accounts import views\n"})
+    out = lint(tmp_path, {})
     assert f"{SESSION} KEPT" in out and "0 broken" in out
+
+
+def test_an_ignore_that_matches_nothing_fails_the_lint(tmp_path: Path) -> None:
+    """If config.urls stops importing accounts.views, the stale allowance must be removed."""
+    out = lint(tmp_path, {"config/urls.py": ""})
+    assert "No matches for ignored import config.urls -> accounts.views" in out
+    assert "KEPT" not in out
 
 
 @pytest.mark.parametrize(
     "source",
     [
         "import accounts.session\n",
+        "from accounts.session import SessionStore\n",
+        "import accounts.models\n",
         "from accounts import models\n",
-        "from accounts import views\nfrom accounts.session import SessionStore\n",
-        "from accounts import views\nimport accounts.models\n",
     ],
-    ids=["store", "models", "views-and-store", "views-and-models"],
+    ids=["store", "store-name", "models", "models-module"],
 )
 def test_config_urls_reaching_the_store_another_way_breaks_the_contract(
     tmp_path: Path, source: str
 ) -> None:
-    assert f"{SESSION} BROKEN" in lint(tmp_path, {**VIEWS, "config/urls.py": source})
+    assert f"{SESSION} BROKEN" in lint(tmp_path, {"config/urls.py": URLS + source})
 
 
 @pytest.mark.parametrize("module", ["config/other.py", "shell/planted.py", "jobs/planted.py"])
 def test_accounts_views_outside_config_urls_breaks_the_contract(
     tmp_path: Path, module: str
 ) -> None:
-    assert f"{SESSION} BROKEN" in lint(tmp_path, {**VIEWS, module: "from accounts import views\n"})
+    assert f"{SESSION} BROKEN" in lint(tmp_path, {module: URLS})
 
 
 # tenancy is the bottom layer (plan M4c-2a): it imports no app, config, host tooling or

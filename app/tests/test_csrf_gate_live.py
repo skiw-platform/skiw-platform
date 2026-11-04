@@ -27,6 +27,7 @@ from tests.test_csrf_gate import (
     ORIGIN,
     Pair,
     assert_csrf_refused,
+    assert_past_csrf,
     ids,
     send,
 )
@@ -64,8 +65,7 @@ def test_a_signed_in_browser_reaches_the_handler_with_the_rotated_token(
     response = send(
         signed_in.client, pair.method, pair.url, {"Origin": ORIGIN, "X-CSRFToken": signed_in.token}
     )
-    assert "X-Skiw-Csrf" not in response.headers
-    assert response.status_code < 300 or response.status_code in (400, 422)
+    assert_past_csrf(response, pair)
 
 
 # case -> (Origin, which token, the code config.csrf.failure sends)

@@ -1,3 +1,4 @@
+from accounts.views import login_password
 from config.routes import route
 from health.views import healthz
 from jobs.views import readyz
@@ -7,5 +8,6 @@ urlpatterns = [
     route("healthz", healthz, name="healthz", methods=("GET",), auth="cookie"),
     route("readyz", readyz, name="readyz", methods=("GET",), auth="cookie"),
     route("assets/<path:path>", asset, name="asset", methods=("GET",), auth="cookie"),
+    route("api/auth/login", login_password, name="auth-login", methods=("POST",), auth="cookie"),
     route("", shell, name="shell", methods=("GET",), auth="cookie"),
 ]
