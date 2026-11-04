@@ -134,6 +134,9 @@ FILES_SWEEP_AGE_S = 3600
 # session row, M2c) reached nothing on hosts. django.security goes to stderr (the container log);
 # the other default handlers and library loggers are kept (plan M3 (a)). django.request at ERROR
 # adds each 5xx (path and traceback) there too: its default was mail_admins with no ADMINS set.
+# The root logger gets the same handler, so every other logger (procrastinate.worker, the app's own)
+# reaches stderr through config.logs instead of Python's last-resort handler, which prints
+# exception messages (PR 103 review R1 P3 #1).
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -152,6 +155,7 @@ LOGGING = {
             "formatter": "plain",
         }
     },
+    "root": {"handlers": ["stderr"], "level": "WARNING"},
     "loggers": {
         "django.security": {"handlers": ["stderr"], "level": "WARNING", "propagate": False},
         "django.request": {"handlers": ["stderr"], "level": "ERROR", "propagate": False},

@@ -1,0 +1,18 @@
+rules:
+  - id: start-new-lifetime-login-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only accounts.auth.login renews a session's absolute deadline (spec D6, plan M3 §3 M3d):
+      start_new_lifetime() anywhere else would let a session outlive SKIW_SESSION_ABSOLUTE_H
+      without a new login. Call accounts.auth.login.login() after both factors are verified.
+    paths:
+      exclude:
+        - /app/accounts/auth/login.py
+        - /app/accounts/session.py
+        - /app/accounts/tests/
+    pattern-either:
+      - pattern: $SESSION.start_new_lifetime(...)
+      - pattern: $SESSION.astart_new_lifetime(...)
+      - pattern: getattr($SESSION, "start_new_lifetime")
+      - pattern: getattr($SESSION, "astart_new_lifetime")
