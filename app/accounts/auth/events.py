@@ -10,7 +10,8 @@ from collections.abc import Mapping
 from django.db import connection
 from django.utils import timezone
 
-KINDS = frozenset({"account.locked"})  # M3e adds the login and lookup kinds
+# login.lookup is written by guard.auth_lookup_login itself (accounts.0009), not from here.
+KINDS = frozenset({"account.locked", "login.failed"})
 DETAIL_NAME = re.compile(r"[a-z_]{1,32}", re.ASCII)
 
 

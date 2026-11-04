@@ -53,8 +53,12 @@ def verify(encoded: str, password: str) -> bool:
 
 def dummy_verify(password: str) -> None:
     """The same Argon2 work as `verify` with the current parameters, for an unknown account (M3e).
-    The first call after start-up also makes the dummy hash; M3e warms it before serving."""
+    `warm` makes the dummy hash at start-up, so no first call pays for it."""
     verify(_dummy_hash(*_parameters()), password)
+
+
+def warm() -> None:
+    _dummy_hash(*_parameters())
 
 
 def needs_rehash(encoded: str) -> bool:

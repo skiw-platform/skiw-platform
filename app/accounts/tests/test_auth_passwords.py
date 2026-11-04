@@ -8,6 +8,7 @@ from collections.abc import Iterator
 import pytest
 from argon2 import PasswordHasher, Type, extract_parameters
 from argon2.low_level import hash_secret
+from django.apps import apps
 from pytest_django import Settings
 
 from accounts.auth import blob, passwords
@@ -75,6 +76,13 @@ def test_dummy_verify_runs_one_verify_with_the_current_parameters(
     tiny.SKIW_ARGON2_MEMORY_KIB = 128
     passwords.dummy_verify("guess")
     assert extract_parameters(seen[2]).memory_cost == 128
+
+
+def test_the_app_makes_the_dummy_hash_before_any_request() -> None:
+    """Plan Risk 2: the first unknown-email login must not also pay for making the dummy hash."""
+    passwords._dummy_hash.cache_clear()
+    apps.get_app_config("accounts").ready()
+    assert passwords._dummy_hash.cache_info().currsize == 1
 
 
 def test_a_real_hash_at_the_lowest_allowed_values_fits_the_login_blob(
