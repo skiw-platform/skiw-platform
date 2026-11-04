@@ -2,8 +2,10 @@
 so a route is authorized only if its view is an `accounts.auth.wrapper.authorized_action` handler.
 Every route of the real URLconf is either wrapped (the view carries `skiw_action`, which
 `route()`'s `require_http_methods` keeps) or listed below as public with the reason it needs no
-login. A new route that is neither fails here; so does a stale or a contradictory entry."""
+login. A new route that is neither fails here; so does a stale or a contradictory entry. A list
+keyed on the route name only holds if each name is one route, so a name used twice fails too."""
 
+from collections import Counter
 from collections.abc import Mapping
 from importlib import import_module
 from typing import Any
@@ -30,10 +32,11 @@ PUBLIC_ROUTES: dict[str, str] = {
 
 def unauthorized(urlconf: str = URLCONF) -> list[str]:
     problems: list[str] = []
-    names: set[str] = set()
-    for name, pattern in walk(import_module(urlconf).urlpatterns):
+    found = list(walk(import_module(urlconf).urlpatterns))
+    names = Counter(name for name, _ in found)
+    problems += [f"{name}: name used by {n} routes" for name, n in names.items() if name and n > 1]
+    for name, pattern in found:
         label = name or str(pattern.pattern)
-        names.add(name)
         wrapped = getattr(pattern.callback, "skiw_action", None) is not None
         if wrapped and name in PUBLIC_ROUTES:
             problems.append(f"{label}: wrapped, but also listed in PUBLIC_ROUTES")
@@ -76,8 +79,21 @@ def test_a_wrapped_route_passes_through_route(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_a_wrapped_route_listed_as_public_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    added(monkeypatch, authorized_action(schema=anything, permission="test.x")(handler), "shell")
-    assert unauthorized() == ["shell: wrapped, but also listed in PUBLIC_ROUTES"]
+    added(monkeypatch, authorized_action(schema=anything, permission="test.x")(handler))
+    monkeypatch.setitem(PUBLIC_ROUTES, "added", "listed by mistake")
+    assert unauthorized() == ["added: wrapped, but also listed in PUBLIC_ROUTES"]
+
+
+def test_an_unwrapped_route_named_like_a_public_one_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PR 109 R1 P2 #1: keyed on the name alone, it would pass as the public `healthz`."""
+    added(monkeypatch, lambda request: HttpResponse(), "healthz")
+    assert unauthorized() == ["healthz: name used by 2 routes"]
+
+
+def test_two_wrapped_routes_sharing_a_name_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    for permission in ("test.one", "test.two"):
+        added(monkeypatch, authorized_action(schema=anything, permission=permission)(handler))
+    assert unauthorized() == ["added: name used by 2 routes"]
 
 
 def test_a_stale_public_entry_fails(monkeypatch: pytest.MonkeyPatch) -> None:
