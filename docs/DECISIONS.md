@@ -722,3 +722,16 @@
 - **Versions:** none new.
 - **Exception to a rule?** no.
 - **Decided by:** builder (deep tier, Opus 5.5), within plan M4c-6b and spec v1.21.
+
+## 2026-11-04 — M4c-6b-2: `check_tenancy_schema` in the migrate step
+- **Decision:** `manage.py check_tenancy_schema` (`app/tenancy/management/commands/`) runs `check()` on the default connection, writes each violation as `<table>: <reason>` to stderr and raises `CommandError("tenancy schema check: <n> violations")`; on none it prints `tenancy schema check: ok`. It runs with no `extra_allowed`, so a leftover test probe table fails it. It is the last line of `make migrate` (so CI's `test-live` fails on a bad schema) and, in `skiw-deploy`, a separate step in the new image right after `migrate`, bounded by `TOOL_S` (120 s, read-only catalog queries). A failure stops the deploy before the state write and the switch; the old digest keeps serving, the migrations stay applied (never reversed), and the tool's output is withheld like every other step.
+- **`make db-test`:** db up, `make migrate` (which ends with the check), `pytest -m live app/tenancy`, then the check again on the schema the fixtures leave (every fixture rolls back, so this proves they leave nothing behind). PROJECT §7's `pending M4` line is unchanged: changing it is the owner's call (ASK).
+- **PR 99 R1 P3:** `test_check_live.py` gains one case per root rule on the real `agency` (restrictive policy dropped, `agency_id` added, primary key replaced by a unique constraint) and the policy rules on a listed global (`bridge_session` with a `current_setting` policy and a PUBLIC `true` policy).
+- **Tests:** `test_check_command_live.py` (2): a clean schema prints the ok line and nothing on stderr; violations are printed one per line and fail the command. `test_deploy.py`: the step order and bounds now include `check_tenancy_schema`; a failed check exits 1 after `migrate`, before any `up -d`, with the old digest still serving, the journal naming the step, and no table name on stderr. `test_check_live.py`: 22.
+- **Runbooks:** `host-rebuild.md` "The tenancy schema check (M4c-6b)" (on failure the table stays, fix forward, never reverse on the host); `deploy.md` step 4.
+- **Why:** spec v1.21 §4.2 "Schema check (M4)"; plan `docs/plans/2026-11-01-m4-core.md` §3 M4c-6b (second half of the split, see M4c-6b-1).
+- **Alternatives rejected:** running the check inside `migrate` as a post-migrate signal (it would run on every test database setup and on `migrate --plan`); unbounded like `migrate` (the check writes nothing, so killing it leaves nothing running).
+- **Scope / affects:** `app/tenancy/management/` (new), `app/tenancy/tests/test_check_command_live.py` (new), `app/tenancy/tests/test_check_live.py`, `Makefile`, `infra/host/skiw_host/deploy.py`, `infra/host/tests/test_deploy.py`, `docs/runbooks/host-rebuild.md`, `docs/runbooks/deploy.md`, `docs/DECISIONS.md`.
+- **Versions:** none new.
+- **Exception to a rule?** no.
+- **Decided by:** builder (deep tier, Opus 5.5), within plan M4c-6b and spec v1.21.

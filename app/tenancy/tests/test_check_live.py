@@ -218,3 +218,45 @@ def test_the_real_agency_fails_without_force_or_with_another_permissive_policy(
             "public.agency", "the tenant root needs exactly one permissive SELECT policy on id"
         ),
     ]
+
+
+# PR 99 R1 P3: each root rule on the real `agency`, and the policy rules on a listed global.
+ROOT_CASES = {
+    "restrictive policy dropped": (
+        "DROP POLICY agency_tenant ON agency",
+        ["no restrictive tenant policy with USING and WITH CHECK"],
+    ),
+    "agency_id column added": (
+        "ALTER TABLE agency ADD COLUMN agency_id uuid",
+        ["the tenant root has an agency_id column"],
+    ),
+    "primary key replaced by a unique constraint": (
+        "ALTER TABLE agency DROP CONSTRAINT agency_pkey; ALTER TABLE agency ADD UNIQUE (id)",
+        ["id is not the primary key"],
+    ),
+}
+
+
+@pytest.mark.parametrize("case", ROOT_CASES)
+def test_each_root_rule_fails_on_the_real_agency(
+    conn: "psycopg.Connection[Any]", case: str
+) -> None:
+    sql, reasons = ROOT_CASES[case]
+    conn.execute(sql)
+    assert check(conn, schemas=["public"], extra_allowed=TEST_ONLY) == [
+        Violation("public.agency", reason) for reason in reasons
+    ]
+
+
+def test_the_policy_rules_apply_to_a_listed_global(conn: "psycopg.Connection[Any]") -> None:
+    conn.execute("CREATE TABLE public.bridge_session (token_hash text, agency_id uuid)")
+    conn.execute(
+        "CREATE POLICY bs_setting ON public.bridge_session FOR SELECT TO skiw_app"
+        " USING (agency_id = current_setting('app.agency_id')::uuid)"
+    )
+    conn.execute("CREATE POLICY bs_open ON public.bridge_session FOR SELECT USING (true)")
+    assert [str(v) for v in check(conn, schemas=["public"], extra_allowed=TEST_ONLY)] == [
+        "public.bridge_session: policy bs_open applies to PUBLIC",
+        "public.bridge_session: policy bs_open has a true predicate",
+        "public.bridge_session: policy bs_setting reads current_setting directly",
+    ]

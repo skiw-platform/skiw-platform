@@ -78,7 +78,8 @@ command `/etc/sudoers.d/skiw-deploy` allows (its arguments pinned by a regular e
    is refused (exit 2) before the dump, as a rollback would be: an older digest cannot be deployed
    across a contract migration. The image's contract migrations join `/var/lib/skiw/applied-contracts` (synced), **before**
    `migrate`, because `migrate` may apply a contract migration and then fail on a later one. Then
-   `migrate` as `skiw_migrator`. A failure stops the deploy; the old containers keep serving.
+   `migrate` as `skiw_migrator`, then `check_tenancy_schema` (120 s; `host-rebuild.md`, "The
+   tenancy schema check"). A failure of either stops the deploy; the old containers keep serving.
    Staging then removes its old status line, so a failed switch never leaves a stale
    `checks=passed`.
 5. Writes `SKIW_IMAGE=<repository>@<digest>` to `/var/lib/skiw/deploy.env` (root, 0644; Compose and

@@ -63,6 +63,7 @@ class Rig:
             "plan": (0, NO_PLAN),
             "dump": (1, ""),
             "migrate": (0, ""),
+            "check": (0, "tenancy schema check: ok\n"),
         }
         both = names("jobs.0001_x", "jobs.0002_y")
         self.names = {f"{REPO}@{NEW}": both, f"{REPO}@{OLD}": both}  # migration_labels per image
@@ -117,6 +118,7 @@ class Rig:
 
     KINDS: tuple[str, ...] = ("curl", "ssh", "lsattr", "chattr", "login", "pull", "rm")
     KINDS += ("predeploy", "migration_labels", "--plan", "inspect", "exec", "up", "stop")
+    KINDS += ("check_tenancy_schema",)
 
     def timed(
         self, argv: list[str], stdin: bytes, bound: float
@@ -191,6 +193,8 @@ class Rig:
             if self.dump_running:  # "the container name is already in use"
                 return 1, ""
             return self.out["dump"]
+        if args[-1] == "check_tenancy_schema":
+            return self.out["check"]
         if args[-1] == "migrate":
             applied = self.root / deploy.APPLIED
             self.at_migrate = applied.read_text() if applied.exists() else None
@@ -260,12 +264,13 @@ def test_a_deploy_pulls_migrates_switches_and_checks_health(
     assert rig.run("--key", "staging", "deploy", NEW, "42") == 0
     assert rig.state() == f"SKIW_IMAGE={REPO}@{NEW}\n" and rig.running == f"{REPO}@{NEW}"
     steps = [c[3] if c[1] == "--config" else c[-1] if c[0] == "env" else c[0] for c in rig.calls]
-    assert steps[:2] == ["login", "pull"] and steps[4:7] == [
+    assert steps[:2] == ["login", "pull"] and steps[4:8] == [
         "migration_labels",
         "--plan",
         "migrate",
+        "check_tenancy_schema",
     ]
-    assert steps[8:10] == ["-d", "curl"] and len(steps) == 11  # no dump: nothing planned
+    assert steps[9:11] == ["-d", "curl"] and len(steps) == 12  # no dump: nothing planned
     assert not any(Path(c[2]).exists() for c in rig.calls[:2])  # the login config is removed
     assert rig.journal == [
         f"deploy {NEW} key staging run 42: deployed; previous {OLD}; staging checks passed"
@@ -289,7 +294,8 @@ def test_a_pending_migration_runs_the_dump_first_and_a_failed_dump_stops(rig: Ri
     rig.out["dump"] = (0, f"predeploy 20261021T101500Z.dump.age {'c' * 64}\n")
     rig.journal.clear()
     assert rig.run("--key", "staging", "deploy", NEW) == 0
-    assert [c[-1] for c in rig.calls if c[0] == "env"][-6:-3] == ["--plan", "predeploy", "migrate"]
+    env = [c[-1] for c in rig.calls if c[0] == "env"]
+    assert env[-7:-3] == ["--plan", "predeploy", "migrate", "check_tenancy_schema"]
 
 
 @pytest.mark.parametrize(
@@ -309,6 +315,25 @@ def test_a_failed_migration_step_stops_before_the_switch(
     assert rig.run("--key", "staging", "deploy", NEW) == 1
     assert rig.running == f"{REPO}@{OLD}" and rig.state() == f"SKIW_IMAGE={REPO}@{OLD}\n"
     assert not any(c[-2:] == ["up", "-d"] for c in rig.calls) and rig.alerts == []
+
+
+def test_a_failed_schema_check_stops_after_migrate_and_before_the_switch(
+    rig: Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Plan M4c-6b: the migrations stay applied (never reversed), the old digest keeps serving, and
+    the check's own lines (table names and reasons) are withheld like any tool output."""
+    rig.put(apply.STATE, f"SKIW_IMAGE={REPO}@{OLD}\n")
+    rig.running = f"{REPO}@{OLD}"
+    rig.out["check"] = (1, "public.loose: not on the global list and has no agency_id column\n")
+    assert rig.run("--key", "staging", "deploy", NEW) == 1
+    assert rig.running == f"{REPO}@{OLD}" and rig.state() == f"SKIW_IMAGE={REPO}@{OLD}\n"
+    assert [c[-1] for c in rig.calls if c[0] == "env"][-2:] == ["migrate", "check_tenancy_schema"]
+    assert not any(c[-2:] == ["up", "-d"] for c in rig.calls) and rig.alerts == []
+    assert ("check_tenancy_schema", deploy.TOOL_S) in rig.bounds
+    assert rig.journal == [
+        f"deploy {NEW} key staging run none: failed: `check_tenancy_schema` exited 1"
+    ]
+    assert "public.loose" not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("fault", ["readyz", "worker"])
