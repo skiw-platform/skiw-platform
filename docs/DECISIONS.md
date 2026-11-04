@@ -909,3 +909,32 @@
 - **Versions:** none new.
 - **Exception to a rule?** no.
 - **Decided by:** builder (deep tier, Opus 5.5) within plan M3d.
+
+## 2026-11-04 — M3d-2b3: the route registry (AUTH-02), the wrapper's registration checks and the logged-in CSRF gate
+- **Decision:**
+  - **Route registry** (`app/tests/test_route_registry.py`, plan M3 Risk 4): it walks `config.urls` (the test pins `ROOT_URLCONF` to it). Every route is either an `authorized_action` handler (its view carries `skiw_action`, which `route()`'s `require_http_methods` keeps through `functools.wraps`) or a name in `PUBLIC_ROUTES` with the reason it needs no login. It fails a route that is neither, a wrapped route that is also listed, a stale entry, and **a route name used by more than one route** (PR 109 R1 P2 #1: Django lets patterns share a name, so an unwrapped route named `healthz` would otherwise pass as the public one). `PUBLIC_ROUTES` starts as `healthz`, `readyz`, `asset` and `shell`; like the gate's `TOKEN_AUTH_ROUTES`, an entry needs the reviewer's sign-off. M3e's login steps will be the first public mutating entries. The test-only URLconfs (`tests.csrf_urls`, `accounts.tests.urls`) are not walked: the app never serves them.
+  - **`SAFE_METHODS` pin:** the registry test asserts `accounts.auth.wrapper.SAFE_METHODS == config.routes.SAFE_METHODS` (the copy exists because `accounts` may not import `config`; M3d-2b2).
+  - **Registration checks in `authorized_action`** (moved here from M3d-2b2):
+    - an empty `permission` raises `ImproperlyConfigured` when the decorator is built;
+    - an async handler raises `ImproperlyConfigured`: the sync view would return its coroutine unrun, and it would run after `with_agency()` closed, outside the binding;
+    - a request whose session is not `accounts.session.SessionStore` (the MAC-checked store, M2c) raises `TypeError`. Until now `SESSION_ENGINE` was the only guarantee.
+  - **CSRF gate with a logged-in session** (M2d deviation (b); plan §3 M3d "CSRF gate: a logged-in fixture"):
+    - `tests.csrf_urls` gains `action-probe`, a cookie-auth POST `authorized_action` handler, beside the plain `csrf-probe`. The gate's `Pair` records whether a route is wrapped.
+    - In `test_csrf_gate.py` (no database) the browser has no session, so with a valid token a wrapped route must answer the wrapper's 401, and a plain route the handler's own outcome, as before. With no session key the store reads no database (`accounts/session.py` `_get_session_from_db`).
+    - `test_csrf_gate_live.py` (live) loads the shell, then signs in through `accounts.auth.login()` server-side (there is no login route before M3e). It gives the client the new session cookie and the rotated `__Host-csrftoken` secret, as the login response will (carry-over (h)). Each cookie-auth mutating route then reaches its handler with the rotated token. It is refused by CSRF with no token, a wrong one, a cross-site `Origin`, and **the token the shell gave before the login** (`token-invalid`), which proves the rotation.
+- **Tests:** `test_route_registry.py` (9), `accounts/tests/test_action_wrapper.py` (4, no database), `test_csrf_gate_live.py` (10), and the gate's cases for `action-probe` (7 more in `test_csrf_gate.py`: 1 accept, 3 CSRF refusals, 3 refused verbs).
+- **Mutants (bytecode off, `__pycache__` cleared, run against the four test files):** 12 killed, none survived:
+  - `login()` without `rotate_token()`: killed (the fixture finds no rotated secret);
+  - each registration check dropped (3); `SAFE_METHODS` drift; no `skiw_action`;
+  - the registry ignoring unwrapped routes, wrapped-and-public routes, or stale entries (3); and, after review R1, the registry ignoring a name used twice (killed by both duplicate-name tests);
+  - no `CsrfViewMiddleware`; the wrapper letting a request without a login through.
+  - A first run reported every mutant killed because zsh passed the test list as one argument and pytest collected nothing. It was discarded and re-run with a passing baseline first.
+- **Why:** AUTH-01, AUTH-02 (no middleware gate), spec T6 (CSRF on all mutating routes), UNI-19 (only intended endpoints unauthenticated); plan M3 §3 M3d, §4 M3d row ("a route without the wrapper fails a registry test", "CSRF gate with the logged-in fixture"), Risk 4; DECISIONS M2d deviation (b), M3d-2b2.
+- **Alternatives rejected:**
+  - a registry keyed on the module that defines the view: renaming or moving a module would pass silently, and the check would not prove the wrapper actually ran;
+  - walking `tests.csrf_urls` as well: its `csrf-probe` is a deliberately unwrapped test route, and listing test probes as "public" would weaken the reviewed list;
+  - a login route for the fixture: that is M3e's work (password step, throttle, uniform errors); `login()` itself is what rotates the token.
+- **Scope / affects:** `app/accounts/auth/wrapper.py`, `app/accounts/tests/test_action_wrapper.py` (new), `app/tests/{test_route_registry.py (new), test_csrf_gate_live.py (new), test_csrf_gate.py, csrf_urls.py, csrf_fixtures.py}`, `docs/runbooks/local-dev.md`, `docs/DECISIONS.md`.
+- **Versions:** none new.
+- **Exception to a rule?** no.
+- **Decided by:** builder (deep tier, Opus 5.5) within plan M3d.

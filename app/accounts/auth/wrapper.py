@@ -1,7 +1,7 @@
 """`authorized_action`: the one gate for a signed-in request (spec D6, T5; AUTH-01, AUTH-02; plan M3
 §3 M3d). There is no auth middleware; every signed-in route is a handler wrapped here, and the
-route registry test (M3d-2b3) fails any route that is neither wrapped nor reviewed as public. The
-steps run in AUTH-01 order and a failing step stops the request:
+route registry test (app/tests/test_route_registry.py) fails any route that is neither wrapped nor
+reviewed as public. The steps run in AUTH-01 order and a failing step stops the request:
 
 1. session: a completed login (the `_skiw_*` keys of accounts.auth.login), else 401;
 2. tenant: `with_agency(_skiw_agency)`, inside which the idle timeout (a marker and a logout),
@@ -17,6 +17,7 @@ query or a header (TEN-11). `_skiw_seen_at` is written at most once a minute, be
 write re-seals the row."""
 
 import functools
+import inspect
 import json
 import uuid
 from collections.abc import Callable, Mapping
@@ -25,13 +26,14 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from django.conf import settings
-from django.contrib.sessions.backends.base import SessionBase
+from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 
 from accounts.auth.login import AGENCY, AUTH_AT, FACTOR, SEEN_AT, USER
 from accounts.auth.revoke import mark, revoked
 from accounts.factor_model import KINDS
+from accounts.session import SessionStore
 from accounts.user_model import AppUser
 from tenancy.binding import with_agency
 
@@ -55,7 +57,7 @@ class Signed:
     seen_at: datetime
 
 
-def _signed(session: SessionBase) -> Signed | None:
+def _signed(session: SessionStore) -> Signed | None:
     """The completed login in the session, or None. Only login() writes these keys (UTC-aware
     times), and a row that fails the MAC (M2c) loads as empty with no key, so a session that has
     them has a key and well-formed values; a missing key is still no login, never a 500."""
@@ -92,12 +94,21 @@ def _refused(status: int, code: str) -> HttpResponse:
 def authorized_action[T](
     *, schema: Callable[[Mapping[str, Any]], T], permission: str
 ) -> Callable[[Callable[[HttpRequest, Signed, T], HttpResponse]], Callable[..., HttpResponse]]:
+    if not permission:
+        raise ImproperlyConfigured("authorized_action needs the permission it checks")
+
     def decorate(
         handler: Callable[[HttpRequest, Signed, T], HttpResponse],
     ) -> Callable[..., HttpResponse]:
+        # A coroutine returned here would run after with_agency() closed, outside the binding.
+        if inspect.iscoroutinefunction(handler):
+            raise ImproperlyConfigured("authorized_action wraps sync handlers only")
+
         @functools.wraps(handler)
         def view(request: HttpRequest) -> HttpResponse:
             session = request.session
+            if not isinstance(session, SessionStore):  # the MAC-checked store (M2c), nothing else
+                raise TypeError("authorized_action needs the accounts session store")
             signed = _signed(session)
             if signed is None:
                 return _refused(401, "signed-out")
@@ -121,7 +132,7 @@ def authorized_action[T](
                     session[SEEN_AT] = now.isoformat(timespec="microseconds")
                 return handler(request, signed, data)
 
-        vars(view).update(skiw_action=permission)  # the route registry reads it (M3d-2b3)
+        vars(view).update(skiw_action=permission)  # the route registry reads it
         return view
 
     return decorate
