@@ -1,0 +1,29 @@
+rules:
+  - id: auth-lookup-accounts-auth-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only accounts.auth.lookup calls the pre-tenant lookups guard.auth_lookup_login and (from
+      M3g) guard.auth_lookup_credential (spec §4.1 "Pre-tenant lookups": callable from code only
+      in accounts.auth; TEN-10, TEN-12). Call accounts.auth.lookup instead; the accounts
+      migrations create the functions and the accounts tests call them on purpose.
+    paths:
+      exclude:
+        - /app/accounts/auth/lookup.py
+        - /app/accounts/migrations/
+        - /app/accounts/tests/
+    pattern-either:
+      # SQL text that calls one (a docstring that only names it is not SQL).
+      - patterns:
+          - pattern: '"$SQL"'
+          - metavariable-regex:
+              metavariable: $SQL
+              regex: (?is)^.*?\b(select|from|perform|call)\b.*?\bauth_lookup_(login|credential)\b
+      # A name composed with psycopg.sql, which no SQL-text regex sees.
+      - patterns:
+          - pattern-either:
+              - pattern: $SQLMOD.Identifier(..., "$NAME", ...)
+              - pattern: Identifier(..., "$NAME", ...)
+          - metavariable-regex:
+              metavariable: $NAME
+              regex: (?i)^auth_lookup_(login|credential)$
