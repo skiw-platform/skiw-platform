@@ -1,13 +1,15 @@
 """Login and credential lookup blobs under `login_blob_key` (spec §4.1 `login_blob_ct`,
-`lookup_blob_ct`, §8.4 H4; plan M3b). No database access.
+`lookup_blob_ct`, §8.4 H4; plan M3b, M3e-1a). No database access.
 
-blob = version (2 bytes, big-endian) || nonce (12 random bytes) || AES-256-GCM ciphertext || tag
-(16 bytes). Each version's AES key is HKDF-SHA-256 of that version's key under LABEL, so a key
-line longer than 32 bytes still gives one AES-256 key. The AAD is the version bytes || a purpose
-label || the lookup value, so a blob moved to another row, purpose or version fails its tag.
-Plaintexts are padded to one size per purpose, so every blob of a purpose has one length (login
-222, credential 62) and an Argon2 parameter change cannot tell old blobs from new ones. The
-newest version seals; every listed one opens.
+blob = nonce (12 random bytes) || AES-256-GCM ciphertext || tag (16 bytes). Nothing in a blob is
+in clear, so it reads as random bytes, like the decoy `guard.auth_lookup_login` returns for an
+unknown email (owner decision 2026-11-04: a cleartext key version would tell the two apart). Each
+version's AES key is HKDF-SHA-256 of that version's key under LABEL, so a key line longer than 32
+bytes still gives one AES-256 key. The AAD is the version bytes || a purpose label || the lookup
+value, so a blob moved to another row, purpose or version fails its tag. Plaintexts are padded to
+one size per purpose, so every blob of a purpose has one length (login 220, credential 60). The
+newest version seals; opening tries every listed version, always all of them, so a decoy and a
+real blob cost the same.
 """
 
 import functools
@@ -28,7 +30,7 @@ CREDENTIAL_AAD = b"skiw-credential-v1"
 LOGIN_SIZE = 192  # user id 16 || agency id 16 || 2-byte length || Argon2 encoded hash || zeros
 CREDENTIAL_SIZE = 32  # user id 16 || agency id 16
 NONCE = 12
-OVERHEAD = 2 + NONCE + 16
+OVERHEAD = NONCE + 16
 
 
 @dataclass(frozen=True)
@@ -53,25 +55,36 @@ def normalise_email(email: str) -> str:
     return unicodedata.normalize("NFKC", email).strip().lower()
 
 
+def _aad(version: int, purpose: bytes, value: bytes) -> bytes:
+    return version.to_bytes(2, "big") + purpose + value
+
+
 def _seal(plaintext: bytes, purpose: bytes, value: bytes) -> bytes:
     version, cipher = next(iter(require_key().items()))
-    header = version.to_bytes(2, "big")
     nonce = os.urandom(NONCE)
-    return header + nonce + cipher.encrypt(nonce, plaintext, header + purpose + value)
+    return nonce + cipher.encrypt(nonce, plaintext, _aad(version, purpose, value))
+
+
+def _attempt(cipher: AESGCM, blob: bytes, aad: bytes) -> bytes | None:
+    try:
+        return cipher.decrypt(blob[:NONCE], blob[NONCE:], aad)
+    except InvalidTag:
+        return None
 
 
 def _open(blob: bytes, size: int, purpose: bytes, value: bytes) -> bytes | None:
-    """The plaintext, or None for a blob of the wrong length, an unlisted version or a failed
-    tag. Logs nothing: in M3e every unknown email reaches here with a decoy."""
+    """The plaintext, or None for a blob of the wrong length or one no listed version opens. Every
+    listed version is tried, also after one opens it, so the work does not depend on which version
+    sealed it or whether any did. Logs nothing: in M3e every unknown email reaches here with a
+    decoy."""
     if len(blob) != size + OVERHEAD:
         return None
-    cipher = require_key().get(int.from_bytes(blob[:2], "big"))
-    if cipher is None:
-        return None
-    try:
-        return cipher.decrypt(blob[2 : 2 + NONCE], blob[2 + NONCE :], blob[:2] + purpose + value)
-    except InvalidTag:
-        return None
+    opened = None
+    for version, cipher in require_key().items():
+        plaintext = _attempt(cipher, blob, _aad(version, purpose, value))
+        if opened is None:
+            opened = plaintext
+    return opened
 
 
 def seal_login(record: LoginRecord, email: str) -> bytes:

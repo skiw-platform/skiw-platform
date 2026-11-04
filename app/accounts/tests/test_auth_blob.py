@@ -19,7 +19,7 @@ from tests.settings_env import AUTH_BOUNDS
 USER, AGENCY = uuid.uuid4(), uuid.uuid4()
 EMAIL = "adviser@example.test"
 CREDENTIAL = secrets.token_bytes(64)
-LOGIN_L, CREDENTIAL_L = 222, 62  # plan M3b [A]: 2 + 12 + 192 + 16 and 2 + 12 + 32 + 16
+LOGIN_L, CREDENTIAL_L = 220, 60  # 12 + 192 + 16 and 12 + 32 + 16 (no header, owner 2026-11-04)
 
 
 def key_line(version: int, size: int = 32) -> str:
@@ -97,30 +97,74 @@ def test_another_key_or_an_unlisted_version_is_refused(use_keys: Callable[..., N
 
 
 def test_the_newest_version_seals_and_every_listed_one_opens(use_keys: Callable[..., None]) -> None:
-    old = key_line(1, size=40)  # longer than 32 bytes: HKDF still gives an AES-256 key
+    old, newest = key_line(1, size=40), key_line(65_535)  # 40 bytes: HKDF still gives AES-256
     use_keys(old)
     sealed_v1 = blob.seal_login(RECORD, EMAIL)
-    use_keys(old, key_line(65_535))
+    use_keys(newest, old)
     sealed_new = blob.seal_login(RECORD, EMAIL)
-    assert sealed_new[:2] == (65_535).to_bytes(2, "big") and sealed_v1[:2] == b"\0\x01"
+    use_keys(newest)  # the newest alone opens the second blob, not the first
+    assert blob.open_login(sealed_new, EMAIL) == RECORD
+    assert blob.open_login(sealed_v1, EMAIL) is None
+    use_keys(newest, old)
     assert blob.open_login(sealed_v1, EMAIL) == blob.open_login(sealed_new, EMAIL) == RECORD
 
 
-def test_the_version_header_is_bound_by_the_aad(use_keys: Callable[..., None]) -> None:
+def test_the_version_is_bound_by_the_aad(use_keys: Callable[..., None]) -> None:
     same = base64.b64encode(secrets.token_bytes(32)).decode()
-    use_keys(f"v2:{same}", f"v1:{same}")  # one key under two versions: only the AAD differs
+    use_keys(f"v2:{same}")
     sealed = blob.seal_login(RECORD, EMAIL)
-    assert sealed[:2] == b"\0\x02" and blob.open_login(sealed, EMAIL) == RECORD
-    assert blob.open_login(b"\0\x01" + sealed[2:], EMAIL) is None
+    use_keys(f"v1:{same}")  # the same key under another version: only the AAD differs
+    assert blob.open_login(sealed, EMAIL) is None
+    use_keys(f"v2:{same}")
+    assert blob.open_login(sealed, EMAIL) == RECORD
 
 
 def test_the_aes_key_is_derived_not_the_raw_key(use_keys: Callable[..., None]) -> None:
     raw = secrets.token_bytes(32)
     use_keys("v1:" + base64.b64encode(raw).decode())
     sealed = blob.seal_login(RECORD, EMAIL)
-    aad = sealed[:2] + blob.LOGIN_AAD + EMAIL.encode()  # the exact AAD: only the key differs
+    aad = b"\0\x01" + blob.LOGIN_AAD + EMAIL.encode()  # the exact AAD: only the key differs
     with pytest.raises(InvalidTag):
-        AESGCM(raw).decrypt(sealed[2 : 2 + blob.NONCE], sealed[2 + blob.NONCE :], aad)
+        AESGCM(raw).decrypt(sealed[: blob.NONCE], sealed[blob.NONCE :], aad)
+
+
+@pytest.fixture
+def attempts(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    seen: list[int] = []
+    real = blob._attempt
+
+    def counted(cipher: AESGCM, sealed: bytes, aad: bytes) -> bytes | None:
+        seen.append(int.from_bytes(aad[:2], "big"))
+        return real(cipher, sealed, aad)
+
+    monkeypatch.setattr(blob, "_attempt", counted)
+    return seen
+
+
+def test_every_listed_version_is_tried_whatever_opens_the_blob(
+    use_keys: Callable[..., None], attempts: list[int]
+) -> None:
+    """Owner 2026-11-04 (1): a real blob, a decoy and an oldest-version blob do the same work."""
+    lines = key_line(3), key_line(2), key_line(1)
+    use_keys(lines[2])
+    oldest = blob.seal_login(RECORD, EMAIL)
+    use_keys(*lines)
+    newest = blob.seal_login(RECORD, EMAIL)
+    decoy = secrets.token_bytes(LOGIN_L)
+    attempts.clear()
+    for sealed, opened in ((newest, RECORD), (decoy, None), (oldest, RECORD)):
+        assert blob.open_login(sealed, EMAIL) == opened
+        assert attempts == [3, 2, 1]
+        attempts.clear()
+    assert blob.open_credential(secrets.token_bytes(CREDENTIAL_L), CREDENTIAL) is None
+    assert attempts == [3, 2, 1]
+
+
+def test_a_blob_has_no_fixed_leading_bytes(use_keys: object) -> None:
+    """Owner 2026-11-04 (5): nothing in clear, so a blob and a random decoy look alike."""
+    logins = {blob.seal_login(RECORD, EMAIL)[:2] for _ in range(64)}
+    credentials = {blob.seal_credential(USER, AGENCY, CREDENTIAL)[:2] for _ in range(64)}
+    assert len(logins) > 1 and len(credentials) > 1
 
 
 @pytest.mark.parametrize(
