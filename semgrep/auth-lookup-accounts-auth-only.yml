@@ -19,11 +19,9 @@ rules:
           - metavariable-regex:
               metavariable: $SQL
               regex: (?is)^.*?\b(select|from|perform|call)\b.*?\bauth_lookup_(login|credential)\b
-      # A name composed with psycopg.sql, which no SQL-text regex sees.
+      # The bare name, as callproc or psycopg.sql.Identifier take it, which no SQL-text regex sees.
       - patterns:
-          - pattern-either:
-              - pattern: $SQLMOD.Identifier(..., "$NAME", ...)
-              - pattern: Identifier(..., "$NAME", ...)
+          - pattern: '"$NAME"'
           - metavariable-regex:
               metavariable: $NAME
-              regex: (?i)^auth_lookup_(login|credential)$
+              regex: (?i)^(guard\.)?auth_lookup_(login|credential)$
