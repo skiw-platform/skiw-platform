@@ -1,0 +1,7 @@
+PR: 113
+Reviewed head SHA: 8b9dea66c115f46b076ee5dc9a9719a258d6331c
+Review file: reviews/PR-113.md
+Review file hash (git hash-object): b7577d988dd1461dfd1fe72b5a8ca4b944c14833
+Log-branch commit holding that review: 4985800
+Verdict: Approved (Round 1); no merge conditions; PUBLIC_ROUTES["auth-login"] signed off by the reviewer; P3 #1 (Argon2 parameter change timing) deferred to M3e-3, to be listed in that PR's body; CI at 8b9dea6: checks, security, image, host pass
+Time: 2026-11-04T22:54:33Z
