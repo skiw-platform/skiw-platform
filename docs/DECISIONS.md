@@ -806,3 +806,28 @@
 - **Versions:** none new.
 - **Exception to a rule?** no.
 - **Decided by:** builder (deep tier, Opus 5.5) within plan M3d.
+
+## 2026-11-04 — M3d-2a: `accounts.auth.login()`, Semgrep `start-new-lifetime-login-only`, every logger through the message-free formatter
+- **Split:** M3d-2 (see the M3d-1a entry) came to more than the plan §1 limit, so it is two PRs. **M3d-2a** (this): `login()`, its Semgrep rule, carry-overs (d) and (i) through `login()`, and PR 103 R1 P3 #1. **M3d-2b**: `authorized_action`, idle timeout, the revocation check (with the marker written when an authenticated session is rotated), the route registry test, the logged-in CSRF fixture, the forged-`agency_id` tests, and the PR 104 R1 `revoked_at` notes.
+- **Decision:**
+  - `app/accounts/auth/login.py` `login(request, user, *, factor)` (owner Q7 (a): no `django.contrib.auth`). Django 5.2.17's own `login()` (`contrib/auth/__init__.py`) was read for the steps. In order: a session that already names another `_skiw_user` is flushed (Django does the same, so no other user's data is carried over); `start_new_lifetime()`; `cycle_key()`; `_skiw_user`, `_skiw_agency` (string UUIDs), `_skiw_auth_at`, `_skiw_seen_at` (the same UTC ISO-8601 instant, to the microsecond) and `_skiw_factor` are written; `django.middleware.csrf.rotate_token()`. Unlike Django, a repeat login by the same user also gets a new key (Django skips `cycle_key` then). Data the session held before the login is kept, as in Django; the M3e pending state must remove its own keys. `factor` must be one of `user_factor` kinds (`passkey`, `totp`, `recovery`), otherwise `ValueError`; a request whose session is not the project store raises `TypeError`. `login()` reads no table: the caller (M3e) has verified the password, the second factor and `status`.
+  - Semgrep `start-new-lifetime-login-only` (`semgrep/start-new-lifetime-login-only.{yml,py}`): `start_new_lifetime()` / `astart_new_lifetime()`, also through `getattr`, are refused anywhere in `app/` except `accounts/auth/login.py`, the store itself and the accounts tests (the M2b/M3a tests call it on purpose).
+  - **PR 103 R1 P3 #1:** `LOGGING` gives the root logger the `stderr` handler at WARNING with the `plain` (`NoExceptionText`) formatter. `django.security` and `django.request` keep `propagate: False`. Every other logger (`procrastinate.worker`, the app's own) now goes through `config.logs` instead of Python's last-resort handler, which printed exception messages. `uvicorn.error` is checked, not changed: under gunicorn the `UvicornWorker` gives it gunicorn's own handlers (`uvicorn_worker/_workers.py:57-60`, formatter `glogging.py:175`, `:220`), but uvicorn logs there only when an exception escapes the ASGI app (`uvicorn/protocols/http/h11_impl.py:414`). Django wraps the handler and every middleware in `convert_exception_to_response` (`core/handlers/base.py:37`, `:95`), which turns a view's exception into a 500 response logged by `django.request`. So `uvicorn.error` does not fire for Django-handled errors.
+- **Tests:**
+  - `app/accounts/tests/test_login_live.py`:
+    - (d): an 11-hour-old session gets a new key and a deadline of now + 12 h, the old row is gone, and a fresh store reads every `_skiw_*` key with no `django.security` record;
+    - the CSRF token rotates;
+    - the same user's re-login rotates and keeps the data, while another user's login flushes it;
+    - an unknown factor is refused;
+    - (i), TEN-11, sync and async: a row whose `_skiw_user` or `_skiw_agency` was changed and re-signed with `SECRET_KEY` (the old MAC kept) is rejected and logged out.
+  - `app/tests/test_security_log_stderr.py`: a `procrastinate.worker` ERROR with a chained exception, whose messages both carry `person@example.test`, prints the classes, the cause line and no marker; a plain app logger's WARNING is printed and its INFO is not.
+- **Mutants (bytecode off):** 9 killed, 1 equivalent. Killed:
+  - in `login()`: no `start_new_lifetime`, no `cycle_key`, no `rotate_token`, no flush for another user, always flush, no factor check, a wrong `_skiw_seen_at`, `_skiw_agency` set to the user id;
+  - no root handler.
+  - Equivalent: root at INFO. The handler's WARNING level still filters, so the output can't change.
+- **Why:** spec D6 ("rotated on login"), D7, TEN-11, UNI-09; plan M3 §3 M3d, §4 M3d row, carry-overs (d) and (i); PR 103 review R1 P3 #1.
+- **Alternatives rejected:** a `logconfig_dict` for gunicorn that puts `NoExceptionText` on `gunicorn.error`/`uvicorn.error`. It would change the image's start command, and the logger does not carry Django-handled errors. Revisit if a later ASGI app path can raise past Django.
+- **Scope / affects:** `app/accounts/auth/login.py`, `app/accounts/tests/test_login_live.py` (new), `semgrep/start-new-lifetime-login-only.{yml,py}` (new), `app/config/settings.py`, `app/tests/test_security_log_stderr.py`, `docs/DECISIONS.md`.
+- **Versions:** none new.
+- **Exception to a rule?** no.
+- **Decided by:** builder (deep tier, Opus 5.5) within plan M3d.

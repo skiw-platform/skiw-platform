@@ -1,5 +1,6 @@
 """`django.security` warnings and `django.request` errors reach the process's real stderr with
-DEBUG off (plan M3 (a); PR 77 review residual risk, M3b).
+DEBUG off (plan M3 (a); PR 77 review residual risk, M3b), and every other logger reaches it through
+the same message-free formatter (PR 103 review R1 P3 #1).
 
 Django's default LOGGING sends `django.*` to the console only when DEBUG is on, and 5xx records
 to `mail_admins` (no ADMINS here), so without the project LOGGING the M2c SuspiciousSession
@@ -51,6 +52,22 @@ with override_settings(ROOT_URLCONF="boom_urls"):
     assert answer.status_code == 500
     assert client.get("/missing").status_code == 404
     assert client.get("/chained").status_code == 500
+"""
+
+# A failed job as procrastinate.worker logs it (ERROR with exc_info), and a plain app logger.
+OTHER_LOGGERS = """
+import logging
+import django
+django.setup()
+try:
+    try:
+        raise KeyError("Key (email)=(person@example.test) already exists")
+    except KeyError as exc:
+        raise ValueError("wrapped person@example.test") from exc
+except ValueError:
+    logging.getLogger("procrastinate.worker").error("Job failed", exc_info=True)
+logging.getLogger("skiw.probe").warning("a plain warning")
+logging.getLogger("skiw.probe").info("below the level")
 """
 
 
@@ -111,4 +128,16 @@ def test_a_500_logs_its_path_and_traceback_to_stderr_but_no_request_data_or_mess
     assert "in chained" in second
     for planted in ("planted-query", "planted-body", "planted-cookie", "planted failure"):
         assert planted not in result.stderr
+    assert "person@example.test" not in result.stderr
+
+
+def test_other_loggers_reach_stderr_through_the_same_formatter() -> None:
+    result = run(OTHER_LOGGERS)
+    assert result.returncode == 0, result.stderr[-2000:]
+    lines = result.stderr.splitlines()
+    assert lines[0] == "ERROR procrastinate.worker Job failed"
+    assert "KeyError" in lines
+    assert "The above exception was the direct cause of the following exception:" in lines
+    assert lines[-2:] == ["ValueError", "WARNING skiw.probe a plain warning"]
+    assert "below the level" not in result.stderr
     assert "person@example.test" not in result.stderr
