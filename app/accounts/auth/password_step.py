@@ -11,17 +11,32 @@ tells an account from no account (plan Risk 2):
    plan [A]), and the lock counter is reset.
 
 All of it runs outside `with_agency()` apart from the status read: no tenant is known yet, and the
-throttle rows and events are global. The login route (M3e-2b) answers each outcome."""
+throttle rows and events are global. `start_pending` then gives the browser a new session that
+holds only the pending state the second factor (M3f) completes; `accounts.auth.login.login()`
+writes the signed-in keys after that factor."""
 
 import uuid
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Literal
+
+from django.conf import settings
+from django.http import HttpRequest
+from django.middleware.csrf import rotate_token
+from django.utils import timezone
 
 from accounts.auth import blob, passwords, throttle
 from accounts.auth.events import record_event
+from accounts.auth.login import AGENCY, USER
 from accounts.auth.lookup import lookup_login
+from accounts.auth.revoke import mark
+from accounts.session import SessionStore
 from accounts.user_model import AppUser
 from tenancy.binding import with_agency
+
+PENDING_USER = "_skiw_pending_user"
+PENDING_AGENCY = "_skiw_pending_agency"
+PENDING_UNTIL = "_skiw_pending_until"  # UTC ISO-8601; the second factor must come before it
 
 
 @dataclass(frozen=True)
@@ -49,3 +64,29 @@ def attempt(email: str, password: str, ip: str) -> Verified | Literal["limited",
         return "failed"
     throttle.reset_on_success(email)
     return Verified(record.user_id, record.agency_id)
+
+
+def start_pending(request: HttpRequest, verified: Verified) -> None:
+    """A new session key and nothing carried over. A signed-in session is retired with a
+    `session_revocation` marker first, in one with_agency() transaction with the row delete, as
+    login() does (plan M3 §3 M3d), so the old row put back by SQL is still refused."""
+    session = request.session
+    if not isinstance(session, SessionStore):
+        raise TypeError("the password step needs the accounts session store")
+    previous, key = session.get(USER), session.session_key
+    if previous is None or key is None:
+        session.flush()
+    else:
+        agency = uuid.UUID(session[AGENCY])
+        with with_agency(agency):
+            mark(agency, uuid.UUID(previous), key)
+            session.flush()
+    until = timezone.now() + timedelta(minutes=settings.SKIW_LOGIN_PENDING_MIN)
+    session.update(
+        {
+            PENDING_USER: str(verified.user_id),
+            PENDING_AGENCY: str(verified.agency_id),
+            PENDING_UNTIL: until.isoformat(timespec="microseconds"),
+        }
+    )
+    rotate_token(request)

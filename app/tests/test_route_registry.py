@@ -27,6 +27,8 @@ PUBLIC_ROUTES: dict[str, str] = {
     "readyz": "readiness probe; binds the deployment agency itself and answers by status only",
     "asset": "hashed SPA build files, the same for every visitor",
     "shell": "the SPA page a signed-out visitor loads first; carries only the CSRF token",
+    "auth-login": "the password step, before any session exists: uniform answers (AUTH-05) and the"
+    " throttle (AUTH-06) stand in for a login; it leaves only a pending state, never a sign-in",
 }
 
 

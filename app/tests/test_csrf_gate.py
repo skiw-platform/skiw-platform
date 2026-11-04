@@ -120,6 +120,16 @@ def send(client: Client, method: str, url: str, headers: dict[str, str]) -> Http
     )
 
 
+def assert_past_csrf(response: HttpResponseBase, pair: Pair) -> None:
+    """The handler's own outcome, not a CSRF refusal (for a browser that passed the check)."""
+    assert "X-Skiw-Csrf" not in response.headers
+    answers = FIXTURES[pair.name].answers
+    if answers is not None:
+        assert response.status_code == answers
+    else:
+        assert response.status_code < 300 or response.status_code in (400, 422)
+
+
 def assert_csrf_refused(response: HttpResponseBase, code: str) -> None:
     assert isinstance(response, HttpResponse)
     assert response.status_code == 403
@@ -149,11 +159,11 @@ def test_cookie_auth_mutating_route_accepts_a_same_origin_token(
 ) -> None:
     client, token = browser
     valid = send(client, pair.method, pair.url, {"Origin": ORIGIN, "X-CSRFToken": token})
-    assert "X-Skiw-Csrf" not in valid.headers  # the handler's own outcome
     if pair.wrapped:  # past CSRF, the wrapper refuses a browser that never signed in
+        assert "X-Skiw-Csrf" not in valid.headers
         assert valid.status_code == 401
     else:
-        assert valid.status_code < 300 or valid.status_code in (400, 422)
+        assert_past_csrf(valid, pair)
 
 
 # case -> (Origin, token or None for none, the code config.csrf.failure sends)
