@@ -3,7 +3,8 @@
 A behaviour test over a mechanically complete inventory, not a `csrf_exempt` scan. The inventory
 is every URL pattern with the methods and auth kind route() recorded on it (config.routes); the
 fixtures say only how to build a request. The cases run on tests.csrf_urls, which is config.urls
-plus one test-only cookie-auth POST route.
+plus two test-only cookie-auth POST routes, one a plain view and one an `authorized_action`. Here
+the browser has no session; test_csrf_gate_live.py runs the mutating cases signed in.
 """
 
 import re
@@ -40,6 +41,7 @@ class Pair:
     auth: str
     url: str
     methods: frozenset[str]
+    wrapped: bool  # an authorized_action handler, which answers 401 without a login
 
 
 def walk(entries: Sequence[Any], prefix: str = "") -> Iterator[tuple[str, URLPattern]]:
@@ -79,7 +81,8 @@ def inventory(urlconf: str) -> tuple[list[Pair], list[str]]:
             token_auth = method in UNSAFE_METHODS and auth != "cookie"
             if token_auth and (name, method) not in TOKEN_AUTH_ROUTES:
                 problems.append(f"{name} {method}: token auth not in TOKEN_AUTH_ROUTES")
-            pairs.append(Pair(name, method, auth, url, frozenset(methods)))
+            wrapped = getattr(pattern.callback, "skiw_action", None) is not None
+            pairs.append(Pair(name, method, auth, url, frozenset(methods), wrapped))
     token = {(p.name, p.method) for p in pairs if p.auth == "token" and p.method in UNSAFE_METHODS}
     problems += [
         f"{entry}: stale TOKEN_AUTH_ROUTES entry" for entry in TOKEN_AUTH_ROUTES.keys() - token
@@ -147,7 +150,10 @@ def test_cookie_auth_mutating_route_accepts_a_same_origin_token(
     client, token = browser
     valid = send(client, pair.method, pair.url, {"Origin": ORIGIN, "X-CSRFToken": token})
     assert "X-Skiw-Csrf" not in valid.headers  # the handler's own outcome
-    assert valid.status_code < 300 or valid.status_code in (400, 422)
+    if pair.wrapped:  # past CSRF, the wrapper refuses a browser that never signed in
+        assert valid.status_code == 401
+    else:
+        assert valid.status_code < 300 or valid.status_code in (400, 422)
 
 
 # case -> (Origin, token or None for none, the code config.csrf.failure sends)

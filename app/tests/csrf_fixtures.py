@@ -5,8 +5,8 @@ from here, so a new method on a route is tested without touching this file."""
 from dataclasses import dataclass, field
 
 
-# A logged-in session joins the fixture with M3 (there is no login before it): until then every
-# case runs as a browser without a session. CSRF_USE_SESSIONS is off, so the check is the same.
+# Every case runs once as a browser without a session (test_csrf_gate.py) and, for the mutating
+# routes, once signed in through accounts.auth.login() (test_csrf_gate_live.py, M3d).
 @dataclass(frozen=True)
 class Fixture:
     path_kwargs: dict[str, str] = field(default_factory=dict)
@@ -19,4 +19,5 @@ FIXTURES: dict[str, Fixture] = {
     "asset": Fixture(path_kwargs={"path": "index-abc.js"}),
     "shell": Fixture(),
     "csrf-probe": Fixture(),  # test only: tests.csrf_urls
+    "action-probe": Fixture(),  # test only: tests.csrf_urls, an authorized_action
 }
