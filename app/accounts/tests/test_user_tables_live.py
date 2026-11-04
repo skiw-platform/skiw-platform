@@ -92,6 +92,28 @@ def test_email_is_unique_and_matched_without_regard_to_case(cursor: CursorWrappe
     assert refused_by(cursor, lambda c: add_user(c, "ADVISER@example.test")) == "app_user_email_key"
 
 
+@pytest.mark.parametrize(
+    ("table", "constraint", "definition"),
+    [
+        ("app_user", "app_user_email_key", "UNIQUE (email)"),
+        ("user_factor", "user_factor_credential_id_key", "UNIQUE (credential_id)"),
+    ],
+    ids=["email", "credential-id"],
+)
+def test_the_pre_tenant_lookup_keys_are_unique_across_agencies(
+    cursor: CursorWrapper, table: str, constraint: str, definition: str
+) -> None:
+    """Spec §4.1 `uq(email)` and `uq(credential_id)` are global: the M3e/M3g lookups resolve them
+    before the tenant is known. A per-agency key (`UNIQUE (agency_id, email)`) passes every
+    single-agency test, so the catalog shape is pinned (PR 103 review R1 P3 #2)."""
+    cursor.execute(
+        "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint"
+        " WHERE conrelid = %s::regclass AND contype = 'u' AND conname = %s",
+        [f"public.{table}", constraint],
+    )
+    assert cursor.fetchall() == [(constraint, definition)]
+
+
 @pytest.mark.parametrize("status", ["invited", "active", "disabled"])
 def test_each_known_status_is_accepted(cursor: CursorWrapper, status: str) -> None:
     add_user(cursor, status=status)
