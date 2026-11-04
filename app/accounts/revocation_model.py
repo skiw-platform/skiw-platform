@@ -2,7 +2,7 @@
 marker (TEN-03: skiw_app may SELECT and INSERT only). A row with `session_key_hash` revokes that
 one session; a row without it revokes every session of the user that signed in at or before
 `revoked_at` (AUTH-07). A deleted session row put back by SQL stays revoked, because the marker
-cannot be removed. The wrapper that reads it comes in M3d-2."""
+cannot be removed. accounts.auth.revoke writes and checks it."""
 
 import uuid
 

@@ -38,6 +38,13 @@ def _chain(exc: BaseException) -> list[tuple[BaseException, str]]:
 
 
 class NoExceptionText(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        # logging.Formatter.format reuses record.exc_text when an earlier handler cached one, and
+        # the stock Formatter caches it with the messages (PR 106 review R1 P3 #1). Ours is
+        # cached instead, so a later handler prints the message-free text.
+        record.exc_text = None
+        return super().format(record)
+
     def formatException(self, ei: ExcInfo) -> str:
         if ei[1] is None:
             return ""

@@ -1,4 +1,6 @@
 import logging
+import os
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -6,6 +8,7 @@ from email.utils import parsedate_to_datetime
 from http.cookies import Morsel
 from types import SimpleNamespace
 
+import psycopg
 import pytest
 from django.conf import settings
 from django.contrib.sessions import middleware
@@ -16,6 +19,10 @@ from pytest_django import DjangoDbBlocker
 
 from accounts.session import stored_key
 from accounts.source_key import require_key
+from accounts.user_model import AppUser
+from tenancy import seed
+from tenancy.binding import with_agency
+from tenancy.tests.isolation import B
 
 COOKIE = "__Host-skiw_session"
 
@@ -100,3 +107,25 @@ def assert_deleted(response: HttpResponseBase) -> None:
     morsel = session_cookie(response)
     assert morsel.value == "" and morsel["max-age"] == 0
     assert morsel["secure"] is True and morsel["path"] == "/" and morsel["domain"] == ""
+
+
+def committed_user(status: str = "active", agency: uuid.UUID | None = None) -> AppUser:
+    """A user of `agency` (the deployment agency by default), committed and kept: skiw_app may
+    not delete `app_user` (TEN-03), and markers written for it need the row (composite FK)."""
+    if agency is None:
+        agency, _ = settings.SKIW_DEPLOYMENT_AGENCY()
+    row = uuid.uuid4()
+    user = AppUser(
+        id=row, agency_id=agency, email=f"{row}@example.test", display_name="User", status=status
+    )
+    with with_agency(agency):
+        user.save(force_insert=True)
+    return user
+
+
+@pytest.fixture
+def agency_b() -> uuid.UUID:
+    """A second real agency (committed and kept, as the tenancy A/B pair)."""
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn, conn.cursor() as cursor:
+        seed.insert_agency(cursor, B, "Isolation B")
+    return B

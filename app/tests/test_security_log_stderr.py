@@ -8,12 +8,14 @@ warning and every 500 traceback reached nothing in production. The subprocess ha
 variables set here: no DJANGO_DEBUG, a key made per run, no reachable database."""
 
 import base64
+import logging
 import os
 import secrets
 import subprocess
 import sys
 from pathlib import Path
 
+from config.logs import NoExceptionText
 from tests.settings_env import REQUIRED
 
 APP_DIR = Path(__file__).resolve().parent.parent
@@ -68,6 +70,17 @@ except ValueError:
     logging.getLogger("procrastinate.worker").error("Job failed", exc_info=True)
 logging.getLogger("skiw.probe").warning("a plain warning")
 logging.getLogger("skiw.probe").info("below the level")
+"""
+
+# PR 106 review R1 P3 #1: with DEBUG on (the local default), a django.* logger other than request.
+DEBUG_ON = """
+import logging
+import django
+django.setup()
+try:
+    raise KeyError("Key (email)=(person@example.test) already exists")
+except KeyError:
+    logging.getLogger("django.template").error("render failed", exc_info=True)
 """
 
 
@@ -141,3 +154,25 @@ def test_other_loggers_reach_stderr_through_the_same_formatter() -> None:
     assert lines[-2:] == ["ValueError", "WARNING skiw.probe a plain warning"]
     assert "below the level" not in result.stderr
     assert "person@example.test" not in result.stderr
+
+
+def test_with_debug_on_a_django_logger_prints_no_exception_message() -> None:
+    result = run(DEBUG_ON, DJANGO_DEBUG="1")
+    assert result.returncode == 0, result.stderr[-2000:]
+    lines = result.stderr.splitlines()
+    assert lines[0] == "ERROR django.template render failed" and lines[-1] == "KeyError"
+    assert [line for line in lines if line.startswith("ERROR")] == [lines[0]]  # printed once
+    assert "person@example.test" not in result.stderr
+
+
+def test_a_traceback_cached_by_an_earlier_handler_is_not_reused() -> None:
+    """logging.Formatter.format reuses record.exc_text; the stock one caches the messages."""
+    marker = "@".join(("person", "example.test"))  # not in the source line the frame quotes
+    try:
+        raise KeyError(marker)
+    except KeyError:
+        record = logging.LogRecord("x", logging.ERROR, __file__, 1, "m", None, sys.exc_info())
+    assert marker in logging.Formatter().format(record)  # caches exc_text with the message
+    text = NoExceptionText("%(message)s").format(record)
+    assert text.endswith("\nKeyError") and marker not in text
+    assert marker not in logging.Formatter().format(record)  # ours is cached now
