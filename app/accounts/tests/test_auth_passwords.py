@@ -92,5 +92,5 @@ def test_a_real_hash_at_the_lowest_allowed_values_fits_the_login_blob(
     blob.require_key.cache_clear()
     record = blob.LoginRecord(uuid.uuid4(), uuid.uuid4(), stored)
     sealed = blob.seal_login(record, "a@example.test")
-    assert len(sealed) == 222 and blob.open_login(sealed, "a@example.test") == record
+    assert len(sealed) == 220 and blob.open_login(sealed, "a@example.test") == record
     blob.require_key.cache_clear()

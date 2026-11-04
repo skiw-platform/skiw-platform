@@ -21,7 +21,7 @@ from tenancy.binding import with_agency
 
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 
-LOOKUP_BLOB_LENGTH = 62
+LOOKUP_BLOB_LENGTH = 60
 # A stored_key()-shaped value, derived so no high-entropy literal sits in the source.
 KEY_HASH = hashlib.sha256(b"session-revocation-test").hexdigest()
 

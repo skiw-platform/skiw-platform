@@ -136,12 +136,15 @@ larger one.
 ### Rotating `login_blob_key` (login and credential blobs, M3b)
 `web` and `worker` read it from `LOGIN_BLOB_KEY_FILE` (`migrate` never mounts it) and refuse to
 start when it is missing or malformed, before the migration check and without printing the key.
-Its version must be at most `v65535`, because each blob stores the version in two bytes (the
-blob module lands in M3b-2). The highest version seals new blobs; every listed version opens. Each
+Its version must be at most `v65535`, because each blob binds the version in two bytes of its
+AAD. The highest version seals new blobs; opening tries every listed version. Each
 `app_user.login_blob_ct` and `user_factor.lookup_blob_ct` (from M3e and M3g) stays sealed under the
 version that wrote it, so a rotation adds a new, higher line and keeps every old one until a later
-job re-seals the blobs (spec T16; not built yet). Removing a version that still seals a blob
-makes that account's password login, or that passkey, fail as if the account were unknown.
+job re-seals the blobs (spec T16; not built yet). A blob carries no version in clear (M3e-1a), so
+SQL cannot show which version a row uses: before a version leaves the file, the re-seal job must
+open every blob and report the version that opened it, and none may still report the old one.
+Removing a version that still seals a blob makes that account's password login, or that passkey,
+fail as if the account were unknown.
 Restart `web` and `worker` after each change, then escrow (spec §8.4 H4).
 
 ### `tenant_token_key` and `lookup_decoy_key` (the guard key tables, M4c-3)

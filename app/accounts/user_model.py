@@ -13,7 +13,7 @@ from accounts.auth.blob import LOGIN_SIZE, OVERHEAD
 from tenancy.models import TenantModel
 
 STATUSES = ("invited", "active", "disabled")
-LOGIN_BLOB_LENGTH = OVERHEAD + LOGIN_SIZE  # 222, the fixed sealed length
+LOGIN_BLOB_LENGTH = OVERHEAD + LOGIN_SIZE  # 220, the fixed sealed length
 
 
 class CIText(models.TextField):  # type: ignore[type-arg]

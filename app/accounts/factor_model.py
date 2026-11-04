@@ -14,7 +14,7 @@ from accounts.user_model import AppUser
 from tenancy.models import TenantModel
 
 KINDS = ("passkey", "totp", "recovery")
-LOOKUP_BLOB_LENGTH = OVERHEAD + CREDENTIAL_SIZE  # 62, the fixed sealed length
+LOOKUP_BLOB_LENGTH = OVERHEAD + CREDENTIAL_SIZE  # 60, the fixed sealed length
 
 
 class UserFactor(TenantModel):
