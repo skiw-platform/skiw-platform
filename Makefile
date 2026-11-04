@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test test-live host-test host-test-live secrets-test build web-build web-dev e2e dev db-up migrate clean check-node audit secrets audit-python audit-web image-scan hooks
+.PHONY: install lint typecheck test test-live db-test host-test host-test-live secrets-test build web-build web-dev e2e dev db-up migrate clean check-node audit secrets audit-python audit-web image-scan hooks
 
 export PYTHONPATH := app:infra/host
 NODE_MAJOR := $(shell node -p "process.versions.node.split('.')[0]" 2>/dev/null)
@@ -38,6 +38,14 @@ test-live: .env
 	docker compose up -d --wait db
 	$(MAKE) migrate
 	set -a; . ./.env; set +a; uv run pytest -m live
+
+# The tenancy gate (plan M4c-6b): migrate (which ends with check_tenancy_schema), the live tenancy
+# tests, then the check once more on the schema they leave behind (every fixture rolls back).
+db-test: .env
+	docker compose up -d --wait db
+	$(MAKE) migrate
+	set -a; . ./.env; set +a; uv run pytest -m live app/tenancy
+	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py check_tenancy_schema
 
 # Host tooling tests (spec section 8.4) and the infra/host/compose.yml config tests. No Docker daemon
 # needed; the Compose tests need the docker compose CLI (skip locally without it, fail when CI=true).
@@ -120,6 +128,7 @@ migrate: .env
 	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py makemigrations --check --dry-run
 	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py lintmigrations --settings config.settings_migration_lint --warnings-as-errors --exclude-apps procrastinate \
 		--ignore-name 0002_guard_key_tables_unlinted --no-cache --quiet ignore
+	set -a; . ./.env; set +a; DATABASE_URL="$${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}" uv run python app/manage.py check_tenancy_schema
 
 clean:
 	docker compose down -v

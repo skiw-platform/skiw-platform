@@ -328,6 +328,17 @@ uuid; the owner gave the staging and production names (2026-11-03).
   gives it back and its row is visible. A `tenant_token_key` that differs from the stored one, or a
   missing row, then fails the deploy health check and the deploy switches back.
 
+### The tenancy schema check (M4c-6b)
+`skiw-deploy` runs `manage.py check_tenancy_schema` in the new image right after `migrate`, as
+`skiw_migrator` (at most 120 s). Every table must be a listed global, the `agency` root, or a
+compliant tenant table (spec §4.2). Output is never shown; the journal line names the step.
+- **On failure** the deploy exits 1 before the switch and the old digest keeps serving. The bad
+  table stays in the database, because migrations are never reversed.
+- **CI runs the same check first** (`make migrate` ends with it), so a failure here means a CI
+  result was missed. Run `make migrate` on that commit to see each `<table>: <reason>` line.
+- **The fix** is a forward migration that makes the table compliant (or drops it), then a new
+  deploy. Do not run a reverse migration on the host.
+
 ## Database roles (`bootstrap-db`, spec §8.4 H4, H6)
 
 Run it in this order on a new or rebuilt host. It needs root, for the same reason as

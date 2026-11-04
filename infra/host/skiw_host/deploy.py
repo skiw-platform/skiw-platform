@@ -6,7 +6,9 @@ Run as root through one sudo rule, reached only from the forced command `skiw-de
 report that digest running with checks=passed (G11 (b), `skiw-staging-status` over SSH); pull by
 digest with the GHCR read token on stdin; (4) `migrate --plan`, and when it is not empty the
 pre-migration dump; (5) the host's applied-contract list grows by the image's contract migrations
-(before `migrate`, which can apply some and then fail), then `migrate`; (6) switch web and worker
+(before `migrate`, which can apply some and then fail), then `migrate`, then
+`check_tenancy_schema` (plan M4c-6b; a failure leaves the migrations applied and the old digest
+serving: the fix is a forward migration, runbook host-rebuild.md); (6) switch web and worker
 (SKIW_IMAGE in the state file, `up -d`); (7) `/readyz` 200 and the worker registered, else switch
 back and alert (migrations are never reversed); staging then writes its status line (G12), after
 removing the old one before the switch; (9) production appends one line to the append-only
@@ -89,6 +91,9 @@ LIVE = (
     " WHERE id > {} AND last_heartbeat > now() - interval '{} seconds';"
 )
 JOURNAL: Journal = partial(to_journal, ident="skiw-deploy")
+# Plan M4c-6b: the tenancy schema check after `migrate`, before the switch (a short tool call).
+CHECK = ["--profile", "deploy", "run", "--rm", "-T", "migrate"]
+CHECK += ["python", "app/manage.py", "check_tenancy_schema"]
 LABELS = ["--profile", "deploy", "run", "--rm", "-T", "migrate"]
 LABELS += ["python", "app/manage.py", "migration_labels"]
 MIGRATION = re.compile(r"[a-z_][a-z0-9_]{0,99}\.[A-Za-z0-9_]{1,200}")
@@ -559,6 +564,7 @@ def deploy(  # the H3 steps in order, one recovery boundary
         union = sorted(applied | set(names["contracts"]))
         write_state(d, "".join(f"{n}\n" for n in union).encode("ascii"), APPLIED)
         d.ok([*d.compose(image), *PLAN], "migrate", bound=None)  # old containers serve on
+        d.ok([*d.compose(image), *CHECK], "check_tenancy_schema")  # a fail: old ones serve on
     if not production:  # G12: the old status line goes before the switch; a failed deploy has none
         write_state(d, None, STATUS)
     # Same digest: Compose keeps the running worker, so its fresh heartbeat is the proof; a new
