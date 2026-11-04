@@ -263,14 +263,23 @@ def test_app_role_cannot_create_in_the_queue_schema() -> None:
     assert rows == [(False,)]
 
 
-def test_no_column_level_grants() -> None:
+# accounts.0009 (plan M3e-1b): the guard.auth_lookup_login owner reads exactly these two columns of
+# app_user (BYPASSRLS, before the tenant is known); every other column grant is refused.
+COLUMN_GRANTS = {
+    ("app_user", "email", LOOKUP_ROLE, "SELECT"),
+    ("app_user", "login_blob_ct", LOOKUP_ROLE, "SELECT"),
+}
+
+
+def test_column_level_grants_are_exactly_the_lookup_columns() -> None:
     rows = separate(
-        "SELECT c.relname, a.attname FROM pg_attribute a"
-        " JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace"
+        "SELECT c.relname, a.attname, e.grantee::regrole::text, e.privilege_type"
+        " FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid"
+        " JOIN pg_namespace n ON n.oid = c.relnamespace, aclexplode(a.attacl) e"
         " WHERE NOT starts_with(n.nspname, 'pg_') AND n.nspname <> 'information_schema'"
         " AND a.attacl IS NOT NULL"
     )
-    assert rows == []
+    assert set(rows) == COLUMN_GRANTS and len(rows) == len(COLUMN_GRANTS)
 
 
 @pytest.mark.parametrize(

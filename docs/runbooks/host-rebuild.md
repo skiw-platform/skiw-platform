@@ -165,6 +165,12 @@ without printing a key (the message names the key and version). `skiw-deploy` th
   that line; a key that turns out to be safe goes back only under a new, higher version number,
   never by un-retiring the old one. Rotate yearly and on suspicion (spec §8.4 H4, T16). Escrow
   after each change (spec §8.4 H4).
+  **`lookup_decoy_key` is different (M3e-1b):** `guard.auth_lookup_login` makes every decoy with the
+  **oldest** listed version, so adding a version changes nothing. Removing the oldest changes every
+  unknown email's decoy at once while real blobs stay the same, and anyone who compared lookups
+  before and after could then tell the two apart. So remove the oldest `lookup_decoy_key` line only
+  in the same deploy window as re-sealing every login blob (the re-seal job, not built yet); until
+  that job exists, do not remove it.
   **Keep the two steps in separate deploys.** From M4c-4a `guard.current_agency()` reads
   `guard.tenant_mac_key` and refuses a retired version. If one deploy both adds the new line and
   removes the old one, `migrate` retires the old version before the switch, while the running
