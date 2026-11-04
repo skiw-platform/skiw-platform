@@ -1,0 +1,7 @@
+PR: 108
+Reviewed head SHA: 83edcbd682d2c52b957742df09bfe829161109ac
+Review file: reviews/PR-108.md
+Review file hash (git hash-object): 41eefb2ecd3c6167b3f2cd14f076c0402242323b
+Log-branch commit holding that review: fcb4054
+Verdict: Approved (Round 1); CI at 83edcbd: checks, security, image, host pass (run 41810521009)
+Time: 2026-11-04T10:27:13Z
