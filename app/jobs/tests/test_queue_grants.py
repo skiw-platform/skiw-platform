@@ -53,6 +53,9 @@ COMPOSITE_TYPES = {"procrastinate_job_to_defer_v1"}
 TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
 # django_session: D6 "Revocation is a row delete" (accounts.0001; flush and cycle_key delete).
 DELETE_ALLOW_LIST = {"procrastinate_periodic_defers", "procrastinate_workers", "django_session"}
+# Tenant tables skiw_app may DELETE from, inside its agency only (RLS). accounts.0007 (plan M3d):
+# a factor is removed, and a recovery code is used up, by a DELETE.
+TENANT_DELETE_ALLOW_LIST = {"user_factor"}
 # accounts.0002 (plan M3c): the global pre-tenant tables of spec §4.1; no DELETE, no TRUNCATE.
 AUTH_TABLES = {
     "auth_throttle": {"SELECT", "INSERT", "UPDATE"},
@@ -78,6 +81,7 @@ TEN03_EVIDENCE_TABLES = [
     "auth_stepup",
     "outbox_approval",
     "outbox_send",
+    "session_revocation",  # accounts.0007 (plan M3d): the revocation marker cannot be removed
 ]
 HAS_AGENCY_ID = (
     "EXISTS (SELECT FROM pg_attribute a"
@@ -232,7 +236,7 @@ def test_app_role_deletes_only_from_the_allow_list() -> None:
         " AND has_table_privilege(%s, c.oid, 'DELETE')",
         APP_ROLE,
     )
-    assert {name for (name,) in rows} == DELETE_ALLOW_LIST
+    assert {name for (name,) in rows} == DELETE_ALLOW_LIST | TENANT_DELETE_ALLOW_LIST
 
 
 @pytest.mark.parametrize("role", [APP_ROLE, LOOKUP_ROLE])
