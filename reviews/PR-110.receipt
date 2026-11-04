@@ -1,0 +1,7 @@
+PR: 110
+Reviewed head SHA: abbdb131d7fa3c931189a9272fd65768f82dedcd
+Review file: reviews/PR-110.md
+Review file hash (git hash-object): 2dd1c4f1b2f9d1f9c2f1f7e7dbfe55c279d7ea18
+Log-branch commit holding that review: b172261
+Verdict: Approved (Round 1); CI at abbdb13: checks, security, image, host pass
+Time: 2026-11-04T13:23:51Z
