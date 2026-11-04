@@ -21,6 +21,39 @@ def _app_user(
     return row
 
 
+def _user_factor(
+    cursor: CursorWrapper, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
+) -> uuid.UUID:
+    row = uuid.uuid4()
+    cursor.execute(
+        "INSERT INTO public.user_factor (id, agency_id, user_id, kind, secret_ct)"
+        " VALUES (%s, %s, %s, 'totp', %s)",
+        [row, agency, parents["user_id"], b"\x00" * 32],
+    )
+    return row
+
+
+def _session_revocation(
+    cursor: CursorWrapper, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
+) -> uuid.UUID:
+    row = uuid.uuid4()
+    cursor.execute(
+        "INSERT INTO public.session_revocation (id, agency_id, user_id) VALUES (%s, %s, %s)",
+        [row, agency, parents["user_id"]],
+    )
+    return row
+
+
+USER = {"user_id": "public.app_user"}
 CASES = [
     IsolationCase("public.app_user", _app_user, frozenset({"SELECT", "INSERT", "UPDATE"})),
+    IsolationCase(
+        "public.user_factor",
+        _user_factor,
+        frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"}),
+        USER,
+    ),
+    IsolationCase(
+        "public.session_revocation", _session_revocation, frozenset({"SELECT", "INSERT"}), USER
+    ),
 ]

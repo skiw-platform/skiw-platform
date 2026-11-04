@@ -788,3 +788,19 @@
 - **Versions:** none new (`citext` ships with Postgres 17.11).
 - **Exception to a rule?** no.
 - **Decided by:** builder (deep tier, Opus 5.5) within plan M3d, split by the plan's §1 rule.
+
+## 2026-11-04 — M3d-1b: `user_factor` and the `session_revocation` marker
+- **Decision:** the second half of M3d-1 (split, see the M3d-1a entry), stacked on M3d-1a. Two `TenantModel`s in the plan's files, `accounts/factor_model.py` and `revocation_model.py`, each with a composite FK `(agency_id, user_id)` → `app_user (agency_id, id)` (Django FK with `db_constraint=False`, `PROTECT`, no reverse accessor; the real FK comes from `tenant_table()`):
+  - `user_factor` (spec §4.1): `kind` `passkey`/`totp`/`recovery`; `credential_id` unique across agencies (spec §4.1); `sign_count >= 0`, default 0; `lookup_blob_ct` null or exactly 62 bytes (`blob.OVERHEAD` 30 + `CREDENTIAL_SIZE` 32); `public_key` and `secret_ct` free bytea (their layouts come with M3f and M3g). `skiw_app` gets all four commands (factor removal, recovery-code use, plan M3d).
+  - `session_revocation(id, agency_id, user_id, session_key_hash null, revoked_at)` (plan carry-over (b), owner PR 74 Q2 = A): `session_key_hash` is null (a user-wide marker) or 64 lower-case hex characters, the shape of `accounts.session.stored_key`; `revoked_at` defaults to Django's `Now()`, which Postgres runs as `STATEMENT_TIMESTAMP()` (the insert's own time, not the transaction's start). Indexes `(agency_id, session_key_hash)` and `(agency_id, user_id, revoked_at)` (plan "Cost"; the user FK's own single-column index is left out, the second index covers it). `skiw_app` gets SELECT and INSERT only (append-only, TEN-03).
+- **Migrations:** `accounts.0006` (generated `CreateModel`s) and `accounts.0007` (`tenant_table()` for both, with the composite FKs), split for the same reason as `0004`/`0005`.
+- **Grant audit (`app/jobs/tests/test_queue_grants.py`):** the DELETE test now allows `DELETE_ALLOW_LIST | TENANT_DELETE_ALLOW_LIST`, the latter `{"user_factor"}` with the plan as its reason; `session_revocation` joins `TEN03_EVIDENCE_TABLES`.
+- **Tests:** both tables join `accounts/tests/isolation_cases.py` with `user_id` declared as a parent, so the harness runs a cross-agency FK test for each. `test_user_tables_live.py` gains the column rules of both tables. The harness keeps their rows under A and B; `local-dev.md` says so.
+- **Mutants (bytecode off), all killed:** dropping each of `user_factor_kind_known`, `_sign_count_gte_0`, `_lookup_blob_ct_length`, `_credential_id_key`, `session_revocation_key_hash_shape` and both composite FKs; UPDATE granted on `session_revocation`; DELETE revoked on `user_factor`; `session_revocation` left out of `CASES`; `TENANT_DELETE_ALLOW_LIST` emptied. (The M3d-1a mutants, rerun on this branch, are still killed.)
+- **Spec gap (plan §9 item 2, still open):** spec §4.1 does not list `session_revocation`, and D6 still says "Revocation is a row delete". The table follows the owner's PR 74 Q2 = A and the plan; the spec text is fixed at the next spec change, as the plan says.
+- **Why:** spec v1.21 §4.1, §4.2, TEN-03–08; plan M3 §3 M3d and carry-over (b).
+- **Alternatives rejected:** a per-user generation counter on `app_user` (plan M3d "Rejected": SQL in agency A can UPDATE it back); a CHECK tying `credential_id`/`public_key`/`lookup_blob_ct` to `kind = 'passkey'` (the plan does not fix which columns TOTP and recovery rows use until M3f; it can be added then).
+- **Scope / affects:** `app/accounts/factor_model.py`, `revocation_model.py`, `models.py`, `migrations/0006_factor_and_revocation.py`, `0007_factor_and_revocation_rls.py` (new), `app/accounts/tests/isolation_cases.py`, `test_user_tables_live.py`, `app/jobs/tests/test_queue_grants.py`, `docs/runbooks/local-dev.md`, `docs/DECISIONS.md`.
+- **Versions:** none new.
+- **Exception to a rule?** no.
+- **Decided by:** builder (deep tier, Opus 5.5) within plan M3d.
