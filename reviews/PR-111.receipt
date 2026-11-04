@@ -1,0 +1,7 @@
+PR: 111
+Reviewed head SHA: 6fbd793ce2c9b9094ad986df3788d6dd3d8e5539
+Review file: reviews/PR-111.md
+Review file hash (git hash-object): 8c75210afd7b21a4be4c025ca65d2699a31d1e1e
+Log-branch commit holding that review: 9a32a56
+Verdict: Approved (Round 1); merge condition (base retargeted to main) met before this receipt; CI at 6fbd793: checks, security, image, host pass
+Time: 2026-11-04T13:33:31Z
