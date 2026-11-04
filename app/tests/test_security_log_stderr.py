@@ -35,7 +35,14 @@ from django.test import Client, override_settings
 from django.urls import path
 def boom(request):
     raise RuntimeError("planted failure")
-sys.modules["boom_urls"] = types.SimpleNamespace(urlpatterns=[path("boom", boom)])
+def chained(request):
+    try:
+        raise KeyError("Key (email)=(person@example.test) already exists")
+    except KeyError as exc:
+        raise ValueError(f"wrapped person@example.test") from exc
+sys.modules["boom_urls"] = types.SimpleNamespace(
+    urlpatterns=[path("boom", boom), path("chained", chained)]
+)
 with override_settings(ROOT_URLCONF="boom_urls"):
     client = Client(raise_request_exception=False)
     answer = client.post(
@@ -43,6 +50,7 @@ with override_settings(ROOT_URLCONF="boom_urls"):
     )
     assert answer.status_code == 500
     assert client.get("/missing").status_code == 404
+    assert client.get("/chained").status_code == 500
 """
 
 
@@ -79,13 +87,28 @@ def test_a_rejected_session_row_logs_one_line_to_stderr_without_secrets() -> Non
         assert secret not in result.stderr
 
 
-def test_a_500_logs_its_path_and_traceback_to_stderr_but_no_request_data() -> None:
+def test_a_500_logs_its_path_and_traceback_to_stderr_but_no_request_data_or_messages() -> None:
     result = run(FAIL, DJANGO_ALLOWED_HOSTS="testserver")
     assert result.returncode == 0, result.stderr[-2000:]
     lines = result.stderr.splitlines()
-    assert lines[0] == "ERROR django.request Internal Server Error: /boom"
-    assert lines[1] == "Traceback (most recent call last):"
-    assert lines[-1] == "RuntimeError: planted failure"
-    assert not [line for line in lines if line.startswith(("ERROR", "WARNING"))][1:]  # no 404
-    for planted in ("planted-query", "planted-body", "planted-cookie"):
+    first, second = "\n".join(lines).split(
+        "\nERROR django.request Internal Server Error: /chained\n"
+    )
+    first_lines = first.splitlines()
+    assert first_lines[0] == "ERROR django.request Internal Server Error: /boom"
+    assert first_lines[1] == "Traceback (most recent call last):"
+    assert first_lines[-1] == "RuntimeError"  # the class, never the message (PR 78 R1 P2)
+    assert "in boom" in first  # the frames are kept
+    assert [line for line in lines if line.startswith(("ERROR", "WARNING"))] == [
+        "ERROR django.request Internal Server Error: /boom",
+        "ERROR django.request Internal Server Error: /chained",
+    ]  # no 404
+    chain = second.splitlines()
+    assert chain[0] == "Traceback (most recent call last):"
+    assert "KeyError" in chain
+    assert "The above exception was the direct cause of the following exception:" in chain
+    assert chain[-1] == "ValueError"
+    assert "in chained" in second
+    for planted in ("planted-query", "planted-body", "planted-cookie", "planted failure"):
         assert planted not in result.stderr
+    assert "person@example.test" not in result.stderr

@@ -141,9 +141,9 @@ def test_an_empty_table_gets_the_configured_agency() -> None:
     transaction that empties the table and rolls back."""
     other = uuid.uuid4()
     with migrator() as conn, conn.transaction(force_rollback=True), conn.cursor() as cursor:
-        seed._lift(cursor)
-        cursor.execute("DELETE FROM agency")
-        seed._restore(cursor)
+        # TRUNCATE ignores RLS, and CASCADE empties the tenant tables whose rows point at an
+        # agency (accounts, M3d), which a DELETE would refuse; all of it rolls back.
+        cursor.execute("TRUNCATE agency CASCADE")
         assert seed.seed_deployment_agency(cursor, other, "Fresh") is True
         seed._lift(cursor)
         assert seed.stored_ids(cursor) == {other}

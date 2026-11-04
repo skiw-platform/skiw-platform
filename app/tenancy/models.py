@@ -3,6 +3,8 @@
 (tenancy.seed) writes it. Django sends `post_migrate` only for apps that have a models module, and
 tenancy.keys and tenancy.seed need it."""
 
+from typing import ClassVar
+
 from django.db import models
 
 
@@ -31,7 +33,8 @@ class TenantModel(models.Model):
 
     class Meta:
         abstract = True
-        constraints = (
+        # Widened so a subclass Meta can add its own checks after `*TenantModel.Meta.constraints`.
+        constraints: ClassVar[tuple[models.BaseConstraint, ...]] = (
             models.UniqueConstraint(
                 fields=["agency_id", "id"], name="%(app_label)s_%(class)s_agency_id_id_uq"
             ),

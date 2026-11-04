@@ -231,7 +231,8 @@ ROOT_CASES = {
         ["the tenant root has an agency_id column"],
     ),
     "primary key replaced by a unique constraint": (
-        "ALTER TABLE agency DROP CONSTRAINT agency_pkey; ALTER TABLE agency ADD UNIQUE (id)",
+        "ALTER TABLE agency DROP CONSTRAINT agency_pkey CASCADE;"
+        " ALTER TABLE agency ADD UNIQUE (id)",
         ["id is not the primary key"],
     ),
 }
@@ -243,7 +244,10 @@ def test_each_root_rule_fails_on_the_real_agency(
 ) -> None:
     sql, reasons = ROOT_CASES[case]
     conn.execute(sql)
-    assert check(conn, schemas=["public"], extra_allowed=TEST_ONLY) == [
+    # Only agency's own findings: dropping its primary key (CASCADE) also drops the tenant
+    # tables' FKs to it, which the tenant rules report on those tables (M3d).
+    found = check(conn, schemas=["public"], extra_allowed=TEST_ONLY)
+    assert [v for v in found if v.table == "public.agency"] == [
         Violation("public.agency", reason) for reason in reasons
     ]
 

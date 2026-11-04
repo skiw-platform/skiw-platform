@@ -137,7 +137,13 @@ FILES_SWEEP_AGE_S = 3600
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {"plain": {"format": "%(levelname)s %(name)s %(message)s"}},
+    # Tracebacks keep frames and exception classes, never exception messages (config.logs).
+    "formatters": {
+        "plain": {
+            "()": "config.logs.NoExceptionText",
+            "format": "%(levelname)s %(name)s %(message)s",
+        }
+    },
     "handlers": {
         "stderr": {
             "class": "logging.StreamHandler",
