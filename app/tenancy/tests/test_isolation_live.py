@@ -1,65 +1,23 @@
 """TEN-08 isolation tests generated from every registered case, the coverage and composite-FK
-checks, and the proof (plan M4c-7a; DECISIONS "M4c-7a"). The fixture pair's schema is dropped before
-it is built and after the module; A and B are committed with `insert_agency` and kept."""
+checks, and the proof (plan M4c-7a; DECISIONS "M4c-7a"), on the conftest's fixture pair."""
 
-import os
 import uuid
-from collections.abc import Iterator, Mapping
-from typing import Any
+from collections.abc import Mapping
 
-import psycopg
 import pytest
 from django.db.backends.utils import CursorWrapper
 
-from tenancy import seed
 from tenancy.check import check, tenant_tables
-from tenancy.template import tenant_table_sql
 from tenancy.tests import isolation
-from tenancy.tests.isolation import COMMANDS, A, B, IsolationCase
+from tenancy.tests.conftest import COLUMNS, build, migrator
+from tenancy.tests.isolation import COMMANDS, IsolationCase
 from tenancy.tests.isolation_cases import SCHEMA
 
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db", "fixture_pair")]
 
 TEST_ONLY = ("public.jobs_probe", "public.files_probe")
 CASES = isolation.registry()
-COLUMNS = "id uuid PRIMARY KEY, agency_id uuid NOT NULL"
 LEAKY = f"{SCHEMA}.leaky"
-
-
-def migrator() -> "psycopg.Connection[Any]":
-    return psycopg.connect(os.environ["MIGRATION_DATABASE_URL"])
-
-
-def build(conn: "psycopg.Connection[Any]", table: str, columns: str, **kwargs: Any) -> None:
-    conn.execute(f"CREATE TABLE {table} ({columns}, UNIQUE (agency_id, id))")
-    for forward, _ in tenant_table_sql(table, **kwargs):
-        for statement in forward:
-            conn.execute(statement)
-
-
-@pytest.fixture(scope="module")
-def fixture_pair() -> Iterator[None]:
-    with migrator() as conn, conn.transaction():
-        conn.execute(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE")
-        conn.execute(f"CREATE SCHEMA {SCHEMA}")
-        conn.execute(f"GRANT USAGE ON SCHEMA {SCHEMA} TO skiw_app")
-        conn.execute(f"SET LOCAL search_path = {SCHEMA}, public")
-        build(conn, "parent", COLUMNS, commands=COMMANDS)
-        build(
-            conn,
-            "child",
-            f"{COLUMNS}, parent_id uuid NOT NULL",
-            commands={"SELECT", "INSERT"},
-            composite_fks=[("parent_id", "parent")],
-        )
-        with conn.cursor() as cursor:
-            seed.insert_agency(cursor, A, "Isolation A")
-            seed.insert_agency(cursor, B, "Isolation B")
-    try:
-        yield
-    finally:
-        with migrator() as conn:
-            conn.execute(f"DROP SCHEMA {SCHEMA} CASCADE")
 
 
 GENERATED = [
