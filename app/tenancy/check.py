@@ -9,6 +9,7 @@ are classified, so an FK is judged by its target; `schemas` limits only what is 
 name tables, policies and constraints, never data.
 """
 
+from collections.abc import Set
 from dataclasses import dataclass
 from typing import Any
 
@@ -108,12 +109,7 @@ def check(
     schema-qualified globals for tests only (`public.jobs_probe`, `public.files_probe`)."""
     relations = _load(conn)
     allowed = GLOBAL_TABLES | set(extra_allowed)
-    tenant = {
-        oid
-        for oid, rel in relations.items()
-        if rel.name not in allowed and rel.name != ROOT_TABLE and "agency_id" in rel.columns
-        and rel.kind not in ("v", "m")
-    }  # fmt: skip
+    tenant = _tenant_oids(relations, allowed)
     root = next((oid for oid, rel in relations.items() if rel.name == ROOT_TABLE), None)
     found: list[Violation] = []
     for oid, rel in relations.items():
@@ -132,6 +128,23 @@ def check(
             reasons.append("not on the global list and has no agency_id column")
         found += [Violation(rel.name, reason) for reason in reasons]
     return sorted(found)
+
+
+def tenant_tables(conn: "psycopg.Connection[Any]", extra_allowed: tuple[str, ...] = ()) -> set[str]:
+    """The schema-qualified names `check()` classifies as tenant tables (the TEN-08 coverage list,
+    plan M4c-7a), compliant or not."""
+    relations = _load(conn)
+    allowed = GLOBAL_TABLES | set(extra_allowed)
+    return {relations[oid].name for oid in _tenant_oids(relations, allowed)}
+
+
+def _tenant_oids(relations: dict[int, "_Relation"], allowed: Set[str]) -> set[int]:
+    return {
+        oid
+        for oid, rel in relations.items()
+        if rel.name not in allowed and rel.name != ROOT_TABLE and "agency_id" in rel.columns
+        and rel.kind not in ("v", "m")
+    }  # fmt: skip
 
 
 def _load(conn: "psycopg.Connection[Any]") -> dict[int, _Relation]:
