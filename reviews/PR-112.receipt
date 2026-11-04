@@ -1,0 +1,7 @@
+PR: 112
+Reviewed head SHA: 53ad168096f86cd86d2e3076e771cb5d35d2df48
+Review file: reviews/PR-112.md
+Review file hash (git hash-object): 7be04a1ab647f417d74eba0063464f3a89da7cee
+Log-branch commit holding that review: fa1619e
+Verdict: Approved (Round 1); no merge conditions; P3 #1 (Argon2 parameter change timing) deferred to M3e-2b; CI at 53ad168: checks, security, image, host pass
+Time: 2026-11-04T15:36:15Z
