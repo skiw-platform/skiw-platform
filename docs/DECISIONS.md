@@ -751,3 +751,22 @@
 - **Versions:** none new.
 - **Exception to a rule?** no.
 - **Decided by:** builder (deep tier, Opus 5.5) within plan M4c-7a; the two wording changes and the §7 line by the owner, 2026-11-04.
+
+## 2026-11-04 — M4c-7b: row-level forged-tenant, leak and EXPLAIN tests
+- **Decision:** `tenancy/tests/test_row_level_live.py` runs, for every registered isolation case (today the fixture pair), as skiw_app through `with_agency()` on committed rows:
+  - **forged tokens (TEN-09):** M4c-4b's list (random, B-shaped with a bad MAC, truncated, extra field, zero MAC, an absent and a retired key version) plus a genuine B token replayed from B's own transaction, each set inside A's transaction. SELECT sees neither B's row nor A's own, UPDATE and DELETE affect 0 rows, an INSERT naming B raises 42501, and B's row is still there afterwards. `guard.current_agency()` must be NULL under the forgery, and A's own row must vanish, so a forgery that never lands fails the test instead of passing quietly;
+  - `app.agency_id` set to B inside A's transaction leaves A seeing only A;
+  - `COMMIT; BEGIN` inside `with_agency(A)` hides A's own row and refuses an INSERT;
+  - **leak test:** A, then B, on the same backend (`pg_backend_pid()` checked), each sees only its own row; afterwards `current_setting('app.tenant_token', true)` is empty and `guard.current_agency()` is NULL;
+  - **EXPLAIN [A5]:** for SELECT and, where granted, UPDATE and DELETE, every `guard.current_agency()` call in the plan sits inside an InitPlan, there is no seq scan, and an index condition reads `agency_id = (InitPlan n).col1`. Seq scans are switched off (`SET LOCAL enable_seqscan = off`), so this shows the `unique (agency_id, id)` index is usable, not that the planner picks it at every table size. Postgres shows one InitPlan for the two identical policy predicates.
+- **"UPDATE/DELETE of B rows fail"** (TEN-09 wording) is read as "affect 0 rows, and the row survives": RLS hides the rows, and Postgres does not raise for that. This is the same reading as M4c-7a's write check; only INSERT and WITH CHECK raise 42501.
+- **"Pooled connection":** the sync path has no pool; Django's persistent connection is the one connection that is reused. M4c-8 re-runs this set on `AsyncConnectionPool`.
+- **M4c-4b's `b-shaped-bad-mac` forgery** swaps that module's own agency id, so this module defines its own (it was a no-op on this module's A, caught by the NULL check while building).
+- **PR 101 R1 P3:** the fixture pair moved to `tenancy/tests/conftest.py`. It is still module-scoped (built and dropped by each module that uses it), and a session autouse fixture drops a leftover `tenancy_fixture` schema before the first tenancy test of any run that selects live tests. Without it, a leftover pair (which passes the schema check) failed `test_guard_schema_live`'s reverse migration and a `test_check_live` root rule; with it, the same leftover gave a green run. `local-dev.md` now says the schema check catches `tenancy_fixture.leaky` but not the compliant pair, and that the next live tenancy run drops the pair.
+- **Mutants (bytecode off), all killed:** the policy predicate without the `(SELECT …)` wrapper (EXPLAIN, 4 tests); a predicate that fails open on NULL (22); a session-level `set_config(…, false)` token (the leak test, 2); an unindexable `::text` predicate (EXPLAIN, 4); a forgery that is never set, with and without the NULL check (16).
+- **Why:** spec v1.21 §4.2 (the InitPlan note), TEN-09; plan `docs/plans/2026-11-01-m4-core.md` §3 M4c-7b, A5.
+- **Alternatives rejected:** a session-scoped fixture pair (the migrate-back tests would meet its FKs, as M4c-7a found); adding the forged set to the harness's `CHECKS` (it needs a second parameter, the forgery, and the harness stays one check per behaviour).
+- **Scope / affects:** `app/tenancy/tests/conftest.py`, `test_isolation_live.py`, `test_row_level_live.py` (new), `docs/runbooks/local-dev.md`, `docs/DECISIONS.md`.
+- **Versions:** none new.
+- **Exception to a rule?** no.
+- **Decided by:** builder (deep tier, Opus 5.5) within plan M4c-7b.
