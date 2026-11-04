@@ -1,0 +1,7 @@
+PR: 109
+Reviewed head SHA: cbd70dbc9dd66bfb73af497362de70395c73af45
+Review file: reviews/PR-109.md
+Review file hash (git hash-object): 3f461204c1e89c517cd522eac0f573626bfaca55
+Log-branch commit holding that review: 98f90eb
+Verdict: Approved (Round 2; Round 1 Changes requested, P2 #1 resolved); CI at cbd70db: checks, security, image, host pass
+Time: 2026-11-04T12:14:51Z
