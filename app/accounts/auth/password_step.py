@@ -8,7 +8,9 @@ tells an account from no account (plan Risk 2):
 4. one Argon2 verify: the record's hash, or `dummy_verify` for None;
 5. any failure: the three throttle counters and one `login.failed` event, whatever the reason;
 6. a verified password: `status` is read in `with_agency()` (not `active` is a failure as in 5,
-   plan [A]), and the lock counter is reset.
+   plan [A]), and the lock counter is reset. A hash made with older Argon2 parameters is re-made
+   with the current ones and re-sealed in that same transaction, so after a parameter change a
+   stored hash and the dummy cost the same again once its user signs in (PR 112 R1 P3 #1).
 
 All of it runs outside `with_agency()` apart from the status read: no tenant is known yet, and the
 throttle rows and events are global. `start_pending` then gives the browser a new session that
@@ -48,7 +50,8 @@ class Verified:
 def attempt(email: str, password: str, ip: str) -> Verified | Literal["limited", "failed"]:
     if throttle.blocked(email, ip) is not None:
         return "limited"
-    record = blob.open_login(lookup_login(email), email)
+    sealed = lookup_login(email)
+    record = blob.open_login(sealed, email)
     if record is None:
         passwords.dummy_verify(password)
         verified = False
@@ -57,6 +60,8 @@ def attempt(email: str, password: str, ip: str) -> Verified | Literal["limited",
     if record is not None and verified:
         with with_agency(record.agency_id):
             verified = AppUser.objects.filter(id=record.user_id, status="active").exists()
+            if verified and passwords.needs_rehash(record.password_hash):
+                _rehash(record, email, password, sealed)
     if record is None or not verified:
         throttle.record_failure(email, ip)
         keys = throttle.keys(email, ip)
@@ -64,6 +69,14 @@ def attempt(email: str, password: str, ip: str) -> Verified | Literal["limited",
         return "failed"
     throttle.reset_on_success(email)
     return Verified(record.user_id, record.agency_id)
+
+
+def _rehash(record: blob.LoginRecord, email: str, password: str, sealed: bytes) -> None:
+    """Only where the row still holds the blob this login opened: a password set meanwhile wins."""
+    fresh = blob.LoginRecord(record.user_id, record.agency_id, passwords.hash_password(password))
+    AppUser.objects.filter(id=record.user_id, login_blob_ct=sealed).update(
+        login_blob_ct=blob.seal_login(fresh, email)
+    )
 
 
 def start_pending(request: HttpRequest, verified: Verified) -> None:

@@ -10,9 +10,9 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 
 from accounts.auth import password_step
+from accounts.auth.blob import EMAIL_MAX
 from accounts.auth.throttle import client_ip
 
-EMAIL_MAX = 254  # RFC 5321 §4.5.3.1.3: the longest path, so the longest address
 FORM = "application/x-www-form-urlencoded"
 
 

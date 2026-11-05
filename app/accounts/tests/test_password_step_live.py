@@ -11,10 +11,13 @@ import pytest
 from django.conf import settings
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from pytest_django import Settings
 
-from accounts.auth import blob
+from accounts.auth import blob, passwords
 from accounts.auth.blob import LoginRecord
 from accounts.auth.password_step import Verified, attempt
+from accounts.user_model import AppUser
+from tenancy.binding import with_agency
 
 from .conftest import Clock, committed_user
 from .logins import (
@@ -150,3 +153,57 @@ def test_known_and_unknown_do_the_same_work(spied: dict[str, list[Any]]) -> None
         "open": [blob.LOGIN_SIZE + blob.OVERHEAD],
     }
     assert runs["unknown"] == reference and runs["invited"] == reference
+
+
+def sealed_of(user: AppUser) -> bytes:
+    with with_agency(user.agency_id):
+        value = AppUser.objects.get(id=user.id).login_blob_ct
+    assert value is not None
+    return bytes(value)
+
+
+def stored_cost(user: AppUser) -> int:
+    record = blob.open_login(sealed_of(user), user.email)
+    assert record is not None
+    return argon2.extract_parameters(record.password_hash).time_cost
+
+
+def test_a_hash_with_older_parameters_is_remade_at_the_next_sign_in(settings: Settings) -> None:
+    """PR 112 R1 P3 #1: after a parameter change, a stored hash costs the old amount until its
+    user signs in, and the current amount after; the dummy always costs the current amount."""
+    user, email = enrolled()
+    disabled, disabled_email = enrolled(status="disabled")
+    assert stored_cost(user) == settings.SKIW_ARGON2_TIME_COST
+    settings.SKIW_ARGON2_TIME_COST += 1
+    assert attempt(email, "wrong", random_ip()) == "failed"
+    assert attempt(disabled_email, PASSWORD, random_ip()) == "failed"
+    assert stored_cost(user) == stored_cost(disabled) == settings.SKIW_ARGON2_TIME_COST - 1
+    assert attempt(email, PASSWORD, random_ip()) == Verified(user.id, user.agency_id)
+    assert stored_cost(user) == settings.SKIW_ARGON2_TIME_COST
+    assert attempt(email, PASSWORD, random_ip()) == Verified(user.id, user.agency_id)
+
+
+def test_a_current_hash_is_left_as_it_is() -> None:
+    user, email = enrolled()
+    before = sealed_of(user)
+    assert attempt(email, PASSWORD, random_ip()) == Verified(user.id, user.agency_id)
+    assert sealed_of(user) == before
+
+
+def test_a_password_set_during_the_sign_in_is_not_overwritten(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user, email = enrolled()
+    settings.SKIW_ARGON2_TIME_COST += 1
+    replaced = blob.seal_login(
+        blob.LoginRecord(user.id, user.agency_id, passwords.hash_password("set meanwhile")), email
+    )
+    real = passwords.needs_rehash
+
+    def meanwhile(encoded: str) -> bool:
+        AppUser.objects.filter(id=user.id).update(login_blob_ct=replaced)
+        return real(encoded)
+
+    monkeypatch.setattr(passwords, "needs_rehash", meanwhile)
+    assert attempt(email, PASSWORD, random_ip()) == Verified(user.id, user.agency_id)
+    assert sealed_of(user) == replaced
