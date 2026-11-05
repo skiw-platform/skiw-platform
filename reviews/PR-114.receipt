@@ -1,0 +1,7 @@
+PR: 114
+Reviewed head SHA: fa7a0db4942d502094eb2ebfb5b2abc9d8c1f024
+Review file: reviews/PR-114.md
+Review file hash (git hash-object): 63bc8ccb257ba5ed59b9a487d14dfce668465de2
+Log-branch commit holding that review: 973aeb0
+Verdict: Approved (Round 1); no findings, no merge conditions; PR 112/113 R1 P3 #1 closed; owner decision needed before M3e-3b (minimum password length, reviewer recommends 12); CI at fa7a0db: checks, security, image, host pass
+Time: 2026-11-05T03:03:26Z
