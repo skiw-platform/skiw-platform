@@ -163,6 +163,8 @@ def test_every_failure_gets_the_same_answer_byte_for_byte(case: str) -> None:
         (b'{"email": "a@example.test", "password": ""}', "application/json"),
         (json.dumps({"email": "a" * 255, "password": "x"}).encode(), "application/json"),
         (b'{"email": "a\\u0000@example.test", "password": "x"}', "application/json"),
+        (b'{"email": "a\\ud800@example.test", "password": "x"}', "application/json"),
+        (b'{"email": "a@example.test", "password": "x\\udfff"}', "application/json"),
         (b"email=a%40example.test", "application/x-www-form-urlencoded"),
         (b'{"email": "a@example.test", "password": "x"}', "text/plain"),
     ],

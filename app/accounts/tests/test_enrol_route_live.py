@@ -4,10 +4,11 @@ works once, expired, tampered, reused"). What `enrol.redeem` accepts is tested i
 test_enrol_live.py (M3e-3a); these tests cover the answers, the session and the CSRF token."""
 
 import json
+import unicodedata
 from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 import pytest
@@ -220,6 +221,36 @@ def test_a_good_link_with_a_password_that_is_not_a_string_is_refused(password: o
     assert isinstance(response, HttpResponse)
     assert_refused(response)
     assert row(email).login_blob_ct is None
+
+
+def test_a_good_link_with_a_lone_surrogate_in_the_password_is_refused() -> None:
+    """JSON allows "\\ud800"; UTF-8 does not, so Argon2 would raise and answer 500 (UNI-03)."""
+    email, token = invited()
+    assert_refused(post(Client(), token, PASSWORD + "\ud800"))
+    assert row(email).login_blob_ct is None
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+def test_a_password_set_in_one_unicode_form_verifies_in_the_other(
+    form: Literal["NFC", "NFD"],
+) -> None:
+    """PR 115 R1 P3 #1: an NFC device enrols, an NFD one signs in, or the other way round."""
+    email, token = invited()
+    password = unicodedata.normalize(form, "caf\u00e9 cr\u00e8me br\u00fbl\u00e9e")
+    assert post(Client(), token, password).status_code == 200
+    record = blob.open_login(sealed(email), email)
+    assert record is not None
+    other = unicodedata.normalize("NFD" if form == "NFC" else "NFC", password)
+    assert other != password and passwords.verify(record.password_hash, other)
+
+
+def test_the_minimum_is_counted_after_normalising() -> None:
+    """Twelve NFD code points that are six characters after NFKC are refused; twelve characters
+    that NFD spells in 24 code points are not short."""
+    email, token = invited()
+    assert_refused(post(Client(), token, unicodedata.normalize("NFD", "\u00e9" * 6)))
+    assert row(email).login_blob_ct is None
+    assert post(Client(), token, unicodedata.normalize("NFD", "\u00e9" * 12)).status_code == 200
 
 
 def test_a_signed_in_session_is_retired_before_the_pending_one_starts() -> None:
