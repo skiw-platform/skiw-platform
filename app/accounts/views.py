@@ -40,9 +40,21 @@ def _fields(request: HttpRequest, first: str, second: str) -> tuple[str, str] | 
     else:
         return None
     one, two = body.get(first), body.get(second)
-    if not isinstance(one, str) or not isinstance(two, str):
+    if not _text(one) or not _text(two):
         return None
     return one, two
+
+
+def _text(value: object) -> bool:
+    """A str UTF-8 can encode. JSON allows a lone surrogate ("\\ud800"), which Argon2 and
+    PostgreSQL refuse with an exception, so it would answer 500 instead of the refusal."""
+    if not isinstance(value, str):
+        return False
+    try:
+        value.encode()
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _credentials(request: HttpRequest) -> tuple[str, str] | None:

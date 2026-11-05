@@ -9,7 +9,9 @@ from collections.abc import Callable, Iterator
 
 import pytest
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from accounts.auth import blob
 from accounts.auth.blob import LoginRecord
@@ -192,3 +194,59 @@ def test_a_hash_too_long_for_the_fixed_size_is_refused_not_cut(use_keys: object)
         blob.seal_login(record, EMAIL)
     fits = LoginRecord(USER, AGENCY, "$" * (blob.LOGIN_SIZE - 34))
     assert blob.open_login(blob.seal_login(fits, EMAIL), EMAIL) == fits
+
+
+FACTOR = uuid.uuid4()
+SECRET = secrets.token_bytes(20)
+FACTOR_L = 48  # 12 + 20 + 16
+
+
+def test_a_factor_secret_round_trips_at_its_fixed_length(use_keys: object) -> None:
+    sealed = blob.seal_factor_secret(SECRET, FACTOR, USER, AGENCY)
+    assert len(sealed) == FACTOR_L
+    assert blob.open_factor_secret(sealed, FACTOR, USER, AGENCY) == SECRET
+    assert all(blob.open_factor_secret(b, FACTOR, USER, AGENCY) is None for b in flips(sealed))
+    assert blob.open_factor_secret(sealed[:-1], FACTOR, USER, AGENCY) is None
+
+
+def test_a_factor_secret_is_bound_to_its_factor_user_and_agency(use_keys: object) -> None:
+    sealed = blob.seal_factor_secret(SECRET, FACTOR, USER, AGENCY)
+    other = uuid.uuid4()
+    for ids in ((other, USER, AGENCY), (FACTOR, other, AGENCY), (FACTOR, USER, other)):
+        assert blob.open_factor_secret(sealed, *ids) is None
+    assert blob.open_factor_secret(sealed, USER, FACTOR, AGENCY) is None  # order matters
+
+
+@pytest.mark.parametrize("size", [0, 19, 21, 32])
+def test_only_a_20_byte_secret_is_sealed(use_keys: object, size: int) -> None:
+    with pytest.raises(ValueError, match="20 bytes"):
+        blob.seal_factor_secret(secrets.token_bytes(size), FACTOR, USER, AGENCY)
+
+
+def test_a_factor_secret_uses_its_own_subkey(use_keys: Callable[..., None]) -> None:
+    """Plan M3f: an HKDF subkey of login_blob_key with info skiw-factor-secret-v1, so the lookup
+    blobs' AES key never opens a factor secret even with the right AAD."""
+    raw = secrets.token_bytes(32)
+    use_keys("v1:" + base64.b64encode(raw).decode())
+    sealed = blob.seal_factor_secret(SECRET, FACTOR, USER, AGENCY)
+    aad = b"\0\x01" + blob.FACTOR_LABEL + FACTOR.bytes + USER.bytes + AGENCY.bytes
+    lookup = blob.require_key()[1]
+    with pytest.raises(InvalidTag):
+        lookup.decrypt(sealed[: blob.NONCE], sealed[blob.NONCE :], aad)
+    hkdf = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"skiw-factor-secret-v1")
+    opened = AESGCM(hkdf.derive(raw)).decrypt(sealed[: blob.NONCE], sealed[blob.NONCE :], aad)
+    assert opened == SECRET
+
+
+def test_a_factor_secret_opens_under_every_listed_version(
+    use_keys: Callable[..., None], attempts: list[int]
+) -> None:
+    old, new = key_line(1), key_line(2)
+    use_keys(old)
+    sealed_old = blob.seal_factor_secret(SECRET, FACTOR, USER, AGENCY)
+    use_keys(new, old)
+    attempts.clear()
+    assert blob.open_factor_secret(sealed_old, FACTOR, USER, AGENCY) == SECRET
+    assert attempts == [2, 1]
+    use_keys(new)
+    assert blob.open_factor_secret(sealed_old, FACTOR, USER, AGENCY) is None

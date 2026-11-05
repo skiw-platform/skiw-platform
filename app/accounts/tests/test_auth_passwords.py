@@ -102,3 +102,42 @@ def test_a_real_hash_at_the_lowest_allowed_values_fits_the_login_blob(
     sealed = blob.seal_login(record, "a@example.test")
     assert len(sealed) == 220 and blob.open_login(sealed, "a@example.test") == record
     blob.require_key.cache_clear()
+
+
+@pytest.mark.parametrize(
+    "stored, typed",
+    [
+        ("caf\u00e9 cr\u00e8me", "cafe\u0301 cre\u0300me"),  # NFC enrols, NFD signs in
+        ("cafe\u0301 cre\u0300me", "caf\u00e9 cr\u00e8me"),  # and the other way round
+        ("\ufb01ne \uff21", "fine A"),  # compatibility forms: the ligature, a full-width letter
+    ],
+)
+def test_a_password_is_nfkc_normalised_before_it_is_hashed_or_verified(
+    tiny: Settings, stored: str, typed: str
+) -> None:
+    """PR 115 R1 P3 #1 (NIST SP 800-63B-4 §3.1.1.2): NFKC, as for the email."""
+    assert passwords.verify(passwords.hash_password(stored), typed)
+    raw = PasswordHasher(memory_cost=64, time_cost=1, parallelism=2).hash(stored)
+    assert passwords.verify(raw, stored) is (passwords.normalise(stored) == stored)
+
+
+def test_normalising_changes_nothing_else(tiny: Settings) -> None:
+    stored = passwords.hash_password(" Correct Horse ")
+    assert passwords.normalise(" Correct Horse ") == " Correct Horse "
+    assert not passwords.verify(stored, "correct horse")
+    assert not passwords.verify(stored, "Correct Horse")
+
+
+def test_dummy_verify_normalises_like_verify(
+    tiny: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[str | bytes] = []
+    real = PasswordHasher.verify
+
+    def spy(self: PasswordHasher, hash: str | bytes, password: str | bytes) -> bool:
+        seen.append(password)
+        return real(self, hash, password)
+
+    monkeypatch.setattr(PasswordHasher, "verify", spy)
+    passwords.dummy_verify("cafe\u0301")
+    assert seen == ["caf\u00e9"]
