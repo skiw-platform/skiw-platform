@@ -1,0 +1,7 @@
+PR: 116
+Reviewed head SHA: 266a3f5726dfe9bf50b1695c51e193288554300a
+Review file: reviews/PR-116.md
+Review file hash (git hash-object): 6602fa11edb29e2153a3e7b6ccce95e22ad5798b
+Log-branch commit holding that review: d70f67b
+Verdict: Approved (Round 1); no findings; PR 115 R1 P3 #1 resolved; lone-surrogate fix accepted; notes: NFKC and unassigned code points, optional secret_ct length CHECK in M3f-3; follow-ups for M3f-2/M3f-3/M3g/M3i; owner still asked to confirm the "12, build" answer; no merge conditions; CI at 266a3f5: checks, security, image, host pass
+Time: 2026-11-05T09:07:32Z
