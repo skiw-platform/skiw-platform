@@ -188,6 +188,7 @@ jobs:
           SKIW_TOTP_SKEW_STEPS: "1"
           SKIW_LOGIN_PENDING_MIN: "5"
           SKIW_ENROL_LINK_MIN: "30"
+          SKIW_PW_MIN_LENGTH: "12"
         run: |
           docker run --rm --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges -e DJANGO_SECRET_KEY -e DATABASE_URL \
@@ -196,6 +197,7 @@ jobs:
             -e SKIW_AUTH_FAILS_PER_ACCOUNT -e SKIW_AUTH_FAILS_PER_IP -e SKIW_AUTH_WINDOW_MIN \
             -e SKIW_AUTH_LOCK_AFTER -e SKIW_AUTH_LOCK_MIN -e SKIW_STEPUP_MAX_AGE_MIN \
             -e SKIW_TOTP_SKEW_STEPS -e SKIW_LOGIN_PENDING_MIN -e SKIW_ENROL_LINK_MIN \
+            -e SKIW_PW_MIN_LENGTH \
             skiw-platform:unlabelled python app/manage.py migration_labels \
             > "$RUNNER_TEMP/migrations.json"
           PYTHONPATH=infra/host python3 -m skiw_host.labels "$GITHUB_SHA" \

@@ -1,5 +1,6 @@
 """Enrolment links (AUTH-08; plan M3 §3 M3e, §4 M3e row "enrolment link: works once, expired,
-tampered, reused"), against the real tables as skiw_app. The route that calls `redeem` is M3e-3b."""
+tampered, reused"), against the real tables as skiw_app. The route that calls `redeem` is
+tested in test_enrol_route_live.py."""
 
 import threading
 import time
@@ -140,7 +141,7 @@ def test_a_signed_value_of_another_shape_does_nothing() -> None:
     signer = signing.TimestampSigner(salt=enrol.SALT)
     value = signer.unsign_object(token)
     for shape in ([value["u"]], {**value, "u": "not a uuid"}, {"u": value["u"]}, "text"):
-        assert enrol.redeem(signer.sign_object(shape), "x") is None
+        assert enrol.redeem(signer.sign_object(shape), PASSWORD) is None
     assert row(email).login_blob_ct is None
 
 
@@ -153,11 +154,16 @@ def test_a_link_for_a_user_no_longer_invited_does_nothing() -> None:
     assert row(email).login_blob_ct is None
 
 
-def test_an_empty_password_is_refused() -> None:
+@pytest.mark.parametrize("short", ["", "x", "é" * 11, "a" * 11])
+def test_a_password_shorter_than_the_minimum_is_refused_and_leaves_the_link(short: str) -> None:
+    """Owner 2026-11-05: at least 12 characters (code points), no composition rules."""
+    assert settings.SKIW_PW_MIN_LENGTH == 12
     email, token = invited()
-    assert enrol.redeem(token, "") is None
+    assert enrol.redeem(token, short) is None
     assert row(email).login_blob_ct is None
-    assert isinstance(enrol.redeem(token, PASSWORD), Verified)  # still unused
+    assert isinstance(enrol.redeem(token, "é" * 12), Verified)  # still unused; 12 is enough
+    record = blob.open_login(sealed(email), email)
+    assert record is not None and passwords.verify(record.password_hash, "é" * 12)
 
 
 def test_two_uses_at_once_set_one_password() -> None:

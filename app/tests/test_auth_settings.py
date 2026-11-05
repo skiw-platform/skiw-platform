@@ -46,6 +46,7 @@ WEAKER_THAN_SPEC = {
     "SKIW_STEPUP_MAX_AGE_MIN": "6",  # T5, §8.1: ≤ 5 min
     "SKIW_TOTP_SKEW_STEPS": "2",  # Flow 5.1: ±1 step
     "SKIW_ENROL_LINK_MIN": "31",  # owner Q5 (a): 30 min
+    "SKIW_PW_MIN_LENGTH": "11",  # owner 2026-11-05: 12 characters
 }
 
 

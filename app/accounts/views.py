@@ -1,15 +1,15 @@
 """The accounts HTTP views (plan M3 §3 M3e). config.urls mounts them, the one config -> accounts
 edge the TEN-10 contract allows (owner Q10 (a)). The login steps run before there is a signed-in
 session, so they are reviewed PUBLIC_ROUTES entries (app/tests/test_route_registry.py), not
-authorized_action handlers. Every answer is one of three fixed bodies; a failure never says why
-(AUTH-05)."""
+authorized_action handlers; so is enrolment, which a user without a password reaches by link.
+Every answer is one of a few fixed bodies; a failure never says why (AUTH-05)."""
 
 import json
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 
-from accounts.auth import password_step
+from accounts.auth import enrol, password_step
 from accounts.auth.blob import EMAIL_MAX
 from accounts.auth.throttle import client_ip
 
@@ -26,8 +26,8 @@ def _failed() -> HttpResponse:
     return _answer({"error": "login-failed"}, 401)
 
 
-def _credentials(request: HttpRequest) -> tuple[str, str] | None:
-    """Email and password from a JSON object or a form post (FE-32), or None (UNI-03)."""
+def _fields(request: HttpRequest, first: str, second: str) -> tuple[str, str] | None:
+    """Two string fields from a JSON object or a form post (FE-32), or None (UNI-03)."""
     if request.content_type == "application/json":
         try:
             body = json.loads(request.body)
@@ -39,9 +39,18 @@ def _credentials(request: HttpRequest) -> tuple[str, str] | None:
         body = request.POST
     else:
         return None
-    email, password = body.get("email"), body.get("password")
-    if not isinstance(email, str) or not isinstance(password, str):
+    one, two = body.get(first), body.get(second)
+    if not isinstance(one, str) or not isinstance(two, str):
         return None
+    return one, two
+
+
+def _credentials(request: HttpRequest) -> tuple[str, str] | None:
+    """Email and password, or None (UNI-03)."""
+    fields = _fields(request, "email", "password")
+    if fields is None:
+        return None
+    email, password = fields
     if not 0 < len(email) <= EMAIL_MAX or "\x00" in email or not password:
         return None  # PostgreSQL text takes no NUL
     return email, password
@@ -60,3 +69,17 @@ def login_password(request: HttpRequest) -> HttpResponse:
         return _failed()
     password_step.start_pending(request, outcome)
     return _answer({"next": "second_factor", "csrf": get_token(request)}, 200)
+
+
+def enrol_password(request: HttpRequest) -> HttpResponse:
+    """POST /api/auth/enrol: the link's token and the new password (spec AUTH-08, Flow 5.1 (4)).
+    Every refusal, a malformed body among them, gets one answer and no cookie; a malformed body
+    touches no row. The link's HMAC stands in for the login throttle: nothing here can be guessed.
+    Success leaves the same pending state as a password login, marked as an enrolment, never a
+    sign-in: the user is still `invited` until a first second factor (M3f, M3g)."""
+    fields = _fields(request, "token", "password")
+    verified = None if fields is None else enrol.redeem(*fields)
+    if verified is None:
+        return _answer({"error": "enrol-failed"}, 401)
+    password_step.start_pending(request, verified, enrol=True)
+    return _answer({"next": "enrol_factor", "csrf": get_token(request)}, 200)

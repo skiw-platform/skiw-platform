@@ -16,6 +16,7 @@ AUTH = {
     "SKIW_TOTP_SKEW_STEPS": "1",
     "SKIW_LOGIN_PENDING_MIN": "5",
     "SKIW_ENROL_LINK_MIN": "30",
+    "SKIW_PW_MIN_LENGTH": "12",
 }
 REQUIRED = {**SESSION, **AUTH}
 # (low, high) for each auth value, as app/config/settings.py reads them: the weak end is the spec or
@@ -33,4 +34,5 @@ AUTH_BOUNDS = {
     "SKIW_TOTP_SKEW_STEPS": (0, 1),
     "SKIW_LOGIN_PENDING_MIN": (1, 15),
     "SKIW_ENROL_LINK_MIN": (5, 30),
+    "SKIW_PW_MIN_LENGTH": (12, 64),
 }

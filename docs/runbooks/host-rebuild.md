@@ -23,9 +23,9 @@ It also sets the interim auth values for the same three services (owner Q6 (a), 
 `SKIW_ARGON2_TIME_COST=3`, `SKIW_ARGON2_PARALLELISM=1` (T5), `SKIW_AUTH_FAILS_PER_ACCOUNT=5`,
 `SKIW_AUTH_FAILS_PER_IP=20`, `SKIW_AUTH_WINDOW_MIN=15`, `SKIW_AUTH_LOCK_AFTER=10`,
 `SKIW_AUTH_LOCK_MIN=30`, `SKIW_TOTP_SKEW_STEPS=1` (Flow 5.1, T18), `SKIW_STEPUP_MAX_AGE_MIN=5`
-(§8.1), `SKIW_LOGIN_PENDING_MIN=5` and `SKIW_ENROL_LINK_MIN=30` (builder values). Each one is
-required, the same way. Nothing reads them yet: the Argon2 values from M3b-2 (password hashing;
-each verify then takes `SKIW_ARGON2_MEMORY_KIB` of `web` memory), the others from M3c on.
+(§8.1), `SKIW_LOGIN_PENDING_MIN=5` and `SKIW_ENROL_LINK_MIN=30` (builder values), and
+`SKIW_PW_MIN_LENGTH=12` (owner 2026-11-05; 12 to 64). Each one is required, the same way.
+Each verify takes `SKIW_ARGON2_MEMORY_KIB` of `web` memory.
 
 Before the first run, as root: `apt-get install nftables gnupg`, then fetch Docker's apt key to
 `/etc/apt/keyrings/docker.asc` (root, 0644):
@@ -354,6 +354,9 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
 - It prints one line, `https://<SKIW_HOSTNAME>/enrol#<token>`, and on stderr how long it is valid.
   A refusal (not an email address, a user who has already enrolled, an email the agency cannot
   see) exits 1 and creates nothing.
+- **Two invites for the same new email at the same moment:** one makes the user and the other is
+  told "this email cannot be invited". Run the command again: it then gives a new link for that
+  invited user.
 - **The link sets the user's password, so treat it as a password.** Send it only to that user,
   directly. Don't paste it into a ticket, a shared chat, the shell history of a shared account or
   this runbook, and don't keep a copy. The token is after `#`, so the browser never sends it in the
@@ -361,6 +364,9 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
 - It works **once** and for `SKIW_ENROL_LINK_MIN` minutes (30). Setting the password ends it, and any
   other unused link for that user with it. The user stays `invited` (password login is refused)
   until they enrol a second factor (M3f, M3g).
+- **The password must be at least `SKIW_PW_MIN_LENGTH` characters (12)**, with no other
+  rules. A shorter one is refused with the same answer as a bad link and doesn't use the link up,
+  so the user can try again with the same link while it is valid.
 - **Expired or lost:** run the command again for the same email. A user who has not finished
   enrolling gets a new link (the stored name stays); one who has is refused, and a lost factor is
   the owner's reset (Flow 5.1, not built yet).

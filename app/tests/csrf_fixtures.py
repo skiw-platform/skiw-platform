@@ -22,6 +22,7 @@ FIXTURES: dict[str, Fixture] = {
     "asset": Fixture(path_kwargs={"path": "index-abc.js"}),
     "shell": Fixture(),
     "auth-login": Fixture(answers=401),
+    "auth-enrol": Fixture(answers=401),
     "csrf-probe": Fixture(),  # test only: tests.csrf_urls
     "action-probe": Fixture(),  # test only: tests.csrf_urls, an authorized_action
 }
