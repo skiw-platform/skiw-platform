@@ -349,6 +349,7 @@ AUTH_VALUES = (
     "SKIW_TOTP_SKEW_STEPS",
     "SKIW_LOGIN_PENDING_MIN",
     "SKIW_ENROL_LINK_MIN",
+    "SKIW_PW_MIN_LENGTH",
 )
 # The one deployment agency (plan M4c-5): migrate seeds it, web's /readyz binds to it.
 AGENCY_VALUES = ("SKIW_DEPLOYMENT_AGENCY_ID", "SKIW_DEPLOYMENT_AGENCY_NAME")

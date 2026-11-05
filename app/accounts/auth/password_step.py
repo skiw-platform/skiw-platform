@@ -39,6 +39,9 @@ from tenancy.binding import with_agency
 PENDING_USER = "_skiw_pending_user"
 PENDING_AGENCY = "_skiw_pending_agency"
 PENDING_UNTIL = "_skiw_pending_until"  # UTC ISO-8601; the second factor must come before it
+# Set only by the enrolment route: this pending user has no second factor yet and may add a first
+# one (M3f, M3g), which makes them `active`. A login's pending state never carries it.
+PENDING_ENROL = "_skiw_pending_enrol"
 
 
 @dataclass(frozen=True)
@@ -79,10 +82,11 @@ def _rehash(record: blob.LoginRecord, email: str, password: str, sealed: bytes) 
     )
 
 
-def start_pending(request: HttpRequest, verified: Verified) -> None:
-    """A new session key and nothing carried over. A signed-in session is retired with a
-    `session_revocation` marker first, in one with_agency() transaction with the row delete, as
-    login() does (plan M3 §3 M3d), so the old row put back by SQL is still refused."""
+def start_pending(request: HttpRequest, verified: Verified, *, enrol: bool = False) -> None:
+    """A new session key and nothing carried over; `enrol` marks an enrolment's pending state. A
+    signed-in session is retired with a `session_revocation` marker first, in one with_agency()
+    transaction with the row delete, as login() does (plan M3 §3 M3d), so the old row put back by
+    SQL is still refused."""
     session = request.session
     if not isinstance(session, SessionStore):
         raise TypeError("the password step needs the accounts session store")
@@ -102,4 +106,6 @@ def start_pending(request: HttpRequest, verified: Verified) -> None:
             PENDING_UNTIL: until.isoformat(timespec="microseconds"),
         }
     )
+    if enrol:
+        session[PENDING_ENROL] = True
     rotate_token(request)

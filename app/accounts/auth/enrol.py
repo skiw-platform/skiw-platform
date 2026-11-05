@@ -1,9 +1,9 @@
 """Enrolment links (spec AUTH-08; plan M3 §3 M3e, owner Q5 (a)). The operator's `accounts_invite`
 creates an `invited` user of the deployment agency and prints a link; the user follows it and sets
-a password (M3e-3b's route calls `redeem`). The link expires after `SKIW_ENROL_LINK_MIN` minutes and
-works once: its token is a `TimestampSigner` signature (salt `skiw-enrol-v1`, key `SECRET_KEY`)
-over the user id, the agency id and a fingerprint of the row's `login_blob_ct` (empty while it is
-NULL), and setting the password changes that blob.
+a password (`POST /api/auth/enrol` in accounts.views calls `redeem`). The link expires after
+`SKIW_ENROL_LINK_MIN` minutes and works once: its token is a `TimestampSigner` signature (salt
+`skiw-enrol-v1`, key `SECRET_KEY`) over the user id, the agency id and a fingerprint of the row's
+`login_blob_ct` (empty while it is NULL), and setting the password changes that blob.
 
 The user stays `invited` after `redeem`, so the password alone signs nobody in (the password step
 refuses a status other than `active`). The first second factor (M3f, M3g) makes the user `active`
@@ -68,9 +68,11 @@ def invite(email: str, name: str) -> str:
 
 
 def redeem(token: str, password: str) -> Verified | None:
-    """Sets the password if the link is genuine, unexpired and unused, and the user is still
-    `invited`; None otherwise, whatever the reason. The row lock makes two uses of one link
-    take turns, so the second sees the changed blob."""
+    """Sets the password if the link is genuine, unexpired and unused, the user is still
+    `invited` and the password has at least `SKIW_PW_MIN_LENGTH` characters (code points;
+    no composition rules); None otherwise, whatever the reason. A refusal writes nothing, so a
+    short password leaves the link working. The row lock makes two uses of one link take turns,
+    so the second sees the changed blob."""
     try:
         value = signing.TimestampSigner(salt=SALT).unsign_object(
             token, max_age=timedelta(minutes=settings.SKIW_ENROL_LINK_MIN)
@@ -78,7 +80,7 @@ def redeem(token: str, password: str) -> Verified | None:
         user_id, agency_id, mark = uuid.UUID(value["u"]), uuid.UUID(value["a"]), value["f"]
     except (signing.BadSignature, TypeError, KeyError, ValueError):
         return None
-    if not password:
+    if len(password) < settings.SKIW_PW_MIN_LENGTH:
         return None
     with with_agency(agency_id):
         user = AppUser.objects.select_for_update().filter(id=user_id, status="invited").first()

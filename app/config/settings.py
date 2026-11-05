@@ -92,6 +92,10 @@ SKIW_STEPUP_MAX_AGE_MIN = env.bounded_int("SKIW_STEPUP_MAX_AGE_MIN", 1, 5)
 SKIW_TOTP_SKEW_STEPS = env.bounded_int("SKIW_TOTP_SKEW_STEPS", 0, 1)
 SKIW_LOGIN_PENDING_MIN = env.bounded_int("SKIW_LOGIN_PENDING_MIN", 1, 15)
 SKIW_ENROL_LINK_MIN = env.bounded_int("SKIW_ENROL_LINK_MIN", 5, 30)
+# The shortest password enrolment accepts, in characters (owner 2026-11-05: 12; no composition
+# rules). The weak end is the owner value; the strict end of 64 is a builder value [A]. "PW", not
+# "PASSWORD": a host env name with PASSWORD must come from a secret file (test_compose_config).
+SKIW_PW_MIN_LENGTH = env.bounded_int("SKIW_PW_MIN_LENGTH", 12, 64)
 
 # CSRF on every mutating route, no switch (spec T6, A.19). Owner Q4 (a): an HttpOnly cookie; the
 # token is rendered into the no-store shell and sent back as X-CSRFToken. Same origin only (D2),

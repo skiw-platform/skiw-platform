@@ -29,6 +29,9 @@ PUBLIC_ROUTES: dict[str, str] = {
     "shell": "the SPA page a signed-out visitor loads first; carries only the CSRF token",
     "auth-login": "the password step, before any session exists: uniform answers (AUTH-05) and the"
     " throttle (AUTH-06) stand in for a login; it leaves only a pending state, never a sign-in",
+    "auth-enrol": "the enrolment password, before the user has any credential: the single-use,"
+    " expiring HMAC link (AUTH-08) stands in for a login, every refusal has one answer (AUTH-05);"
+    " it leaves only a pending enrolment, never a sign-in",
 }
 
 
