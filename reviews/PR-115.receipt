@@ -1,0 +1,7 @@
+PR: 115
+Reviewed head SHA: 37389ccba8440162faadd8a8f304167cc9f1be8f
+Review file: reviews/PR-115.md
+Review file hash (git hash-object): 94b36a1b105f423a1cbcdb30df45bc482e80359e
+Log-branch commit holding that review: 5ab321a
+Verdict: Approved (Round 1); PUBLIC_ROUTES["auth-enrol"] signed off; one finding P3 #1 (password Unicode normalisation) deferred to M3f, must land before the first enrolment on a host; no merge conditions; owner asked to confirm the "12, build" answer; CI at 37389cc: checks, security, image, host pass
+Time: 2026-11-05T04:46:51Z
