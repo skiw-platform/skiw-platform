@@ -1,5 +1,78 @@
 # Review — 2026-10-24-alert-channel-and-uptime-ping
 
+## Round 2 — 2026-10-24 · scope: slice (amendment v1.1)
+
+- **Spec review:** `docs/specs/2026-10-24-alert-channel-and-uptime-ping.md` · version 1.1 · hash
+  `ea6ee2fb0fe2283eda93ff70a7c777f29668d154` (working file, untracked in the main checkout).
+- **Amends:** v1.18, hash `0edfb3cdc514e1d5bbd3ae3d34875cd16c037644` (unchanged). `main` =
+  `origin/main` = `2af8ff384975387470d7296f2fa2b6240a9c212e`.
+- **Mode:** read only; no file written except this one.
+- **Model used:** Claude Opus 5.5. **Switch model next step?** No.
+
+**Verdict:** Approved
+
+This approval covers the amendment text at hash `ea6ee2fb…` only. It is not an approval of the
+v1.18 docs PR (S1) or of the M1j-2 code.
+
+### Round 1 resolution audit (re-read in v1.1, not taken from the builder's word)
+| Round 1 finding | Status | Evidence in v1.1 |
+|---|---|---|
+| P2 broken channel is silent | resolved | Decision 12 and flow 5: weekly heartbeat, Monday, first run at or after 00:00 UTC; the ISO week of the last **delivered** heartbeat is kept; an owed old heartbeat is replaced; owner rule "no message by Monday 10:00 Kuala Lumpur time → check the host"; tests with a fake clock (§7). Decision 10 now says silence off the host is possible and is bounded to one week. Matches the owner decision. |
+| P2 H6 freshness alert: two readings | resolved | §2: "This spec does not build the H6 off-site freshness alert … uses the same Telegram channel with its own bot token … The H6 alarm is not dropped." One reading. |
+| P2 two rules for the PDPA confirmation | resolved | §7 PDPA row and §10 Q2 both say: the owner's own confirmation is enough; it also says when the rule stops holding (a data subject's data in an alert). Matches the owner decision. |
+| P2 decision 8 misses H4 and the cost line | resolved | Decision 8 and the header now list H4 (`alert_credential`) and the cost line. |
+| P3 alert values not listed | resolved | §7 "Alert values" table. Its check names match `health.py` `CHECKS` exactly (11) plus `check-hardening` and `heartbeat`. |
+| P3 `SEND_S` change unstated | resolved | §8: "changes from 30 s (M1j-1) to 10 s". `alert.py` today: `SEND_S = 30`. |
+| P3 token request details | resolved | §7: `ProxyHandler({})`, token format check before the URL, plain text with link previews off; each has a test. |
+| P3 when `alert_credential` must exist | resolved | Decision 13: if and only if the channel is `telegram`; both wrong states fail `secret-store`. |
+| P3 deploys raise UptimeRobot alerts | resolved | §7 "Deploys and UptimeRobot" and the M1j-2 runbook scope. |
+| P3 UptimeRobot facts with a date | resolved | §7 facts paragraph with dates; owner confirms the alert contact before M1k. |
+
+### Findings
+
+No P0, P1 or P2.
+
+### [P3] The heartbeat says "N checks ok" even when some checks are bad
+- **Evidence:** decision 12 and the values table: value `N checks ok`, "N is the number of checks".
+  `CHECKS` has 11 entries, so the message would read "11 checks ok" while, for example, `disk` is bad.
+- **Effect:** a misleading line in the owner's chat. The bad check still has its own alert.
+- **Suggested correction:** a value that stays true, for example `N checks, M bad` (numbers only),
+  or `alive`.
+
+### [P3] The "only answered" check in decision 8 is stricter than the planned text
+- **Evidence:** decision 8: "After the docs PR, `grep -n Q20` on v1.18 shows only 'answered'". The
+  same row keeps "the Telegram bot chat of the owner (Q20)" in H7. v1.18 has Q20 at lines 101, 103,
+  1035, 1037 and 1107.
+- **Suggested correction:** "every Q20 mention reads as answered or adopted".
+
+### [P3] A stale vendor line
+- **Evidence:** §7 last paragraph still lists "the UptimeRobot free plan's check interval, number of
+  monitors and alert contacts [A …]" as unchecked, after the paragraph above it records the
+  interval and the monitor count with dates.
+- **Suggested correction:** keep only the alert contacts (and the Telegram items) in that line.
+
+### Injection check
+No text in the spec addresses an AI agent or asks to skip a gate.
+
+### Verification performed
+| Check | Result |
+|---|---|
+| `git hash-object` of the spec | `ea6ee2fb…` (v1.1) |
+| v1.18 hash | `0edfb3cd…`, unchanged |
+| `health.py` `CHECKS` names vs the values table | 11 of 11 match |
+| v1.18 `Q20` mentions | lines 101, 103, 1035, 1037, 1107 (P3 above) |
+| Each Round 1 finding re-read in v1.1 | 4 P2 and 6 P3 resolved |
+
+### Residual risks
+- As in Round 1: a blocking DNS lookup can outlast the 10 s SIGALRM deadline; the 280 s unit
+  timeout bounds the run.
+- The heartbeat bounds silence to about 7 days, not less (owner choice).
+- Telegram API facts stay [A] until the builder checks them before M1j-2 (accepted in the spec).
+
+### Next step
+S1: the builder opens the docs PR (v1.18 text changes from decision 8, the DECISIONS UNI-11/D19
+entry). That PR changes the main spec hash, so `setup` reconciles `PROJECT.md` after it merges.
+
 ## Round 1 — 2026-10-24 · scope: slice (amendment to spec v1.18: Q20 channel, uptime ping, UNI-11)
 
 - **Spec review:** `docs/specs/2026-10-24-alert-channel-and-uptime-ping.md` · version 1.0 (draft) ·
