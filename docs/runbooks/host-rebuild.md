@@ -337,6 +337,38 @@ uuid; the owner gave the staging and production names (2026-11-03).
   gives it back and its row is visible. A `tenant_token_key` that differs from the stored one, or a
   missing row, then fails the deploy health check and the deploy switches back.
 
+### Enrol a user (M3e-3)
+Until staff invites arrive with M4-rest ("Manage staff"), the operator invites each user of the
+deployment agency with `accounts_invite`, run inside the running `web` container (it connects as
+`skiw_app`, like `web`):
+```sh
+sudo -v
+running="$(sudo sed -n 's/^SKIW_IMAGE=//p' /var/lib/skiw/deploy.env)"; test -n "$running"
+sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
+  --env-file /etc/skiw/host.env exec -T web \
+  python app/manage.py accounts_invite '<email>' --name '<display name>'
+```
+- **Use `exec`, never `run`.** A `compose run` container's output goes to its logging driver
+  (journald) as well as to your terminal, so the link would be kept in the journal. `exec` output
+  reaches only your terminal.
+- It prints one line, `https://<SKIW_HOSTNAME>/enrol#<token>`, and on stderr how long it is valid.
+  A refusal (not an email address, a user who has already enrolled, an email the agency cannot
+  see) exits 1 and creates nothing.
+- **The link sets the user's password, so treat it as a password.** Send it only to that user,
+  directly. Don't paste it into a ticket, a shared chat, the shell history of a shared account or
+  this runbook, and don't keep a copy. The token is after `#`, so the browser never sends it in the
+  request line, a `Referer` or the Caddy log.
+- It works **once** and for `SKIW_ENROL_LINK_MIN` minutes (30). Setting the password ends it, and any
+  other unused link for that user with it. The user stays `invited` (password login is refused)
+  until they enrol a second factor (M3f, M3g).
+- **Expired or lost:** run the command again for the same email. A user who has not finished
+  enrolling gets a new link (the stored name stays); one who has is refused, and a lost factor is
+  the owner's reset (Flow 5.1, not built yet).
+- **After raising `SKIW_ARGON2_*`:** each stored hash is re-made with the new values when its user
+  next signs in. Until then, a wrong password for that account costs the old amount while an unknown
+  email costs the new one, so the two can be told apart by timing. Raise the values only when a
+  difference for users who have not signed in since is acceptable, or have them sign in soon after.
+
 ### The tenancy schema check (M4c-6b)
 `skiw-deploy` runs `manage.py check_tenancy_schema` in the new image right after `migrate`, as
 `skiw_migrator` (at most 120 s). Every table must be a listed global, the `agency` root, or a

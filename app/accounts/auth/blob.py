@@ -30,6 +30,7 @@ CREDENTIAL_AAD = b"skiw-credential-v1"
 LOGIN_SIZE = 192  # user id 16 || agency id 16 || 2-byte length || Argon2 encoded hash || zeros
 CREDENTIAL_SIZE = 32  # user id 16 || agency id 16
 NONCE = 12
+EMAIL_MAX = 254  # RFC 5321 §4.5.3.1.3: the longest path, so the longest address
 OVERHEAD = NONCE + 16
 
 
