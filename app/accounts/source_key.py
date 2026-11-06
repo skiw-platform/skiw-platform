@@ -29,7 +29,8 @@ def require_key() -> tuple[tuple[int, bytes], ...]:
     return tuple(settings.SKIW_TENANT_SOURCE_KEYS())
 
 
-def _field(value: str) -> bytes:
+def field(value: str) -> bytes:
+    """`value` as UTF-8 behind its 8-byte big-endian length (also accounts.auth.recovery)."""
     data = value.encode()
     return len(data).to_bytes(8, "big") + data
 
@@ -38,7 +39,7 @@ def _mac(key: bytes, stored_key: str, expire_date: datetime, blob: str) -> bytes
     if expire_date.utcoffset() is None:
         raise ValueError("expire_date must be timezone-aware")
     instant = expire_date.astimezone(UTC).isoformat(timespec="microseconds")
-    message = LABEL + _field(stored_key) + _field(instant) + _field(blob)
+    message = LABEL + field(stored_key) + field(instant) + field(blob)
     digest = hmac.new(key, message, hashlib.sha256).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=")
 

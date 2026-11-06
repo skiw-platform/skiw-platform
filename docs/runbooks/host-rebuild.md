@@ -128,6 +128,9 @@ after each change. Removing the old version at once, or replacing the file, logs
 (the next request gets an empty session and the cookie is deleted): that is the wanted effect when
 the key may have leaked. No script rotates app keys yet, and the escrow after every rotation (spec
 §8.4 H4) still applies.
+Recovery codes (M3f-2) are MACs under this key too, with no version stored and no expiry: a code
+made under a version stops working once that version is removed. Keep the old version listed
+until every user has regenerated their codes (or accept that their old codes are void).
 Both `web` (`config.asgi`) and `worker` (`runworker`, from M3a) refuse to start when the file is
 missing or malformed, before the migration check and without printing the key. A version number
 has at most six digits (`v1` to `v999999`): the reader and `bootstrap-secrets restore` refuse a
