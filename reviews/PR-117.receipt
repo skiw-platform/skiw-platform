@@ -1,0 +1,7 @@
+PR: 117
+Reviewed head SHA: 480b673cdb89dac897021887ea499e849cec808b
+Review file: reviews/PR-117.md
+Review file hash (git hash-object): 1d34dfd19ba697d596c63ae07eba070f96876f47
+Log-branch commit holding that review: a855e0d
+Verdict: Approved with conditions (Round 3); R1 P1 and R2 P1 (CI security red; DECISIONS conflict) resolved; P2 (recovery-code version not stored, runbook count cannot be run) deferred to M3f-3, and PR 118 R1 P2 (narrow the label regex) deferred to M3f-3 or a standalone follow-up; no P0/P1; CI at 480b673 (run 42151633050): checks, security (all steps), image, host pass
+Time: 2026-11-06T03:19:36Z
