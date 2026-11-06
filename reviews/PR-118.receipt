@@ -1,0 +1,7 @@
+PR: 118
+Reviewed head SHA: 8092182831f21fd60e12ba2c2c8d896d42ca4044
+Review file: reviews/PR-118.md
+Review file hash (git hash-object): 21b75f9683237af36cc8989f7cf84440a393332e
+Log-branch commit holding that review: fc52aaa
+Verdict: Approved with conditions (Round 1); one P2 (allowlist regex width, UNI-07) deferred to M3f-3 or a standalone follow-up; no P0/P1; CI at 8092182: checks, security (all steps), image, host pass
+Time: 2026-11-06T02:06:58Z
