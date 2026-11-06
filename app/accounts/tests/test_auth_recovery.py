@@ -5,16 +5,27 @@ import hashlib
 import hmac
 import uuid
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from django.db.transaction import TransactionManagementError
 
 from accounts import source_key
 from accounts.auth import recovery, throttle
+from accounts.factor_model import RECOVERY_SECRET_CT_LENGTH, RECOVERY_VERSION_BYTES
 
 from .test_auth_blob import key_line
 
 CANONICAL = "ABCDEFGHJKMNPQRS"
+RUNBOOK = Path(__file__).resolve().parents[3] / "docs" / "runbooks" / "host-rebuild.md"
+# The operator's count of users per signing version (runbook "Rotating `tenant_source_key`"); the
+# live test runs this very text, and the runbook test pins it to the runbook.
+VERSION_REPORT = (
+    "SELECT (get_byte(secret_ct, 0)::bigint << 24) | (get_byte(secret_ct, 1) << 16)"
+    " | (get_byte(secret_ct, 2) << 8) | get_byte(secret_ct, 3) AS version,"
+    " count(DISTINCT user_id) AS users FROM user_factor WHERE kind = 'recovery'"
+    " GROUP BY 1 ORDER BY 1"
+)
 
 
 def use_source_keys(monkeypatch: pytest.MonkeyPatch, *lines: str) -> list[bytes]:
@@ -32,6 +43,11 @@ def expected(key: bytes, user: uuid.UUID, code: str) -> bytes:
     for value in (str(user).encode(), code.encode()):
         message += len(value).to_bytes(8, "big") + value
     return hmac.new(key, message, hashlib.sha256).digest()
+
+
+def stored_form(version: int, key: bytes, user: uuid.UUID, code: str) -> bytes:
+    """What `user_factor.secret_ct` holds: the version in 4 bytes big-endian, then the MAC."""
+    return version.to_bytes(4, "big") + expected(key, user, code)
 
 
 class Untouchable(str):
@@ -101,8 +117,25 @@ def test_macs_follow_the_plan_construction_newest_version_first(
     newest, older = use_source_keys(monkeypatch, key_line(2), key_line(1))
     user = uuid.uuid4()
     mac = recovery.macs(user, CANONICAL)
-    assert mac == [expected(newest, user, CANONICAL), expected(older, user, CANONICAL)]
-    assert all(len(value) == 32 for value in mac)
+    assert mac == [
+        stored_form(2, newest, user, CANONICAL),
+        stored_form(1, older, user, CANONICAL),
+    ]
+    assert RECOVERY_VERSION_BYTES == 4
+    assert all(len(value) == RECOVERY_SECRET_CT_LENGTH == 36 for value in mac)
+
+
+def test_the_largest_key_version_fits_the_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    (key,) = use_source_keys(monkeypatch, key_line(999_999))
+    user = uuid.uuid4()
+    (stored,) = recovery.macs(user, CANONICAL)
+    assert stored[:4] == bytes.fromhex("000f423f") and stored == stored_form(
+        999_999, key, user, CANONICAL
+    )
+
+
+def test_the_runbook_gives_the_operator_the_report_the_tests_run() -> None:
+    assert VERSION_REPORT in " ".join(RUNBOOK.read_text(encoding="utf-8").split())
 
 
 def test_a_mac_is_bound_to_the_user_and_the_code(monkeypatch: pytest.MonkeyPatch) -> None:

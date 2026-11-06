@@ -22,6 +22,9 @@ from tenancy.binding import with_agency
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 
 LOOKUP_BLOB_LENGTH = 60
+TOTP_SECRET_CT = 48  # accounts.0010: the sealed factor secret
+RECOVERY_SECRET_CT = 36  # accounts.0010: 4-byte key version, then the 32-byte HMAC-SHA-256
+SECRET_CT = {"totp": TOTP_SECRET_CT, "recovery": RECOVERY_SECRET_CT}
 # A stored_key()-shaped value, derived so no high-entropy literal sits in the source.
 KEY_HASH = hashlib.sha256(b"session-revocation-test").hexdigest()
 
@@ -52,7 +55,7 @@ def add_user(cursor: CursorWrapper, email: str | None = None, **columns: Any) ->
 
 
 def add_factor(cursor: CursorWrapper, user: uuid.UUID, **columns: Any) -> None:
-    values: dict[str, Any] = {"id": uuid.uuid4(), "user_id": user, "kind": "totp", **columns}
+    values: dict[str, Any] = {"id": uuid.uuid4(), "user_id": user, "kind": "passkey", **columns}
     cursor.execute(
         f"INSERT INTO user_factor (agency_id, {', '.join(values)})"  # noqa: S608 (as above)
         f" VALUES (guard.current_agency(), {', '.join(['%s'] * len(values))})",
@@ -136,7 +139,30 @@ def test_the_login_blob_has_exactly_the_sealed_length(cursor: CursorWrapper, siz
 
 @pytest.mark.parametrize("kind", ["passkey", "totp", "recovery"])
 def test_each_known_factor_kind_is_accepted(cursor: CursorWrapper, kind: str) -> None:
-    add_factor(cursor, add_user(cursor), kind=kind)
+    secret = b"\0" * SECRET_CT[kind] if kind in SECRET_CT else None
+    add_factor(cursor, add_user(cursor), kind=kind, secret_ct=secret)
+
+
+@pytest.mark.parametrize(
+    ("kind", "secret"),
+    [
+        ("totp", None),
+        ("totp", b"\0" * (TOTP_SECRET_CT - 1)),
+        ("totp", b"\0" * (TOTP_SECRET_CT + 1)),
+        ("totp", b"\0" * RECOVERY_SECRET_CT),
+        ("recovery", None),
+        ("recovery", b"\0" * 32),
+        ("recovery", b"\0" * (RECOVERY_SECRET_CT - 1)),
+        ("recovery", b"\0" * (RECOVERY_SECRET_CT + 1)),
+        ("recovery", b"\0" * TOTP_SECRET_CT),
+    ],
+)
+def test_a_totp_or_recovery_secret_has_exactly_its_length(
+    cursor: CursorWrapper, kind: str, secret: bytes | None
+) -> None:
+    user = add_user(cursor)
+    refusal = refused_by(cursor, lambda c: add_factor(c, user, kind=kind, secret_ct=secret))
+    assert refusal == f"user_factor_{kind}_secret_ct_length"
 
 
 @pytest.mark.parametrize(
@@ -158,7 +184,7 @@ def test_a_factor_outside_the_column_rules_is_refused(
 
 def test_a_factor_takes_the_sealed_lookup_blob_and_counts_from_zero(cursor: CursorWrapper) -> None:
     user = add_user(cursor)
-    add_factor(cursor, user, kind="recovery", lookup_blob_ct=b"\0" * LOOKUP_BLOB_LENGTH)
+    add_factor(cursor, user, kind="passkey", lookup_blob_ct=b"\0" * LOOKUP_BLOB_LENGTH)
     cursor.execute("SELECT sign_count FROM user_factor WHERE user_id = %s", [user])
     assert cursor.fetchall() == [(0,)]
 

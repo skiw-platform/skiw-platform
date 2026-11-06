@@ -128,9 +128,26 @@ after each change. Removing the old version at once, or replacing the file, logs
 (the next request gets an empty session and the cookie is deleted): that is the wanted effect when
 the key may have leaked. No script rotates app keys yet, and the escrow after every rotation (spec
 §8.4 H4) still applies.
-Recovery codes (M3f-2) are MACs under this key too, with no version stored and no expiry: a code
-made under a version stops working once that version is removed. Keep the old version listed
-until every user has regenerated their codes (or accept that their old codes are void).
+Recovery codes (M3f-2) are MACs under this key too, with no expiry: a code made under a version
+stops working once that version is removed. Each `user_factor.secret_ct` of kind `recovery` starts
+with the version that signed it (4 bytes, big-endian; M3f-3a), so before removing a version count
+the users it still signs. Run this as `postgres`, because row-level security hides every row from
+`skiw_readonly`:
+```sh
+running="$(sudo sed -n 's/^SKIW_IMAGE=//p' /var/lib/skiw/deploy.env)"; test -n "$running"
+sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
+  --env-file /etc/skiw/host.env exec -T db \
+  sh -c 'psql -X -At -U postgres -d "$POSTGRES_DB"' <<'SQL'
+SELECT (get_byte(secret_ct, 0)::bigint << 24) | (get_byte(secret_ct, 1) << 16)
+  | (get_byte(secret_ct, 2) << 8) | get_byte(secret_ct, 3) AS version,
+  count(DISTINCT user_id) AS users FROM user_factor WHERE kind = 'recovery'
+  GROUP BY 1 ORDER BY 1;
+SQL
+```
+For a planned rotation, remove a version only when the report no longer lists it; users get the
+newest version by regenerating their codes. In an emergency (the key may have leaked) remove it at
+once: every code still under it is void, so tell those users to generate new ones at their next
+sign-in.
 Both `web` (`config.asgi`) and `worker` (`runworker`, from M3a) refuse to start when the file is
 missing or malformed, before the migration check and without printing the key. A version number
 has at most six digits (`v1` to `v999999`): the reader and `bootstrap-secrets restore` refuse a

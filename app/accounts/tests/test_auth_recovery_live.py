@@ -1,9 +1,11 @@
 """Recovery codes against the real tables (accounts.auth.recovery; spec D7; plan M3 §3 M3f, §4 M3f
 row "each recovery code once, two parallel uses → one success; regenerate invalidates old
-codes"), as skiw_app on committed users (kept). The second-factor route is M3f-3."""
+codes"), as skiw_app on committed users (kept). The second-factor route is M3f-3c."""
 
 import logging
+import os
 import re
+import secrets
 import threading
 import uuid
 from collections.abc import Callable
@@ -15,13 +17,13 @@ from django.test.utils import CaptureQueriesContext
 
 from accounts import source_key
 from accounts.auth import recovery
-from accounts.factor_model import UserFactor
+from accounts.factor_model import TOTP_SECRET_CT_LENGTH, UserFactor
 from accounts.user_model import AppUser
 from tenancy.binding import with_agency
 
 from .conftest import committed_user
 from .test_auth_blob import key_line
-from .test_auth_recovery import expected, use_source_keys
+from .test_auth_recovery import VERSION_REPORT, stored_form, use_source_keys
 
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 PARALLEL = 10
@@ -47,8 +49,16 @@ def stored(user: AppUser) -> list[bytes]:
 
 
 def macs_of(user: AppUser, codes: list[str]) -> set[bytes]:
-    key = source_key.require_key()[0][1]
-    return {expected(key, user.id, code.replace("-", "")) for code in codes}
+    version, key = source_key.require_key()[0]
+    return {stored_form(version, key, user.id, code.replace("-", "")) for code in codes}
+
+
+def version_report(agency: uuid.UUID) -> list[tuple[int, int]]:
+    """The runbook's report, run as skiw_app bound to `agency` (the operator runs it as
+    `postgres`, which sees every agency)."""
+    with with_agency(agency), connection.cursor() as cursor:
+        cursor.execute(VERSION_REPORT)
+        return [(int(version), int(users)) for version, users in cursor.fetchall()]
 
 
 def in_parallel[T](user: AppUser, action: Callable[[], T]) -> list[T]:
@@ -140,6 +150,7 @@ def test_a_code_works_while_its_key_version_is_listed(
     v1, v2 = key_line(1), key_line(2)
     use_source_keys(monkeypatch, v1)
     codes = generated(user)
+    assert {row[:4].hex() for row in stored(user)} == {"00000001"}
     use_source_keys(monkeypatch, v2, v1)
     assert used(user, codes[0])  # made under v1 while v2 signs
     use_source_keys(monkeypatch, v2)
@@ -147,6 +158,7 @@ def test_a_code_works_while_its_key_version_is_listed(
     use_source_keys(monkeypatch, v2, v1)
     fresh = generated(user)
     assert set(stored(user)) == macs_of(user, fresh)  # signed with v2, the newest
+    assert {row[:4].hex() for row in stored(user)} == {"00000002"}
     use_source_keys(monkeypatch, v1)
     assert not used(user, fresh[0])
 
@@ -169,23 +181,46 @@ def test_no_code_reaches_a_log_a_query_or_a_repr(
             assert form not in text
 
 
+def test_the_runbook_report_counts_users_per_signing_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Before a version leaves the key file the operator counts the users it still signs. The
+    versions are random so that no other test's committed users can match."""
+    older = secrets.randbelow(900_000) + 1
+    newer = older + 50_000
+    users = [committed_user() for _ in range(3)]
+    use_source_keys(monkeypatch, key_line(older))
+    generated(users[0])
+    generated(users[1])
+    use_source_keys(monkeypatch, key_line(newer), key_line(older))
+    generated(users[1])  # regenerated: all under the newer version now
+    generated(users[2])
+    ours = {older, newer}
+    assert [row for row in version_report(users[0].agency_id) if row[0] in ours] == [
+        (older, 1),
+        (newer, 2),
+    ]
+
+
 def test_only_recovery_rows_are_used_or_replaced(user: AppUser) -> None:
-    """A TOTP row, even one holding a recovery MAC, is neither consumed by a use nor deleted by a
-    regeneration: both are scoped to kind `recovery`."""
+    """Rows of another kind, even a passkey row holding a recovery MAC, are neither consumed by a
+    use nor deleted by a regeneration: both are scoped to kind `recovery`. (The CHECK on
+    `secret_ct`, accounts.0010, stops a TOTP row from holding one.)"""
     code = "ABCD-EFGH-JKMN-PQRS"
     mac = recovery.macs(user.id, recovery.normalise(code) or "")[0]
     with with_agency(user.agency_id), connection.cursor() as cursor:
-        cursor.execute(
-            "INSERT INTO user_factor (id, agency_id, user_id, kind, secret_ct)"
-            " VALUES (gen_random_uuid(), %s, %s, 'totp', %s)",
-            [user.agency_id, user.id, mac],
-        )
+        for kind, secret in (("passkey", mac), ("totp", os.urandom(TOTP_SECRET_CT_LENGTH))):
+            cursor.execute(
+                "INSERT INTO user_factor (id, agency_id, user_id, kind, secret_ct)"
+                " VALUES (gen_random_uuid(), %s, %s, %s, %s)",
+                [user.agency_id, user.id, kind, secret],
+            )
 
-    def totp_rows() -> int:
+    def other_rows() -> int:
         with with_agency(user.agency_id):
-            return UserFactor.objects.filter(user_id=user.id, kind="totp").count()
+            return UserFactor.objects.filter(user_id=user.id).exclude(kind="recovery").count()
 
-    assert not used(user, code) and totp_rows() == 1
+    assert not used(user, code) and other_rows() == 2
     generated(user)
     generated(user)
-    assert totp_rows() == 1 and len(stored(user)) == 10
+    assert other_rows() == 2 and len(stored(user)) == 10

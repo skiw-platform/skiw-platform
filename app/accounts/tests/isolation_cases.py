@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 from django.db.backends.utils import CursorWrapper
 
+from accounts.factor_model import TOTP_SECRET_CT_LENGTH
 from tenancy.tests.isolation import IsolationCase
 
 
@@ -28,7 +29,7 @@ def _user_factor(
     cursor.execute(
         "INSERT INTO public.user_factor (id, agency_id, user_id, kind, secret_ct)"
         " VALUES (%s, %s, %s, 'totp', %s)",
-        [row, agency, parents["user_id"], b"\x00" * 32],
+        [row, agency, parents["user_id"], b"\x00" * TOTP_SECRET_CT_LENGTH],  # accounts.0010
     )
     return row
 
