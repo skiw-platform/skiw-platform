@@ -1,0 +1,7 @@
+PR: 125
+Reviewed head SHA: 39b6eded8853a73aaf7a0c4ba12d02112e644b42
+Review file: reviews/PR-125.md
+Review file hash (git hash-object): c8adab43184b71bc72dffc4fb8f6f142559bd5c5
+Log-branch commit holding that review: 77c04db
+Verdict: Approved (Round 2; Round 1 was Blocked on a missing PR-body self-check table, fixed by a body-only edit); no open findings; CI at 39b6ede: checks, security, image, host pass
+Time: 2026-11-06T16:43:52Z
