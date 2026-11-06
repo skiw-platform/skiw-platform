@@ -1,0 +1,7 @@
+PR: 119
+Reviewed head SHA: 13a6463c520580178f5be91a8885c0eb2edf830f
+Review file: reviews/PR-119.md
+Review file hash (git hash-object): 1449b79e780eede799e84c5637dc107c6ee643cd
+Log-branch commit holding that review: 2cc62dd
+Verdict: Approved (Round 2); Round 1 P2 (runbook report needs a PGPASSFILE) fixed in 13a6463; no open P0/P1/P2; CI at 13a6463: checks, security, image, host pass
+Time: 2026-11-06T05:05:11Z
