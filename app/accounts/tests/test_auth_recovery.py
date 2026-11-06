@@ -26,6 +26,12 @@ VERSION_REPORT = (
     " count(DISTINCT user_id) AS users FROM user_factor WHERE kind = 'recovery'"
     " GROUP BY 1 ORDER BY 1"
 )
+# The list of the users one version signs; the runbook's `00000001` is the version to replace.
+USERS_REPORT = (
+    "SELECT u.email FROM user_factor f JOIN app_user u ON u.id = f.user_id"
+    " WHERE f.kind = 'recovery' AND substring(f.secret_ct FROM 1 FOR 4) = decode('00000001', 'hex')"
+    " GROUP BY u.email ORDER BY u.email"
+)
 
 
 def use_source_keys(monkeypatch: pytest.MonkeyPatch, *lines: str) -> list[bytes]:
@@ -134,8 +140,16 @@ def test_the_largest_key_version_fits_the_prefix(monkeypatch: pytest.MonkeyPatch
     )
 
 
-def test_the_runbook_gives_the_operator_the_report_the_tests_run() -> None:
-    assert VERSION_REPORT in " ".join(RUNBOOK.read_text(encoding="utf-8").split())
+@pytest.mark.parametrize("report", [VERSION_REPORT, USERS_REPORT], ids=["count", "users"])
+def test_the_runbook_gives_the_operator_the_report_the_tests_run(report: str) -> None:
+    """The SQL is pinned, and so is the shell around it (PR 119 R1): pg_hba asks `postgres` for a
+    password on the socket, so psql must run behind a password file made from the container's
+    secret, and the report must be fed to that wrapper."""
+    blocks = [" ".join(block.split()) for block in RUNBOOK.read_text(encoding="utf-8").split("```")]
+    (block,) = [block for block in blocks if report in block]
+    assert "sh -c \"$pg\" <<'SQL' " + report.split(" ")[0] in block
+    (wrapper,) = [block for block in blocks if "pg='set -eu; umask 077;" in block]
+    assert "/run/secrets/postgres_password" in wrapper and 'PGPASSFILE="$f" psql' in wrapper
 
 
 def test_a_mac_is_bound_to_the_user_and_the_code(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -131,17 +131,32 @@ the key may have leaked. No script rotates app keys yet, and the escrow after ev
 Recovery codes (M3f-2) are MACs under this key too, with no expiry: a code made under a version
 stops working once that version is removed. Each `user_factor.secret_ct` of kind `recovery` starts
 with the version that signed it (4 bytes, big-endian; M3f-3a), so before removing a version count
-the users it still signs. Run this as `postgres`, because row-level security hides every row from
-`skiw_readonly`:
+the users it still signs. This is a break-glass read (one SELECT, no writes) as `postgres` over the
+`db` socket, because row-level security hides every row from `skiw_readonly`. `pg_hba` asks
+`postgres` for a password, so the wrapper builds a 0600 password file from the container's secret
+(removed on exit; never in argv or the environment), as `restore.md` does:
 ```sh
+sudo -v
 running="$(sudo sed -n 's/^SKIW_IMAGE=//p' /var/lib/skiw/deploy.env)"; test -n "$running"
-sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
-  --env-file /etc/skiw/host.env exec -T db \
-  sh -c 'psql -X -At -U postgres -d "$POSTGRES_DB"' <<'SQL'
+compose() { sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
+  --env-file /etc/skiw/host.env "$@"; }
+pg='set -eu; umask 077; f=$(mktemp); trap "rm -f \"\$f\"" EXIT
+printf "*:*:*:postgres:%s\n" "$(sed -e "s/[\\\\:]/\\\\&/g" /run/secrets/postgres_password)" > "$f"
+PGPASSFILE="$f" psql -X -At -U postgres -d "$POSTGRES_DB"'
+compose exec -T db sh -c "$pg" <<'SQL'
 SELECT (get_byte(secret_ct, 0)::bigint << 24) | (get_byte(secret_ct, 1) << 16)
   | (get_byte(secret_ct, 2) << 8) | get_byte(secret_ct, 3) AS version,
   count(DISTINCT user_id) AS users FROM user_factor WHERE kind = 'recovery'
   GROUP BY 1 ORDER BY 1;
+SQL
+```
+To list the users of one version (to tell them), run the same with this SELECT, replacing the eight
+hex digits with the version in four bytes (version 2 is `00000002`):
+```sh
+compose exec -T db sh -c "$pg" <<'SQL'
+SELECT u.email FROM user_factor f JOIN app_user u ON u.id = f.user_id
+  WHERE f.kind = 'recovery' AND substring(f.secret_ct FROM 1 FOR 4) = decode('00000001', 'hex')
+  GROUP BY u.email ORDER BY u.email;
 SQL
 ```
 For a planned rotation, remove a version only when the report no longer lists it; users get the

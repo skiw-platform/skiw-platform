@@ -23,7 +23,7 @@ from tenancy.binding import with_agency
 
 from .conftest import committed_user
 from .test_auth_blob import key_line
-from .test_auth_recovery import VERSION_REPORT, stored_form, use_source_keys
+from .test_auth_recovery import USERS_REPORT, VERSION_REPORT, stored_form, use_source_keys
 
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 PARALLEL = 10
@@ -59,6 +59,13 @@ def version_report(agency: uuid.UUID) -> list[tuple[int, int]]:
     with with_agency(agency), connection.cursor() as cursor:
         cursor.execute(VERSION_REPORT)
         return [(int(version), int(users)) for version, users in cursor.fetchall()]
+
+
+def users_of(agency: uuid.UUID, version: int) -> list[str]:
+    """The runbook's list of the users one version signs (its `00000001` replaced), as skiw_app."""
+    with with_agency(agency), connection.cursor() as cursor:
+        cursor.execute(USERS_REPORT.replace("00000001", f"{version:08x}"))
+        return [email for (email,) in cursor.fetchall()]
 
 
 def in_parallel[T](user: AppUser, action: Callable[[], T]) -> list[T]:
@@ -200,6 +207,9 @@ def test_the_runbook_report_counts_users_per_signing_version(
         (older, 1),
         (newer, 2),
     ]
+    agency = users[0].agency_id
+    assert users_of(agency, older) == [users[0].email]
+    assert sorted(users_of(agency, newer)) == sorted(user.email for user in users[1:])
 
 
 def test_only_recovery_rows_are_used_or_replaced(user: AppUser) -> None:
