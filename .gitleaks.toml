@@ -15,8 +15,11 @@ keywords = ["cred_enc_key", "supabase_service_key", "anthropic_api_key", "gas_pr
 # word "secret" or "key" in prose, which the default generic-api-key rule reads as a credential
 # (PR 117 R1 P1). The regex is anchored to the whole captured secret, so only a bare label is
 # skipped; a value next to a label, or a label with anything appended, is still a finding.
+# It is also no wider than the labels that exist (PR 118 R1 P2): one to four lowercase words of 2 to
+# 12 letters (the longest is `credential`), and a version of at most six digits, so a random value
+# written in the label's outline (`skiw-<hex>-v1`) is still a finding.
 [[allowlists]]
 description = "skiw-<words>-v<N> domain-separation labels, bare"
 targetRules = ["generic-api-key"]
 regexTarget = "secret"
-regexes = ['''^skiw(?:-[a-z0-9]+)+-v[0-9]+$''']
+regexes = ['''^skiw(?:-[a-z]{2,12}){1,4}-v[0-9]{1,6}$''']
