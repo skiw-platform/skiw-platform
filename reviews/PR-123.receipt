@@ -1,0 +1,7 @@
+PR: 123
+Reviewed head SHA: 034b09cb29d7ab64864addc28dd0f20f89500328
+Review file: reviews/PR-123.md
+Review file hash (git hash-object): 9262b8e30c53694fbd0c8ed53d932b1d0ca45821
+Log-branch commit holding that review: d322318
+Verdict: Approved (Round 1); no open findings; CI at 034b09c: checks, security (all steps, 551 commits scanned, 13 rule tests), image, host pass
+Time: 2026-11-06T08:32:15Z
