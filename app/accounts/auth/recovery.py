@@ -1,9 +1,15 @@
-"""Recovery codes (spec D7, Flow 5.1 (2); plan M3 §3 M3f, DECISIONS M3f-2). COUNT per user, each
-LENGTH Crockford base32 symbols from `secrets` (80 bits), shown once as four groups of four. Each
-code is one `user_factor` row (kind `recovery`) whose `secret_ct` is HMAC-SHA-256 under
-`tenant_source_key` over LABEL || field(user id) || field(code), so the table holds no code. The
-newest key version signs; a candidate is matched under every listed version, so a code keeps
-working across a rotation until its version is removed from the key file.
+"""Recovery codes (spec D7, Flow 5.1 (2); plan M3 §3 M3f, DECISIONS M3f-2, M3f-3a). COUNT per
+user, each LENGTH Crockford base32 symbols from `secrets` (80 bits), shown once as four groups of
+four. Each code is one `user_factor` row (kind `recovery`) whose `secret_ct` is the
+`tenant_source_key` version that signed it (RECOVERY_VERSION_BYTES, big-endian), then HMAC-SHA-256
+under that version over LABEL || field(user id) || field(code), so the table holds no code. The
+newest version signs; a candidate is matched under every listed version, each MAC behind its own
+version, so a code keeps working across a rotation until its version is removed from the key file.
+
+The version is in clear so that, before a version leaves the key file, an operator can count the
+users whose codes it still signs (runbook host-rebuild.md, "Rotating `tenant_source_key`"). It is
+no secret (a session row names its version too), and it is outside the MAC: a row whose version
+was changed matches no candidate.
 
 Both functions run in the caller's with_agency() transaction, as revoke.mark does, so M3f-3 can
 write the AUTH-07 marker in the transaction that regenerates. A use is one `DELETE ... RETURNING`:
@@ -22,7 +28,7 @@ from django.db import connection
 from django.db.transaction import TransactionManagementError
 
 from accounts import source_key
-from accounts.factor_model import UserFactor
+from accounts.factor_model import RECOVERY_VERSION_BYTES, UserFactor
 
 LABEL = b"skiw-recovery-v1"  # keeps this use of the key apart from the session MAC and throttle
 ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"  # Crockford base32: no I, L, O or U
@@ -63,10 +69,14 @@ def normalise(candidate: str) -> str | None:
 
 
 def macs(user: uuid.UUID, code: str) -> list[bytes]:
-    """The MAC of the normalised `code` for `user` under each listed key version, newest first."""
+    """The stored form of the normalised `code` for `user` under each listed key version, newest
+    first: the version in RECOVERY_VERSION_BYTES big-endian bytes, then the MAC under it."""
     message = LABEL + source_key.field(str(user)) + source_key.field(code)
-    keys = source_key.require_key()
-    return [hmac.new(key, message, hashlib.sha256).digest() for _, key in keys]
+    return [
+        version.to_bytes(RECOVERY_VERSION_BYTES, "big")
+        + hmac.new(key, message, hashlib.sha256).digest()
+        for version, key in source_key.require_key()
+    ]
 
 
 def generate(agency: uuid.UUID, user: uuid.UUID) -> list[str]:
