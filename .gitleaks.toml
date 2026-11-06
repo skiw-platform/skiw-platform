@@ -10,3 +10,13 @@ id = "skiw-secret-key-assignment"
 description = "A SKIW secret key name assigned a literal value"
 regex = '''(?i)(CRED_ENC_KEY|SUPABASE_SERVICE_KEY|ANTHROPIC_API_KEY|GAS_PROOF_URL|tenant_token_key|tenant_source_key|login_blob_key|approval_mac_key|audit_mac_key|private_key_id|lookup_decoy_key|field_kek|blind_index_key|crm_jar_kek)["']?\s*[:=]\s*["']?[A-Za-z0-9+/_.:=-]{16,}'''
 keywords = ["cred_enc_key", "supabase_service_key", "anthropic_api_key", "gas_proof_url", "tenant_token_key", "tenant_source_key", "login_blob_key", "approval_mac_key", "audit_mac_key", "private_key_id", "lookup_decoy_key", "field_kek", "blind_index_key", "crm_jar_kek"]
+
+# Our HKDF and MAC domain-separation labels (skiw-factor-secret-v1, skiw-recovery-v1, ...) hold the
+# word "secret" or "key" in prose, which the default generic-api-key rule reads as a credential
+# (PR 117 R1 P1). The regex is anchored to the whole captured secret, so only a bare label is
+# skipped; a value next to a label, or a label with anything appended, is still a finding.
+[[allowlists]]
+description = "skiw-<words>-v<N> domain-separation labels, bare"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = ['''^skiw(?:-[a-z0-9]+)+-v[0-9]+$''']
