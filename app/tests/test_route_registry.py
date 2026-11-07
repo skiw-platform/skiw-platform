@@ -32,6 +32,12 @@ PUBLIC_ROUTES: dict[str, str] = {
     "auth-enrol": "the enrolment password, before the user has any credential: the single-use,"
     " expiring HMAC link (AUTH-08) stands in for a login, every refusal has one answer (AUTH-05);"
     " it leaves only a pending enrolment, never a sign-in",
+    "auth-enrol-totp": "the first authenticator secret, for a pending enrolment session only (the"
+    " enrolment link's password came first): without that session the one answer is 401; it stores"
+    " nothing and signs nobody in",
+    "auth-enrol-totp-confirm": "the first authenticator code, for a pending enrolment session"
+    " only: wrong codes are throttled per user (AUTH-06); the right one completes the sign-in"
+    " through login(), the one place a session becomes a login",
 }
 
 
