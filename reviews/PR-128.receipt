@@ -1,0 +1,7 @@
+PR: 128
+Reviewed head SHA: def827b93226c588f1f2a8b0f9d91a4e2c41673c
+Review file: reviews/PR-128.md
+Review file hash (git hash-object): ce5ca08678fa39c0224a9ac6fbd067aa609f3fda
+Log-branch commit holding that review: c382479
+Verdict: Approved with conditions (Round 1; no open P0/P1; P2 #1 factor-throttle atomicity deferred to M3f-3c-1, which must not merge with the check-then-record shape; P3s open: DECISIONS reason for no factor security_event (3c-1), parallel enrolment test (3b-2), pending deadline and host-rebuild.md:401 (3b-2), TEN-08 evidence wording); CI at def827b: checks, host, image, security pass
+Time: 2026-11-07T14:43:45Z
