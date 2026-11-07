@@ -135,3 +135,20 @@ def test_every_step_in_the_window_is_compared_whichever_matches(skew: Settings) 
 def test_a_new_secret_is_20_random_bytes() -> None:
     secrets_made = {totp.new_secret() for _ in range(32)}
     assert len(secrets_made) == 32 and {len(s) for s in secrets_made} == {20}
+
+
+def test_the_key_uri_carries_the_fixed_issuer_and_the_email_percent_encoded() -> None:
+    uri = totp.uri(RFC_SECRET, "ann+work@example.test")
+    assert uri == (
+        "otpauth://totp/SKIW%20Assistant:ann%2Bwork@example.test"
+        "?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=SKIW%20Assistant"
+        "&algorithm=SHA1&digits=6&period=30"
+    )
+    assert totp.text(RFC_SECRET) == "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  # RFC 4648 of the RFC secret
+
+
+def test_the_key_uri_cannot_be_bent_by_the_account_name() -> None:
+    uri = totp.uri(RFC_SECRET, "a b&issuer=Evil?x=1#frag/é@example.test")
+    label, _, query = uri.removeprefix("otpauth://totp/").partition("?")
+    assert " " not in uri and "#" not in uri and "&issuer=Evil" not in uri
+    assert label.startswith("SKIW%20Assistant:") and query.count("issuer=") == 1
