@@ -1129,3 +1129,15 @@
 - **Versions:** python base image digest only (3.12.15 unchanged).
 - **Exception to a rule?** no.
 - **Decided by:** builder (Sonnet session), as the remediation the PR 126 reviewer required.
+
+## 2026-11-07 — M3 plan: TOTP required, passkey optional; M3f-3 as six PRs; factor changes on active sessions to M3h
+- **Decision:** the owner's answers of 2026-11-06 to the reviewer (`.agent/reviews/owner-decisions-m3f-3.md`, "1a 2ok 3yes 4yes") are now in the plan (`docs/plans/2026-10-31-m3-auth.md`, amended 2026-11-07): (1) **TOTP is required for every user, owner and admin included; a passkey is optional for everyone** (spec v1.22, PR 124: D7, T5, Flow 5.1 (4), M3 row, cutover step; `PROJECT.md` reconciled by PR 125); (2) the TOTP issuer is the fixed string `SKIW Assistant`, the account name the user's email, label `SKIW Assistant:<email>`, not configurable, not the agency name; (3) M3f-3 is six PRs, S, 3a, 3b-1, 3b-2, 3c-1, 3c-2 (≈ 1 600 lines against the plan's ≈ 350 for all of M3f); (4) adding, removing or regenerating a factor on an *active* session is deferred to M3h behind step-up (D8).
+- **Accepted risk (owner, 2026-11-06):** TOTP can be phished in real time, so an owner or admin account is protected by TOTP alone. The reviewer recommended keeping passkeys required for owner/admin; the owner declined. Recorded in spec T5.
+- **Plan rows changed:** AUTH-03 row (the passkey half removed; AUTH-03 itself stays deferred to M4-rest), the M3f to M3i rows, the M3f bullets (six-PR sequence, issuer label), M3h (D8 actions carry AUTH-07 with a test, as the reviewer required; step-up by TOTP or an enrolled passkey), M3i (enrol TOTP, optional passkey), the §4 M3f and M3i tests (a user with no TOTP is not active and cannot reach data, replacing the deferred owner/admin passkey test), the §5 auth row, Q9 (AUTH-03 only), §9 item 11 and the Done-when gap note.
+- **Consequence not stated by the owner:** step-up re-verifies TOTP when no passkey is enrolled (spec v1.22, reviewed in Round 26).
+- **Until M3h:** a lost factor needs the owner-performed reset (Flow 5.1), and the runbook's emergency-rotation step "generate new ones at their next sign-in" cannot be done by users. Neither matters while the real-data gate is locked.
+- **Not decided here:** whether M3g (optional passkeys) moves after M3i; the D20 wording in the spec (Round 26 P3, next spec touch).
+- **Scope / affects:** `docs/plans/2026-10-31-m3-auth.md`, `docs/DECISIONS.md`. No code.
+- **Versions:** none new.
+- **Exception to a rule?** no.
+- **Decided by:** owner (answers 1a, 2 ok, 3 yes, 4 yes, 2026-11-06, relayed by the reviewer); written by the Sonnet builder session.
