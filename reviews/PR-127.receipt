@@ -1,0 +1,7 @@
+PR: 127
+Reviewed head SHA: dab2e8b007378afe569d7a9669a1bcb53ec5fb44
+Review file: reviews/PR-127.md
+Review file hash (git hash-object): 50540ae4483a822076c3bfb0090ebd6af1852b7a
+Log-branch commit holding that review: 6ef4c98
+Verdict: Approved (Round 2; Round 1 was Revision required on a PR-body self-check rule ID, fixed body-only); no open findings; CI at dab2e8b: checks, host, image, security pass
+Time: 2026-11-07T11:29:32Z
