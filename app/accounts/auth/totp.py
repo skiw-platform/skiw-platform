@@ -6,9 +6,11 @@ access: the caller stores the accepted step in `user_factor.sign_count` and pass
 blob.seal_factor_secret.
 """
 
+import base64
 import hmac
 import secrets
 import time
+from urllib.parse import quote, urlencode
 
 from django.conf import settings
 
@@ -16,11 +18,28 @@ from accounts.auth.blob import FACTOR_SECRET_SIZE
 
 DIGITS = 6
 PERIOD = 30
+ISSUER = "SKIW Assistant"  # fixed, not the agency name (owner 2026-11-06, plan M3 §3 M3f)
 SECRET_BYTES = FACTOR_SECRET_SIZE
 
 
 def new_secret() -> bytes:
     return secrets.token_bytes(SECRET_BYTES)
+
+
+def text(secret: bytes) -> str:
+    """The secret as an authenticator app takes it typed in: RFC 4648 base32, no padding (20
+    bytes fill 32 symbols exactly)."""
+    return base64.b32encode(secret).decode()
+
+
+def uri(secret: bytes, account: str) -> str:
+    """The `otpauth://` key URI an authenticator app imports (Google Authenticator's Key URI
+    format): label `SKIW Assistant:<account>` and `issuer=SKIW Assistant`, percent-encoded with
+    %20 for a space, never `+`. `account` is the user's email."""
+    label = quote(f"{ISSUER}:{account}", safe=":@")
+    query: dict[str, str | int] = {"secret": text(secret), "issuer": ISSUER, "algorithm": "SHA1"}
+    query |= {"digits": DIGITS, "period": PERIOD}
+    return f"otpauth://totp/{label}?{urlencode(query, quote_via=quote)}"
 
 
 def code(secret: bytes, step: int) -> str:

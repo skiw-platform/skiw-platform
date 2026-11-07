@@ -16,6 +16,7 @@ import hashlib
 import hmac
 import ipaddress
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -30,6 +31,7 @@ from accounts.auth.blob import normalise_email
 from accounts.auth.events import record_event
 
 ACCOUNT, IP, LOCK = b"skiw-throttle-account-v1", b"skiw-throttle-ip-v1", b"skiw-throttle-lock-v1"
+FACTOR = b"skiw-throttle-factor-v1"
 MALFORMED_IP = "malformed"  # every unparseable client address counts under this one key
 RUN = datetime(1970, 1, 1, tzinfo=UTC)  # window_start of the consecutive-failure row
 UPSERT = (
@@ -115,3 +117,22 @@ def reset_on_success(email: str) -> None:
             "UPDATE auth_throttle SET count = 0 WHERE key_hmac = %s AND window_start = %s",
             [_hmac(LOCK, normalise_email(email)), RUN],
         )
+
+
+def factor_blocked(user: uuid.UUID) -> bool:
+    """True once `user` has had SKIW_AUTH_FAILS_PER_ACCOUNT wrong second-factor codes in this
+    window (AUTH-06). The user is known here (a pending session, after the password), so the
+    count is per user, not per email or IP: a password holder guessing from many addresses is
+    still counted. Windowed like the account counter, never reset by a success."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT count FROM auth_throttle WHERE key_hmac = %s AND window_start = %s",
+            [_hmac(FACTOR, str(user)), _window(timezone.now())],
+        )
+        row = cursor.fetchone()
+    return row is not None and row[0] >= settings.SKIW_AUTH_FAILS_PER_ACCOUNT
+
+
+def record_factor_failure(user: uuid.UUID) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(UPSERT, [_hmac(FACTOR, str(user)), _window(timezone.now())])
