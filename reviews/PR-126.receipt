@@ -1,0 +1,7 @@
+PR: 126
+Reviewed head SHA: a7e0d8ba54889d18f602b8b0a5786dce0a60a795
+Review file: reviews/PR-126.md
+Review file hash (git hash-object): d36f45618c4c8d4344901c0eab87b663ad58bf62
+Log-branch commit holding that review: 2cac70d
+Verdict: Approved (Round 3; Round 1 and Round 2 were Revision required: provenance, work-package accounting, Q9 gate, UNI-13 image gate fixed via PR 127); no open findings; CI at a7e0d8b: checks, host, image, security pass
+Time: 2026-11-07T11:51:43Z
