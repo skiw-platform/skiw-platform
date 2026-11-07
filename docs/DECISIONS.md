@@ -1118,3 +1118,14 @@
 - **Versions:** none new (gitleaks stays v8.30.1).
 - **Exception to a rule?** no.
 - **Decided by:** builder (Sonnet session, with the regex the reviewer proposed in PR 118 R1 P2, widened from `{2,12}` words only by the version bound `{1,6}`, which the reviewer also gave); standalone PR "S" of the M3f-3 sequence.
+
+## 2026-11-07 — App image: re-pin `python:3.12.15-alpine` to the rebuilt digest (UNI-13, PR 126 R2 P1)
+- **Decision:** `Dockerfile` line 12 now pins `python:3.12.15-alpine@sha256:b658b05ce9c4eb97ec6fc19424818a1f31993659c2b505a532f470e83807815d` (Alpine 3.24.3, `musl` and `musl-utils` 1.2.6-r3, `zlib` 1.3.2-r1). It replaces `@sha256:1b668429…` (Alpine 3.24.2, `musl` 1.2.6-r2, `zlib` 1.3.2-r0). Same Python version, same tag; only the digest changed.
+- **Why:** the CI `image` job (Trivy v0.75.0, `--severity HIGH,CRITICAL --exit-code 1`) began failing on 2026-11-07 on three fixed HIGH findings in the old digest: `musl` and `musl-utils` CVE-2026-107891 (fixed in 1.2.6-r3) and `zlib` CVE-2026-85091 (fixed in 1.3.2-r1). Main had been green at `d1b7abb` the day before; nothing in the repo changed, the vulnerability database did. PR 126's review (R2 P1) found the red gate.
+- **Evidence:** the image built from this Dockerfile, scanned with `aquasec/trivy:0.75.0 image --severity HIGH,CRITICAL --exit-code 1`: exit 0, `alpine 3.24.3` 0 findings, every `python-pkg` target 0. No allow-list, no `.trivyignore`, no `apk upgrade` layer.
+- **Alternatives rejected:** `python:3.12.16-alpine` (a Python patch bump, a larger change than a security re-pin; Dependabot proposes version moves); an `apk upgrade` layer (leaves the pinned digest not reproducing the shipped image); a `.trivyignore` entry (the findings are fixed upstream).
+- **Follow-up:** the dump image (`infra/host/backup/predeploy/Dockerfile`, its own postgres alpine pin) is scanned by the same job; its scan step was skipped in the failed PR 126 run (the app-image scan failed first), so it was built and scanned here too with the same Trivy command: exit 0, `alpine 3.24.3`, 0 findings. Not changed.
+- **Scope / affects:** `Dockerfile`, `docs/DECISIONS.md`.
+- **Versions:** python base image digest only (3.12.15 unchanged).
+- **Exception to a rule?** no.
+- **Decided by:** builder (Sonnet session), as the remediation the PR 126 reviewer required.
