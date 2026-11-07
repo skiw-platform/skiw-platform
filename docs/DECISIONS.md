@@ -1119,6 +1119,17 @@
 - **Exception to a rule?** no.
 - **Decided by:** builder (Sonnet session, with the regex the reviewer proposed in PR 118 R1 P2, widened from `{2,12}` words only by the version bound `{1,6}`, which the reviewer also gave); standalone PR "S" of the M3f-3 sequence.
 
+## 2026-11-07 — App image: re-pin `python:3.12.15-alpine` to the rebuilt digest (UNI-13, PR 126 R2 P1)
+- **Decision:** `Dockerfile` line 12 now pins `python:3.12.15-alpine@sha256:b658b05ce9c4eb97ec6fc19424818a1f31993659c2b505a532f470e83807815d` (Alpine 3.24.3, `musl` and `musl-utils` 1.2.6-r3, `zlib` 1.3.2-r1). It replaces `@sha256:1b668429…` (Alpine 3.24.2, `musl` 1.2.6-r2, `zlib` 1.3.2-r0). Same Python version, same tag; only the digest changed.
+- **Why:** the CI `image` job (Trivy v0.75.0, `--severity HIGH,CRITICAL --exit-code 1`) began failing on 2026-11-07 on three fixed HIGH findings in the old digest: `musl` and `musl-utils` CVE-2026-107891 (fixed in 1.2.6-r3) and `zlib` CVE-2026-85091 (fixed in 1.3.2-r1). Main had been green at `d1b7abb` the day before; nothing in the repo changed, the vulnerability database did. PR 126's review (R2 P1) found the red gate.
+- **Evidence:** the image built from this Dockerfile, scanned with `aquasec/trivy:0.75.0 image --severity HIGH,CRITICAL --exit-code 1`: exit 0, `alpine 3.24.3` 0 findings, every `python-pkg` target 0. No allow-list, no `.trivyignore`, no `apk upgrade` layer.
+- **Alternatives rejected:** `python:3.12.16-alpine` (a Python patch bump, a larger change than a security re-pin; Dependabot proposes version moves); an `apk upgrade` layer (leaves the pinned digest not reproducing the shipped image); a `.trivyignore` entry (the findings are fixed upstream).
+- **Follow-up:** the dump image (`infra/host/backup/predeploy/Dockerfile`, its own postgres alpine pin) is scanned by the same job; its scan step was skipped in the failed PR 126 run (the app-image scan failed first), so it was built and scanned here too with the same Trivy command: exit 0, `alpine 3.24.3`, 0 findings. Not changed.
+- **Scope / affects:** `Dockerfile`, `docs/DECISIONS.md`.
+- **Versions:** python base image digest only (3.12.15 unchanged).
+- **Exception to a rule?** no.
+- **Decided by:** builder (Sonnet session), as the remediation the PR 126 reviewer required.
+
 ## 2026-11-07 — M3 plan: TOTP required, passkey optional; M3f-3 as six PRs; factor changes on active sessions to M3h
 - **Decision:** the owner's answers of 2026-11-06 to the reviewer (`.agent/reviews/owner-decisions-m3f-3.md`, "1a 2ok 3yes 4yes") are now in the plan (`docs/plans/2026-10-31-m3-auth.md`, amended 2026-11-07): (1) **TOTP is required for every user, owner and admin included; a passkey is optional for everyone** (spec v1.22, PR 124: D7, T5, Flow 5.1 (4), M3 row, cutover step; `PROJECT.md` reconciled by PR 125); (2) the TOTP issuer is the fixed string `SKIW Assistant`, the account name the user's email, label `SKIW Assistant:<email>`, not configurable, not the agency name; (3) M3f-3 is six PRs, S, 3a, 3b-1, 3b-2, 3c-1, 3c-2 (≈ 1 600 lines against the plan's ≈ 350 for all of M3f); (4) adding, removing or regenerating a factor on an *active* session is deferred to M3h behind step-up (D8).
 - **Accepted risk (owner, 2026-11-06):** TOTP can be phished in real time, so an owner or admin account is protected by TOTP alone. The reviewer recommended keeping passkeys required for owner/admin; the owner declined. Recorded in spec T5.
