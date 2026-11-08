@@ -16,7 +16,7 @@ from django.db import connection
 from django.http import HttpRequest
 from django.test import RequestFactory
 
-from accounts.auth import blob, factors, password_step, recovery, second_factor, totp
+from accounts.auth import blob, factors, password_step, recovery, second_factor, throttle, totp
 from accounts.auth.password_step import Verified
 from accounts.auth.second_factor import Passed, attempt
 from accounts.factor_model import UserFactor
@@ -26,9 +26,14 @@ from tenancy.binding import with_agency
 
 from .conftest import Clock
 from .logins import enrolled, factor_count, unseal
+from .test_factor_lock_live import events as lock_events
+from .test_factor_lock_live import markers as lock_markers
+from .test_factor_lock_live import run as lock_run
+from .test_factors_live import begun, enrolling
 
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 LIMIT = settings.SKIW_AUTH_FAILS_PER_ACCOUNT
+WINDOW = timedelta(minutes=settings.SKIW_AUTH_WINDOW_MIN)
 STEP = 1_000_000  # a fixed step, so no test straddles a 30-second boundary
 
 
@@ -210,11 +215,12 @@ def test_an_expired_pending_login_is_unavailable(clock: Clock) -> None:
 def test_a_user_who_is_no_longer_active_is_unavailable_and_nothing_changes(status: str) -> None:
     user, secret, codes = signing_in()
     request = pending_login(user)
+    throttle.factor_failed(user.id, user.email, "192.0.2.9")  # a run of one, which must stay
     with with_agency(user.agency_id):
         AppUser.objects.filter(id=user.id).update(status=status)
     assert attempt(request, code_at(secret, STEP)) == "unavailable"
     assert attempt(pending_login(user), codes[0]) == "unavailable"
-    assert factor_count(user.id) == 0 and stored_step(user) == 0
+    assert factor_count(user.id) == 0 and stored_step(user) == 0 and lock_run(user.id) == 1
     with with_agency(user.agency_id):
         assert UserFactor.objects.filter(user_id=user.id, kind="recovery").count() == 10
 
@@ -263,6 +269,21 @@ def test_parallel_wrong_codes_cannot_pass_the_limit() -> None:
     assert factor_count(user.id) == LIMIT
 
 
+def test_parallel_right_and_wrong_codes_never_exceed_the_limit_and_the_right_one_passes() -> None:
+    user, secret, _ = signing_in()
+    right, guess = code_at(secret, STEP), wrong_for(secret)
+    requests = [pending_login(user) for _ in range(2 * LIMIT)]
+    results = in_parallel(
+        [
+            partial(attempt, r, c)
+            for r, c in zip(requests, [right] + [guess] * (2 * LIMIT - 1), strict=True)
+        ]
+    )
+    assert results.count("wrong_code") <= LIMIT
+    assert len([r for r in results if isinstance(r, Passed)]) <= 1
+    assert stored_step(user) in (0, STEP)
+
+
 def test_a_fault_gives_the_attempt_back(monkeypatch: pytest.MonkeyPatch) -> None:
     user, _, codes = signing_in()
     request = pending_login(user)
@@ -286,7 +307,7 @@ def failing_commit(agency_id: uuid.UUID) -> Iterator[None]:
         raise RuntimeError("the commit failed")
 
 
-def test_a_fault_after_a_wrong_comparison_keeps_the_count(
+def test_a_fault_after_a_wrong_comparison_keeps_the_count_and_feeds_the_lock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """PR 130 R1 P3: a failure an attacker can provoke after the comparison must not hand the
@@ -296,9 +317,32 @@ def test_a_fault_after_a_wrong_comparison_keeps_the_count(
     for n in range(1, LIMIT + 1):
         with pytest.raises(RuntimeError):
             attempt(pending_login(user), wrong_for(secret))
-        assert factor_count(user.id) == n
+        assert factor_count(user.id) == n and lock_run(user.id) == n
     assert attempt(pending_login(user), wrong_for(secret)) == "limited"  # all five stayed counted
     assert factor_count(user.id) == LIMIT
+
+
+def test_a_fault_after_a_wrong_recovery_code_keeps_the_count_and_feeds_the_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PR 132 R1 residual risk: the recovery path takes the same `seen.wrong` branch as TOTP."""
+    user, _, _ = signing_in()
+    monkeypatch.setattr(second_factor, "with_agency", failing_commit)
+    with pytest.raises(RuntimeError):
+        attempt(pending_login(user), "WRONGWRONGWRONG0")
+    assert factor_count(user.id) == 1 and lock_run(user.id) == 1
+
+
+def test_a_double_click_on_a_right_code_costs_one_count() -> None:
+    """PR 132 R1 design call 4: of two parallel submissions of one right code the loser comes
+    back `wrong_code` and is counted (and fed to the lock); the winner gives its attempt back."""
+    user, secret, _ = signing_in()
+    code = code_at(secret, STEP)
+    results = in_parallel([partial(attempt, pending_login(user), code) for _ in range(2)])
+    assert len([r for r in results if isinstance(r, Passed)]) == 1
+    assert results.count("wrong_code") == 1
+    assert factor_count(user.id) == 1
+    assert lock_run(user.id) in (0, 1)  # the winner's reset may land before or after the loser
 
 
 def test_a_fault_after_the_right_code_rolls_it_back_and_gives_the_attempt_back(
@@ -310,5 +354,93 @@ def test_a_fault_after_the_right_code_rolls_it_back_and_gives_the_attempt_back(
         patch.setattr(second_factor, "with_agency", failing_commit)
         with pytest.raises(RuntimeError):
             attempt(request, code_at(secret, STEP))
-    assert factor_count(user.id) == 0 and stored_step(user) == 0
+    assert factor_count(user.id) == 0 and stored_step(user) == 0 and lock_run(user.id) == 0
     assert isinstance(attempt(request, code_at(secret, STEP)), Passed)  # the code was not used
+
+
+def locked_events(user: AppUser, request: HttpRequest) -> list[dict[str, int]]:
+    return lock_events(user.email, throttle.client_ip(request))
+
+
+def wrong_codes(user: AppUser, secret: bytes, clock: Clock, times: int) -> None:
+    """Wrong codes the way sign-in makes them, TOTP and recovery codes alternately: a limited one
+    is refused, so it waits a window."""
+    for n in range(times):
+        if factor_count(user.id) >= LIMIT:
+            clock.advance(WINDOW)
+        candidate = wrong_for(secret) if n % 2 == 0 else "WRONGWRONGWRONG0"
+        assert attempt(pending_login(user), candidate) == "wrong_code"
+
+
+def test_consecutive_wrong_codes_lock_the_second_factor_and_raise_the_alert(
+    clock: Clock, security_log: pytest.LogCaptureFixture
+) -> None:
+    """PR 130 R1 P2 / PR 131 R1 P2, spec Flow 5.1 "Failures", through `attempt`: 10 consecutive
+    wrong codes, TOTP and recovery alternately, across windows, lock both kinds for 30 minutes and
+    alert once, though the budget (5 per 15 minutes) alone never would."""
+    after, lock_for = settings.SKIW_AUTH_LOCK_AFTER, timedelta(minutes=settings.SKIW_AUTH_LOCK_MIN)
+    user, secret, codes = signing_in()
+    request = pending_login(user)
+    wrong_codes(user, secret, clock, after - 1)
+    assert lock_markers(user.id) == 0 and locked_events(user, request) == []
+    wrong_codes(user, secret, clock, 1)  # the LOCK_AFTER-th
+    assert lock_markers(user.id) == 1 and locked_events(user, request) == [{"consecutive": after}]
+    assert any("soft-locked" in r.getMessage() for r in security_log.records)
+    assert str(user.id) not in security_log.text and user.email not in security_log.text
+    clock.advance(WINDOW)  # a fresh budget, but the lock holds
+    assert attempt(pending_login(user), code_at(secret, STEP)) == "limited"  # both kinds, right
+    assert attempt(pending_login(user), codes[0]) == "limited"  # codes included
+    assert factor_count(user.id) == 0 and stored_step(user) == 0
+    assert locked_events(user, request) == [{"consecutive": after}]  # still the one event
+    clock.advance(lock_for - WINDOW + timedelta(seconds=1))  # LOCK_MIN after the lock marker
+    assert isinstance(attempt(pending_login(user), code_at(secret, STEP)), Passed)
+    assert lock_run(user.id) == 0  # a success ends the run
+
+
+def test_a_success_ends_the_run_of_wrong_codes(clock: Clock) -> None:
+    after = settings.SKIW_AUTH_LOCK_AFTER
+    user, secret, _ = signing_in()
+    wrong_codes(user, secret, clock, after - 1)
+    assert lock_run(user.id) == after - 1
+    clock.advance(WINDOW)
+    assert isinstance(attempt(pending_login(user), code_at(secret, STEP)), Passed)
+    assert lock_run(user.id) == 0
+    wrong_codes(user, secret, clock, 1)
+    assert lock_run(user.id) == 1 and lock_markers(user.id) == 0  # starts again from one
+
+
+def test_the_lock_is_the_users_own_and_survives_a_new_sign_in(clock: Clock) -> None:
+    user, secret, _ = signing_in()
+    other, other_secret, _ = signing_in()
+    wrong_codes(user, secret, clock, settings.SKIW_AUTH_LOCK_AFTER)
+    clock.advance(WINDOW)
+    request = pending_login(user)  # a new password step does not clear it
+    assert attempt(request, code_at(secret, STEP)) == "limited"
+    assert isinstance(attempt(pending_login(other), code_at(other_secret, STEP)), Passed)
+
+
+def test_parallel_wrong_codes_lock_once_and_lose_no_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "SKIW_AUTH_LOCK_AFTER", 3)
+    user, secret, _ = signing_in()
+    guess = wrong_for(secret)
+    requests = [pending_login(user) for _ in range(LIMIT)]
+    results = in_parallel([partial(attempt, r, guess) for r in requests])
+    wrong = results.count("wrong_code")
+    assert 3 <= wrong <= LIMIT and wrong + results.count("limited") == LIMIT
+    assert lock_run(user.id) == wrong and factor_count(user.id) == wrong
+    assert lock_markers(user.id) == 1 and locked_events(user, requests[0]) == [{"consecutive": 3}]
+
+
+def test_wrong_codes_at_enrolment_do_not_feed_the_run_but_a_locked_user_is_refused(
+    clock: Clock,
+) -> None:
+    user, request = enrolling()
+    _, secret = begun(request)
+    for _ in range(LIMIT - 1):
+        assert factors.confirm_totp(request, wrong_for(secret)) == "wrong_code"
+    assert factor_count(user.id) == LIMIT - 1 and lock_run(user.id) == 0
+    for _ in range(settings.SKIW_AUTH_LOCK_AFTER):  # the lock, set by sign-in failures
+        throttle.factor_failed(user.id, user.email, "192.0.2.9")
+    assert factors.confirm_totp(request, code_at(secret, STEP)) == "limited"

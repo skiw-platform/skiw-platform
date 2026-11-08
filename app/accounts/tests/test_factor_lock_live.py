@@ -12,7 +12,8 @@ from datetime import timedelta
 
 import pytest
 from django.conf import settings
-from django.db import connection
+from django.db import connection, transaction
+from django.db.transaction import TransactionManagementError
 
 from accounts.auth import throttle
 
@@ -162,3 +163,15 @@ def test_parallel_wrong_codes_lose_no_count_and_lock_each_time_once(
         list(pool.map(one, range(8)))
     assert run(user) == 8 and markers(user) == 1  # one frozen instant: one marker row
     assert sorted(event["consecutive"] for event in events(email, ip)) == [3, 6]
+
+
+def test_the_run_is_written_outside_transactions_only(who: tuple[uuid.UUID, str, str]) -> None:
+    """PR 131 R1 P3: inside a caller's transaction a rollback would take the run, the marker and
+    the event with it, and wrong codes would never reach the lock."""
+    user, email, ip = who
+    fail(who, AFTER - 1)
+    with pytest.raises(TransactionManagementError), transaction.atomic():
+        throttle.factor_failed(user, email, ip)
+    with pytest.raises(TransactionManagementError), transaction.atomic():
+        throttle.factor_reset(user)
+    assert run(user) == AFTER - 1 and markers(user) == 0 and events(email, ip) == []
