@@ -16,14 +16,14 @@ from django.http import HttpResponse
 from django.test import Client
 from pytest_django import Settings
 
-from accounts.auth import enrol, factors, password_step, throttle, totp, wrapper
+from accounts.auth import enrol, factors, password_step, totp, wrapper
 from accounts.auth.login import FACTOR
 from accounts.auth.password_step import Verified, attempt
 from accounts.session import SessionStore
 from tests.test_csrf_gate import META, ORIGIN
 
 from .conftest import Clock
-from .logins import PASSWORD, enrolled, random_ip, unseal
+from .logins import PASSWORD, enrolled, factor_count, random_ip, unseal
 from .test_enrol_live import invited, row
 from .test_enrol_route_live import browser as browser_fixture
 from .test_enrol_route_live import post
@@ -150,7 +150,7 @@ def test_wrong_codes_are_refused_counted_and_end_in_limited(
     response = send(client, CONFIRM, token, {"code": current(secret)})
     assert response.status_code == 429 and json.loads(response.content) == {"error": "limited"}
     assert state(row(email)) == ("invited", [])
-    assert throttle.factor_blocked(row(email).id)
+    assert factor_count(row(email).id) == settings.SKIW_AUTH_FAILS_PER_ACCOUNT
 
 
 @pytest.mark.parametrize("body", [None, {}, {"code": 123456}, {"code": None}, {"code": ["1"]}])
@@ -161,7 +161,7 @@ def test_a_confirm_body_without_a_text_code_is_invalid_and_counts_nothing(
     begun(client, token)
     response = send(client, CONFIRM, token, body)
     assert response.status_code == 400 and json.loads(response.content) == {"error": "invalid"}
-    assert not throttle.factor_blocked(row(email).id) and state(row(email))[0] == "invited"
+    assert factor_count(row(email).id) == 0 and state(row(email))[0] == "invited"
     other = client.post(
         CONFIRM,
         "code=123456",
