@@ -32,7 +32,7 @@ from accounts.auth.blob import normalise_email
 from accounts.auth.events import record_event
 
 ACCOUNT, IP, LOCK = b"skiw-throttle-account-v1", b"skiw-throttle-ip-v1", b"skiw-throttle-lock-v1"
-FACTOR = b"skiw-throttle-factor-v1"
+FACTOR, FACTOR_LOCK = b"skiw-throttle-factor-v1", b"skiw-throttle-factor-lock-v1"
 MALFORMED_IP = "malformed"  # every unparseable client address counts under this one key
 RUN = datetime(1970, 1, 1, tzinfo=UTC)  # window_start of the consecutive-failure row
 UPSERT = (
@@ -146,11 +146,22 @@ def factor_reserve(user: uuid.UUID) -> Reservation | None:
     takes the row lock, re-reads the count and refuses when it is at the limit, so at most the
     limit are let through however many arrive at once (PR 128 R1 P2). A refused attempt changes
     nothing. It runs in autocommit and refuses an atomic block, where the count could be rolled
-    back with the caller's transaction and a guess would go uncounted."""
+    back with the caller's transaction and a guess would go uncounted. While the user's factor lock
+    holds (`factor_failed`) nothing is counted or checked either. The lock is read before the
+    count, not with it: attempts already in flight when the lock is set are still bounded by the
+    count, which is the hard cap."""
     if connection.in_atomic_block:
         raise TransactionManagementError("the factor attempt is counted outside any transaction")
-    reservation = Reservation(_hmac(FACTOR, str(user)), _window(timezone.now()))
+    now = timezone.now()
+    lock = _hmac(FACTOR_LOCK, str(user))
+    reservation = Reservation(_hmac(FACTOR, str(user)), _window(now))
     with connection.cursor() as cursor:
+        cursor.execute(  # a lock marker newer than LOCK_MIN; the run row (RUN) is older than any
+            "SELECT 1 FROM auth_throttle WHERE key_hmac = %s AND window_start > %s",
+            [lock, now - timedelta(minutes=settings.SKIW_AUTH_LOCK_MIN)],
+        )
+        if cursor.fetchone() is not None:
+            return None
         cursor.execute(
             FACTOR_RESERVE,
             [reservation.key, reservation.window, settings.SKIW_AUTH_FAILS_PER_ACCOUNT],
@@ -164,3 +175,33 @@ def factor_release(reservation: Reservation) -> None:
     the window has moved on (the reservation names its window) and never goes below zero."""
     with connection.cursor() as cursor:
         cursor.execute(FACTOR_RELEASE, [reservation.key, reservation.window])
+
+
+def factor_failed(user: uuid.UUID, email: str, ip: str) -> None:
+    """A wrong second-factor code, for the soft-lock of spec Flow 5.1 "Failures": the user's
+    consecutive wrong codes are one counter (RUN row, never windowed, reset by `factor_reset`);
+    each SKIW_AUTH_LOCK_AFTER-th adds a marker row (window_start = now) that makes
+    `factor_reserve` refuse for SKIW_AUTH_LOCK_MIN, and writes `factor.locked` (HMACs of the email
+    and IP, as `account.locked` does) and a warning: that is the owner alert. It is separate from
+    the password counter, which `reset_on_success` clears at every verified password, so a
+    holder of the password cannot keep it at zero. Call it in autocommit, after the check."""
+    lock, now = _hmac(FACTOR_LOCK, str(user)), timezone.now()
+    with transaction.atomic(), connection.cursor() as cursor:
+        cursor.execute(UPSERT, [lock, RUN])
+        (consecutive,) = cursor.fetchone()
+        locked = consecutive % settings.SKIW_AUTH_LOCK_AFTER == 0
+        if locked:
+            cursor.execute(UPSERT, [lock, now])
+            k = keys(email, ip)
+            record_event("factor.locked", k.account, k.ip, {"consecutive": consecutive})
+    if locked:
+        log.warning("second factor soft-locked after %d consecutive wrong codes", consecutive)
+
+
+def factor_reset(user: uuid.UUID) -> None:
+    """A verified second factor ends the run of wrong codes."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE auth_throttle SET count = 0 WHERE key_hmac = %s AND window_start = %s",
+            [_hmac(FACTOR_LOCK, str(user)), RUN],
+        )
