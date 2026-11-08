@@ -398,7 +398,18 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   request line, a `Referer` or the Caddy log.
 - It works **once** and for `SKIW_ENROL_LINK_MIN` minutes (30). Setting the password ends it, and any
   other unused link for that user with it. The user stays `invited` (password login is refused)
-  until they enrol a second factor (M3f, M3g).
+  until they enrol an authenticator app (TOTP), which every user must do (spec v1.22). A passkey is
+  optional and is added later (M3h).
+- **After setting the password the user has `SKIW_LOGIN_PENDING_MIN` minutes (5) to finish.** In
+  that time the page shows the authenticator secret and the user enters the first code; the
+  confirmation signs them in and shows ten recovery codes, once. The time is not extended. If it
+  runs out, or the browser is closed, the next step answers "enrolment expired", the password stays
+  set and the user stays `invited`. Run the command above again for the same email: it gives a new
+  link, and the user sets a new password and starts the authenticator step again. Nothing is kept
+  from the first try, so an old authenticator entry is not valid.
+- **Recovery codes are shown once**, in the answer to the first correct code. The operator cannot
+  see or resend them. A user who lost them before signing in needs the owner's reset (Flow 5.1,
+  not built yet).
 - **The password must be at least `SKIW_PW_MIN_LENGTH` characters (12)**, with no other
   rules. A shorter one is refused with the same answer as a bad link and doesn't use the link up,
   so the user can try again with the same link while it is valid.

@@ -4,6 +4,7 @@ enrolled TOTP is not active and cannot reach client data"). The routes are M3f-3
 factor at sign-in is M3f-3c."""
 
 import base64
+import threading
 import time
 from collections.abc import Iterator
 from datetime import timedelta
@@ -226,3 +227,36 @@ def test_a_login_pending_state_cannot_confirm_even_with_a_secret_in_the_session(
     del request.session[password_step.PENDING_ENROL]  # now the shape of a login's pending state
     assert factors.confirm_totp(request, current(secret)) == "unavailable"
     assert state(user) == ("invited", [])
+
+
+def test_two_sessions_confirming_at_once_enrol_one_factor_and_ten_codes() -> None:
+    """The same user in two browsers, each with its own begun secret, confirming at the same
+    moment: the row lock on the user lets one through; the other sees `active` and is refused."""
+    user, first = enrolling()
+    second = RequestFactory().get("/")
+    second.session = SessionStore()
+    password_step.start_pending(second, Verified(user.id, user.agency_id), enrol=True)
+    codes = [current(begun(request)[1]) for request in (first, second)]
+    results: list[object] = []
+    start = threading.Barrier(2)
+
+    def confirm(request: HttpRequest, code: str) -> None:
+        start.wait()
+        try:
+            results.append(factors.confirm_totp(request, code))
+        finally:
+            connection.close()
+
+    threads = [
+        threading.Thread(target=confirm, args=(request, code))
+        for request, code in zip((first, second), codes, strict=True)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert sorted(isinstance(r, factors.Enrolled) for r in results) == [False, True]
+    assert [r for r in results if not isinstance(r, factors.Enrolled)] == ["unavailable"]
+    status, rows = state(user)
+    assert status == "active" and sorted(r.kind for r in rows) == ["recovery"] * 10 + ["totp"]
+    assert markers(user) == 1
