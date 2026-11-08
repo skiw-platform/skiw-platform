@@ -412,18 +412,20 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   once regenerating exists (M3h); the owner's reset (Flow 5.1, not built yet) is only for a user who
   lost the authenticator too.
 - **Too many wrong codes** (`SKIW_AUTH_FAILS_PER_ACCOUNT`, 5, in `SKIW_AUTH_WINDOW_MIN`, 15 minutes)
-  stop all code checks for that user, at enrolment and at sign-in alike (sign-in from M3f-3c), until
+  stop all code checks for that user, at enrolment and at sign-in alike (`POST /api/auth/second-factor`), until
   the window ends. A new invite link does not shorten that, so tell the user to wait up to 15 minutes.
 - **Ten wrong codes in a row** (`SKIW_AUTH_LOCK_AFTER`, across any number of windows, and not
   cleared by signing in with the password again) lock that user's second factor for
   `SKIW_AUTH_LOCK_MIN` (30 minutes), TOTP and recovery codes alike, and the right code is refused
-  too until it ends. This is checked at sign-in from M3f-3c. The lock writes a `factor.locked`
+  too until it ends. It is checked at sign-in too, and a locked user gets the same `limited` answer as one who used up the budget. The lock writes a `factor.locked`
   event (HMACs of the email and IP, and the count) and a `second factor soft-locked` warning in the
   web log. That is the M3 stand-in for the owner alert (owner Q4 (a)): **nobody is sent anything**
   until that alert path exists, so look. After the `compose` helper of "Rotating
   `tenant_source_key`" is set up: `compose logs --since 24h web | grep 'soft-locked'`, or count the
-  events with the `pg` wrapper there: `SELECT count(*), max(at) FROM security_event WHERE kind =
-  'factor.locked'`. A user who is locked out just waits; only a right code, after the lock ends,
+  events per user with the `pg` wrapper there: `SELECT encode(email_hmac, 'hex'), count(*), max(at)
+  FROM security_event WHERE kind = 'factor.locked' GROUP BY 1 ORDER BY 2 DESC`. The hash cannot be
+  turned back into a name: you learn who it is from the user (they are the one locked out) or from
+  Ying. A user who is locked out just waits; only a right code, after the lock ends,
   clears the run. **There is no password change yet** (the owner's reset, Flow 5.1, is not built
   and `accounts_invite` only invites), so if locks repeat for one user, who may have a password
   someone else knows, the step for now is to tell Ying.

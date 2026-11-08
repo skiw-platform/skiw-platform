@@ -11,7 +11,7 @@ from typing import Any, TypeGuard
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 
-from accounts.auth import enrol, factors, password_step
+from accounts.auth import enrol, factors, password_step, second_factor
 from accounts.auth.blob import EMAIL_MAX
 from accounts.auth.login import login
 from accounts.auth.throttle import client_ip
@@ -146,3 +146,31 @@ def enrol_factor_confirm(request: HttpRequest) -> HttpResponse:
     return _answer(
         {"next": "signed_in", "recovery_codes": outcome.codes, "csrf": get_token(request)}, 200
     )
+
+
+def login_second_factor(request: HttpRequest) -> HttpResponse:
+    """POST /api/auth/second-factor: the code (authenticator or recovery) for the user the password
+    step left pending (spec Flow 5.1 (2)). Every pending-state failure (none, an enrolment's,
+    expired, a user no longer `active`) is the one `login-expired` answer with no cookie, so it
+    tells a holder of the pending session nothing (AUTH-05); wrong codes are counted per user and
+    ten in a row lock the user's second factor (AUTH-06, DECISIONS M3f-3c-1b/d); both end in the
+    same `limited` answer. Right: `login()` makes the session a login, called straight after the
+    attempt (only the user read is between them). If either fails the code is already spent and
+    stays spent: the 500 saves no session, so the pending login is as it was and the user can try
+    another code. Accepted, never undone by restoring the code, which would reopen replay
+    (DECISIONS M3f-3c-2)."""
+    body = _body(request)
+    code = None if body is None else body.get("code")
+    if not _text(code):
+        return _answer({"error": "invalid"}, 400)
+    outcome = second_factor.attempt(request, code)
+    if outcome == "unavailable":
+        return _answer({"error": "login-expired"}, 401)
+    if outcome == "limited":
+        return _answer({"error": "limited"}, 429)
+    if outcome == "wrong_code":
+        return _answer({"error": "code-wrong"}, 401)
+    with with_agency(outcome.agency_id):
+        user = AppUser.objects.get(id=outcome.user_id)
+    login(request, user, factor=outcome.factor)
+    return _answer({"next": "signed_in", "csrf": get_token(request)}, 200)

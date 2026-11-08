@@ -13,14 +13,15 @@ from typing import Any
 import pytest
 from django.conf import settings
 from django.http import HttpResponse
-from django.test import Client
+from django.middleware.csrf import get_token
+from django.test import Client, RequestFactory
 from pytest_django import Settings
 
 from accounts.auth import enrol, factors, password_step, totp, wrapper
-from accounts.auth.login import FACTOR
+from accounts.auth.login import FACTOR, login
 from accounts.auth.password_step import Verified, attempt
 from accounts.session import SessionStore
-from tests.test_csrf_gate import META, ORIGIN
+from tests.test_csrf_gate import CASES_URLCONF, META, ORIGIN
 
 from .conftest import Clock
 from .logins import PASSWORD, enrolled, factor_count, random_ip, unseal
@@ -30,8 +31,9 @@ from .test_enrol_route_live import post
 from .test_factors_live import state
 
 browser = browser_fixture
-pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
+pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db"), pytest.mark.urls(CASES_URLCONF)]
 BEGIN, CONFIRM = "/api/auth/enrol/totp", "/api/auth/enrol/totp/confirm"
+PROBE = "/action-probe"  # tests.csrf_urls: an authorized_action route
 SESSION = settings.SESSION_COOKIE_NAME
 EXPIRED = {"error": "enrol-expired"}
 
@@ -106,8 +108,33 @@ def test_the_whole_enrolment_ends_in_a_signed_in_session_and_ten_codes(
     assert not any(key in session for key in factors.PENDING_KEYS)
     assert state(row(email))[0] == "active"
     assert isinstance(attempt(email, PASSWORD, random_ip()), Verified)
+    # PR 129 R1 P2: the marker confirm_totp writes is older than the login() that follows it, so the
+    # new session passes the action check
+    assert send(client, PROBE, body["csrf"]).status_code == 200
     again = send(client, BEGIN, body["csrf"])  # a signed-in session is not an enrolment
     assert again.status_code == 401 and json.loads(again.content) == EXPIRED
+
+
+def test_a_session_signed_in_before_the_enrolment_marker_is_refused(
+    browser: tuple[Client, str],
+) -> None:
+    """PR 129 R1 P2 (AUTH-07): the user-wide marker the enrolment writes signs out every session
+    that logged in before it, and only those: the new one passes."""
+    client, token, email = enrolling(browser)
+    request = RequestFactory().post("/", secure=True)
+    request.session = older = SessionStore()
+    login(request, row(email), factor="totp")  # a session from before the enrolment
+    older.save()
+    elder = Client(enforce_csrf_checks=True)
+    elder.cookies[SESSION] = str(older.session_key)
+    elder.cookies[settings.CSRF_COOKIE_NAME] = request.META["CSRF_COOKIE"]
+    old_token = get_token(request)
+    secret = begun(client, token)
+    confirmed = send(client, CONFIRM, token, {"code": current(secret)})
+    assert confirmed.status_code == 200
+    assert send(elder, PROBE, old_token).status_code == 401
+    assert send(client, PROBE, json.loads(confirmed.content)["csrf"]).status_code == 200
+    older.delete()
 
 
 def test_without_an_enrolment_session_both_routes_answer_expired_and_set_no_cookie(

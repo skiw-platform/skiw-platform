@@ -1216,3 +1216,16 @@
 - **Versions:** none new.
 - **Exception to a rule?** no.
 - **Decided by:** builder (Sonnet session), on PR 131 R1 and PR 132 R1.
+
+## 2026-11-08 — M3f-3c-2: the second-factor route (PR 129 R1 P2, PR 132 R1 P3, PR 133 R1)
+- **Decision:** `POST /api/auth/second-factor` (`accounts.views.login_second_factor`, name `auth-second-factor`, `auth="cookie"`, JSON or form `{"code": "…"}`) calls `second_factor.attempt` and, on `Passed`, `login(request, user, factor=outcome.factor)`, the one place a session becomes a login. Answers (AUTH-05, all `Cache-Control: no-store`): 200 `{"next": "signed_in", "csrf"}` (no recovery codes: they are shown once, at enrolment); 400 `invalid` for a body without a text `code` (counts nothing); 401 `login-expired` for every pending-state failure (none, an enrolment's, expired, user no longer `active`: the caller holds a pending session, so it tells nothing about any account); 401 `code-wrong`; 429 `limited` for the attempt budget and the factor lock alike.
+- **`PUBLIC_ROUTES["auth-second-factor"]` (AUTH-01 pass by pattern, as `auth-login` and `auth-enrol-totp-confirm`):** a public pre-session route whose ordered check (pending state, count, the compare, the lock) runs inside `second_factor` before anything is signed in. CSRF gate fixture: no `code` → 400.
+- **A failure after `Passed` spends the code (PR 132 R1 P3), accepted:** between `Passed` and `login()` the route reads the `AppUser` row (the only step in between; `login()` takes a model). If that or `login()` raises, the code is already used up (a recovery code deleted, a TOTP step stored) and stays so: restoring it would reopen replay. The 500 saves no session, so the stored pending login is as it was and the user can try another code. Tested (`test_a_failure_in_login_after_the_attempt_spends_the_code`), so nobody "fixes" it by undoing the use.
+- **PR 129 R1 P2:** `test_enrol_factor_route_live` now calls the test-only `action-probe` (an `authorized_action`) after the enrolment (200) and shows a session logged in before the enrolment marker is refused; `test_second_factor_route_live` does the same after a sign-in (200) and shows a recovery-code sign-in writes no marker (a second session stays signed in, AUTH-07).
+- **PR 133 review:** the lock is tested through the route: ten wrong codes (authenticator and recovery alternately) across two windows, then the right code in a fresh window gets the same 429 `limited` with the budget untouched.
+- **Runbook:** the lock bullet is checked at sign-in now and groups the `factor.locked` events by user (PR 133 R1 P3 #1), saying the hash cannot be reversed.
+- **Scope / affects:** `accounts.views`, `config.urls`, the registry entry and CSRF fixture, two live test files, the runbook, this log. No migration, no dependency, no setting. Web screens are M3i.
+- **Alternatives rejected:** returning `unavailable` as 401 `code-wrong` (hides a lost session from the page, which must send the user back to the password step); a distinct 423 for the lock (tells the holder of the password a lock exists, and the budget answer is already 429 `limited`); restoring a spent code when `login()` fails.
+- **Versions:** none new.
+- **Exception to a rule?** no.
+- **Decided by:** builder (Sonnet session), on PR 129 R1 P2, PR 132 R1 P3 and PR 133 R1 P3 #1.
