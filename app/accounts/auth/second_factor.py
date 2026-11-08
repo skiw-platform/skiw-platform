@@ -8,10 +8,11 @@ Order: the pending state; the attempt is counted (`throttle.factor_reserve`, one
 before anything is checked; over the limit, or while the factor lock holds, is `limited` and
 nothing else happens); then, in one with_agency() transaction, the user must still be `active` and
 the code is checked. A verified code, or a fault before the comparison, gives the attempt back
-(`factor_release`), so only wrong codes stay counted. A fault AFTER a wrong comparison (leaving
-the transaction) keeps the count: otherwise a failure an attacker can provoke would hand every
-guess back (PR 130 R1 P3). TOTP and recovery codes share the one per-user budget. Feeding wrong
-codes to the factor soft-lock (`factor_failed`, `factor_reset`) is M3f-3c-1d.
+(`factor_release`), so only wrong codes stay counted; a wrong code also counts toward the factor
+soft-lock (`factor_failed`: Flow 5.1 "Failures", SKIW_AUTH_LOCK_AFTER in a row lock the user's
+second factor for SKIW_AUTH_LOCK_MIN and raise the owner alert), a verified one resets that run.
+A fault AFTER a wrong comparison (leaving the transaction) keeps the count and feeds the lock.
+TOTP and recovery codes share the one per-user budget and the one run.
 
 A TOTP code is accepted by a conditional update, `sign_count < step`, and the update's row count
 decides: of two parallel submissions of one code, one finds the stored step already at it and is
@@ -21,7 +22,8 @@ the same path with a throwaway secret, so having one or not does not change the 
 result is never used).
 
 On success the pending state is cleared, because login() keeps it; the caller then calls login()
-with `factor`. Nothing here logs and no code is kept anywhere (UNI-09). Consuming a recovery code
+with `factor`. Only the lock writes anything outside the tables above (an event and a warning,
+HMACs and counts only) and no code is kept anywhere (UNI-09). Consuming a recovery code
 is a use of the factor, not a change to the factor set, so it writes no revocation marker (AUTH-07;
 plan M3f lists only adding, removing and regenerating)."""
 
@@ -58,12 +60,13 @@ class _Seen:
     """What `_check` learned before it left the transaction, for the case that leaving raises."""
 
     wrong: bool = False  # the code was compared and was wrong
+    email: str = ""  # of the user, for the lock event's HMACs
 
 
 def attempt(request: HttpRequest, candidate: str) -> Passed | Failure:
     """ "unavailable": no pending login (none, an enrolment's, expired or malformed) or the user is
     no longer `active`; nothing is left counted. "limited": the attempt limit or the factor lock
-    holds, nothing was checked. "wrong_code": counted against the user."""
+    holds, nothing was checked. "wrong_code": counted against the user, and toward the lock."""
     state = factors.pending(request)
     if state is None or state.enrol:
         return "unavailable"
@@ -75,15 +78,21 @@ def attempt(request: HttpRequest, candidate: str) -> Passed | Failure:
     try:
         result = _check(state, candidate, kind, seen)
     except BaseException:
-        # Only a fault BEFORE the comparison is not a guess; after a wrong one the count stays.
-        if not seen.wrong:
+        # Only a fault BEFORE the comparison is not a guess. After a wrong comparison the guess
+        # stays counted (and counts toward the lock) even if leaving the transaction failed:
+        # otherwise a failure an attacker can provoke would hand every guess back (PR 130 R1 P3).
+        if seen.wrong:
+            throttle.factor_failed(state.user_id, seen.email, throttle.client_ip(request))
+        else:
             throttle.factor_release(reservation)
         raise
     if result == "wrong_code":
+        throttle.factor_failed(state.user_id, seen.email, throttle.client_ip(request))
         return result  # the attempt stays counted
     throttle.factor_release(reservation)
     if result == "unavailable":
         return result
+    throttle.factor_reset(state.user_id)
     factors.clear_pending(request)
     return Passed(state.user_id, state.agency_id, kind)
 
@@ -96,7 +105,7 @@ def _check(
         if user is None:
             return "unavailable"
         right = _totp(user, candidate) if kind == "totp" else recovery.consume(user.id, candidate)
-        seen.wrong = not right  # the comparison is done
+        seen.wrong, seen.email = not right, user.email  # the comparison is done
     return "ok" if right else "wrong_code"
 
 

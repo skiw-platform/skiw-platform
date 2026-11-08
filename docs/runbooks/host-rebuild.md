@@ -415,12 +415,18 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   stop all code checks for that user, at enrolment and at sign-in alike (sign-in from M3f-3c), until
   the window ends. A new invite link does not shorten that, so tell the user to wait up to 15 minutes.
 - **Ten wrong codes in a row** (`SKIW_AUTH_LOCK_AFTER`, across any number of windows, and not
-  cleared by signing in with the password again; checked at sign-in from M3f-3c) lock that user's second factor for
-  `SKIW_AUTH_LOCK_MIN` (30 minutes), TOTP and recovery codes alike. It writes a `factor.locked`
+  cleared by signing in with the password again) lock that user's second factor for
+  `SKIW_AUTH_LOCK_MIN` (30 minutes), TOTP and recovery codes alike, and the right code is refused
+  too until it ends. This is checked at sign-in from M3f-3c. The lock writes a `factor.locked`
   event (HMACs of the email and IP, and the count) and a `second factor soft-locked` warning in the
-  web log: that is the owner alert. Only a right code, after the lock ends, clears the run. A user
-  who is locked out just waits; one who keeps being locked out may have a password someone else
-  knows, so change it (the owner's reset, Flow 5.1, is not built yet).
+  web log. That is the M3 stand-in for the owner alert (owner Q4 (a)): **nobody is sent anything**
+  until that alert path exists, so look. After the `compose` helper of "Rotating
+  `tenant_source_key`" is set up: `compose logs --since 24h web | grep 'soft-locked'`, or count the
+  events with the `pg` wrapper there: `SELECT count(*), max(at) FROM security_event WHERE kind =
+  'factor.locked'`. A user who is locked out just waits; only a right code, after the lock ends,
+  clears the run. **There is no password change yet** (the owner's reset, Flow 5.1, is not built
+  and `accounts_invite` only invites), so if locks repeat for one user, who may have a password
+  someone else knows, the step for now is to tell Ying.
 - **The password must be at least `SKIW_PW_MIN_LENGTH` characters (12)**, with no other
   rules. A shorter one is refused with the same answer as a bad link and doesn't use the link up,
   so the user can try again with the same link while it is valid.

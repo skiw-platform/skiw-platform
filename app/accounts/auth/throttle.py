@@ -137,6 +137,12 @@ def reset_on_success(email: str) -> None:
         )
 
 
+def _outside_transactions() -> None:
+    """The factor counters are taken in autocommit: a rolled-back count hides a guess."""
+    if connection.in_atomic_block:
+        raise TransactionManagementError("the factor attempt is counted outside any transaction")
+
+
 def factor_reserve(user: uuid.UUID) -> Reservation | None:
     """Counts one second-factor attempt for `user` BEFORE the code is checked, and returns the
     reservation, or None once SKIW_AUTH_FAILS_PER_ACCOUNT attempts are already counted in this
@@ -150,8 +156,7 @@ def factor_reserve(user: uuid.UUID) -> Reservation | None:
     holds (`factor_failed`) nothing is counted or checked either. The lock is read before the
     count, not with it: attempts already in flight when the lock is set are still bounded by the
     count, which is the hard cap."""
-    if connection.in_atomic_block:
-        raise TransactionManagementError("the factor attempt is counted outside any transaction")
+    _outside_transactions()
     now = timezone.now()
     lock = _hmac(FACTOR_LOCK, str(user))
     reservation = Reservation(_hmac(FACTOR, str(user)), _window(now))
@@ -182,9 +187,13 @@ def factor_failed(user: uuid.UUID, email: str, ip: str) -> None:
     consecutive wrong codes are one counter (RUN row, never windowed, reset by `factor_reset`);
     each SKIW_AUTH_LOCK_AFTER-th adds a marker row (window_start = now) that makes
     `factor_reserve` refuse for SKIW_AUTH_LOCK_MIN, and writes `factor.locked` (HMACs of the email
-    and IP, as `account.locked` does) and a warning: that is the owner alert. It is separate from
-    the password counter, which `reset_on_success` clears at every verified password, so a
-    holder of the password cannot keep it at zero. Call it in autocommit, after the check."""
+    and IP, as `account.locked` does) and a warning: the M3 stand-in for the owner alert (owner Q4
+    (a); nobody is sent anything until that path exists). It is separate from the password
+    counter, which `reset_on_success` clears at every verified password, so a holder of the
+    password cannot keep it at zero. It runs in autocommit and refuses an atomic block, as
+    `factor_reserve` does: inside a caller's transaction a rollback would take the run, the
+    marker and the event with it, and wrong codes would never reach the lock (PR 131 R1 P3)."""
+    _outside_transactions()
     lock, now = _hmac(FACTOR_LOCK, str(user)), timezone.now()
     with transaction.atomic(), connection.cursor() as cursor:
         cursor.execute(UPSERT, [lock, RUN])
@@ -199,7 +208,8 @@ def factor_failed(user: uuid.UUID, email: str, ip: str) -> None:
 
 
 def factor_reset(user: uuid.UUID) -> None:
-    """A verified second factor ends the run of wrong codes."""
+    """A verified second factor ends the run of wrong codes. Autocommit only, as `factor_failed`."""
+    _outside_transactions()
     with connection.cursor() as cursor:
         cursor.execute(
             "UPDATE auth_throttle SET count = 0 WHERE key_hmac = %s AND window_start = %s",
