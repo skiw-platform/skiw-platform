@@ -408,8 +408,12 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   link, and the user sets a new password and starts the authenticator step again. Nothing is kept
   from the first try, so an old authenticator entry is not valid.
 - **Recovery codes are shown once**, in the answer to the first correct code. The operator cannot
-  see or resend them. A user who lost them before signing in needs the owner's reset (Flow 5.1,
-  not built yet).
+  see or resend them. A user who lost the codes but still has the authenticator can make new ones
+  once regenerating exists (M3h); the owner's reset (Flow 5.1, not built yet) is only for a user who
+  lost the authenticator too.
+- **Too many wrong codes** (`SKIW_AUTH_FAILS_PER_ACCOUNT`, 5, in `SKIW_AUTH_WINDOW_MIN`, 15 minutes)
+  stop all code checks for that user, at enrolment and at sign-in alike, until the window ends. A new
+  invite link does not shorten that, so tell the user to wait up to 15 minutes.
 - **The password must be at least `SKIW_PW_MIN_LENGTH` characters (12)**, with no other
   rules. A shorter one is refused with the same answer as a bad link and doesn't use the link up,
   so the user can try again with the same link while it is valid.

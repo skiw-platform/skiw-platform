@@ -15,7 +15,8 @@ user-wide revocation marker (AUTH-07). Any failure rolls all of it back, so no u
 without a factor and recovery codes. The pending keys are cleared after the commit, so a caller
 cannot reach login() with them still set (login() keeps them).
 
-Wrong codes are counted per user (throttle.factor_*). The user row is locked while `invited`, so
+Wrong codes are counted per user (throttle.factor_reserve: the attempt is counted before the code
+is checked, and given back unless the code was wrong). The user row is locked while `invited`, so
 two confirmations of one secret take turns: the second finds the user `active` and is refused."""
 
 import base64
@@ -117,14 +118,34 @@ def confirm_totp(request: HttpRequest, candidate: str) -> Enrolled | Failure:
     """Enrols the secret `begin_totp` made if `candidate` is its current code; see the module
     docstring for what that commits. "unavailable": no usable enrolment state or the user is no
     longer `invited`, nothing counted. "limited": too many wrong codes, nothing checked.
-    "wrong_code": counted against the user."""
+    "wrong_code": counted against the user. The attempt is counted before the code is checked and
+    given back unless the code was wrong (throttle.factor_reserve), so parallel guesses cannot
+    exceed the limit."""
     state, session = pending(request), _store(request)
     stored = _secret(session)
     if state is None or not state.enrol or stored is None:
         return "unavailable"
-    if throttle.factor_blocked(state.user_id):
+    reservation = throttle.factor_reserve(state.user_id)
+    if reservation is None:
         return "limited"
-    factor, sealed = stored
+    try:
+        result = _confirm(state, *stored, candidate)
+    except BaseException:
+        throttle.factor_release(reservation)  # a fault is not a guess
+        raise
+    if result == "wrong_code":
+        return result  # the attempt stays counted
+    throttle.factor_release(reservation)
+    if isinstance(result, str):
+        return result
+    clear_pending(request)
+    return Enrolled(state.user_id, state.agency_id, result)
+
+
+def _confirm(
+    state: Pending, factor: uuid.UUID, sealed: bytes, candidate: str
+) -> list[str] | Failure:
+    """The recovery codes when the first code is right, else why not."""
     with with_agency(state.agency_id):
         user = AppUser.objects.select_for_update().filter(id=state.user_id, status="invited")
         locked = user.first()
@@ -134,13 +155,7 @@ def confirm_totp(request: HttpRequest, candidate: str) -> Enrolled | Failure:
         if secret is None:
             return "unavailable"
         step = totp.accept(secret, candidate, 0)
-        if step is not None:
-            codes = _commit(locked, factor, sealed, step)
-    if step is None:
-        throttle.record_factor_failure(state.user_id)  # after the lookup, outside the tenant
-        return "wrong_code"
-    clear_pending(request)
-    return Enrolled(state.user_id, state.agency_id, codes)
+        return "wrong_code" if step is None else _commit(locked, factor, sealed, step)
 
 
 def _commit(user: AppUser, factor: uuid.UUID, sealed: bytes, step: int) -> list[str]:

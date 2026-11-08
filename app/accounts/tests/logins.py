@@ -8,11 +8,12 @@ import secrets
 import uuid
 
 from django.db import connection
+from django.utils import timezone
 
 from accounts.auth import blob
 from accounts.auth.blob import LoginRecord
 from accounts.auth.passwords import hash_password
-from accounts.auth.throttle import RUN, keys
+from accounts.auth.throttle import FACTOR, RUN, _hmac, _window, keys
 from accounts.user_model import AppUser
 from tenancy.binding import with_agency
 
@@ -81,3 +82,14 @@ def consecutive(email: str) -> int:
             [keys(email, "").lock, RUN],
         )
         return int(cursor.fetchone()[0])
+
+
+def factor_count(user: uuid.UUID) -> int:
+    """Second-factor attempts counted for `user` in the current window (0 when none)."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT count FROM auth_throttle WHERE key_hmac = %s AND window_start = %s",
+            [_hmac(FACTOR, str(user)), _window(timezone.now())],
+        )
+        row = cursor.fetchone()
+    return 0 if row is None else int(row[0])

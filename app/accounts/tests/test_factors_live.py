@@ -17,7 +17,7 @@ from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory
 from django.utils import timezone
 
-from accounts.auth import blob, factors, password_step, recovery, throttle, totp, wrapper
+from accounts.auth import blob, factors, password_step, recovery, totp, wrapper
 from accounts.auth.password_step import Verified, attempt
 from accounts.auth.revoke import revoked
 from accounts.factor_model import UserFactor
@@ -27,7 +27,7 @@ from accounts.user_model import AppUser
 from tenancy.binding import with_agency
 
 from .conftest import Clock
-from .logins import PASSWORD, enrolled, random_ip, unseal
+from .logins import PASSWORD, enrolled, factor_count, random_ip, unseal
 
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 
@@ -125,6 +125,7 @@ def test_enrolling_revokes_the_users_earlier_sessions_and_not_the_next_one() -> 
     assert markers(user) == 0
     assert isinstance(factors.confirm_totp(request, current(secret)), factors.Enrolled)
     assert markers(user) == 1
+    assert factor_count(user.id) == 0  # the winner's attempt and the loser's were given back
     with with_agency(user.agency_id):
         assert revoked(user.id, "any-key", before) is True
         assert revoked(user.id, "any-key", timezone.now() + timedelta(seconds=1)) is False
@@ -154,7 +155,10 @@ def test_wrong_codes_enrol_nothing_and_are_counted_until_the_user_is_limited() -
         assert factors.confirm_totp(request, wrong_for(secret)) == "wrong_code"
     assert factors.confirm_totp(request, current(secret)) == "limited"  # even the right one
     assert state(user) == ("invited", [])
-    assert not throttle.factor_blocked(other.id)  # another user is not counted
+    assert factor_count(other.id) == 0  # another user is not counted
+    assert (
+        factor_count(user.id) == settings.SKIW_AUTH_FAILS_PER_ACCOUNT
+    )  # the refused one adds none
     with connection.cursor() as cursor:  # the key is an HMAC, never the user id
         cursor.execute("SELECT count(*) FROM auth_throttle WHERE key_hmac = %s", [user.id.bytes])
         assert cursor.fetchone() == (0,)
@@ -173,7 +177,7 @@ def test_no_enrolment_state_means_unavailable_and_counts_nothing() -> None:
     empty.session = SessionStore()
     assert factors.confirm_totp(empty, "123456") == "unavailable"
     assert factors.begin_totp(empty) is None
-    assert not throttle.factor_blocked(user.id)
+    assert factor_count(user.id) == 0
 
 
 def test_an_expired_or_malformed_pending_state_is_cleared(clock: Clock) -> None:
@@ -260,3 +264,4 @@ def test_two_sessions_confirming_at_once_enrol_one_factor_and_ten_codes() -> Non
     status, rows = state(user)
     assert status == "active" and sorted(r.kind for r in rows) == ["recovery"] * 10 + ["totp"]
     assert markers(user) == 1
+    assert factor_count(user.id) == 0  # the winner's attempt and the loser's were given back

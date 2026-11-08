@@ -23,6 +23,7 @@ from typing import Literal
 
 from django.conf import settings
 from django.db import connection, transaction
+from django.db.transaction import TransactionManagementError
 from django.http import HttpRequest
 from django.utils import timezone
 
@@ -39,8 +40,25 @@ UPSERT = (
     " ON CONFLICT (key_hmac, window_start) DO UPDATE SET count = auth_throttle.count + 1"
     " RETURNING count"
 )
+FACTOR_RESERVE = (  # no row back: the count is at the limit, and nothing was changed
+    "INSERT INTO auth_throttle (key_hmac, window_start, count) VALUES (%s, %s, 1)"
+    " ON CONFLICT (key_hmac, window_start) DO UPDATE SET count = auth_throttle.count + 1"
+    " WHERE auth_throttle.count < %s RETURNING count"
+)
+FACTOR_RELEASE = (
+    "UPDATE auth_throttle SET count = count - 1"
+    " WHERE key_hmac = %s AND window_start = %s AND count > 0"
+)
 log = logging.getLogger("django.security.throttle")
 Limit = Literal["lock", "account", "ip"]
+
+
+@dataclass(frozen=True)
+class Reservation:
+    """One counted second-factor attempt: the counter row it was counted in."""
+
+    key: bytes
+    window: datetime
 
 
 @dataclass(frozen=True)
@@ -119,20 +137,30 @@ def reset_on_success(email: str) -> None:
         )
 
 
-def factor_blocked(user: uuid.UUID) -> bool:
-    """True once `user` has had SKIW_AUTH_FAILS_PER_ACCOUNT wrong second-factor codes in this
-    window (AUTH-06). The user is known here (a pending session, after the password), so the
-    count is per user, not per email or IP: a password holder guessing from many addresses is
-    still counted. Windowed like the account counter, never reset by a success."""
+def factor_reserve(user: uuid.UUID) -> Reservation | None:
+    """Counts one second-factor attempt for `user` BEFORE the code is checked, and returns the
+    reservation, or None once SKIW_AUTH_FAILS_PER_ACCOUNT attempts are already counted in this
+    window (AUTH-06). The user is known here (a pending session, after the password), so the count
+    is per user, not per email or IP: a password holder guessing from many addresses is still
+    counted. Check and count are ONE statement: of K concurrent attempts, the conflicting upsert
+    takes the row lock, re-reads the count and refuses when it is at the limit, so at most the
+    limit are let through however many arrive at once (PR 128 R1 P2). A refused attempt changes
+    nothing. It runs in autocommit and refuses an atomic block, where the count could be rolled
+    back with the caller's transaction and a guess would go uncounted."""
+    if connection.in_atomic_block:
+        raise TransactionManagementError("the factor attempt is counted outside any transaction")
+    reservation = Reservation(_hmac(FACTOR, str(user)), _window(timezone.now()))
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT count FROM auth_throttle WHERE key_hmac = %s AND window_start = %s",
-            [_hmac(FACTOR, str(user)), _window(timezone.now())],
+            FACTOR_RESERVE,
+            [reservation.key, reservation.window, settings.SKIW_AUTH_FAILS_PER_ACCOUNT],
         )
-        row = cursor.fetchone()
-    return row is not None and row[0] >= settings.SKIW_AUTH_FAILS_PER_ACCOUNT
+        return reservation if cursor.fetchone() is not None else None
 
 
-def record_factor_failure(user: uuid.UUID) -> None:
+def factor_release(reservation: Reservation) -> None:
+    """Gives the attempt back: a verified code, or an attempt that was not a guess. So only wrong
+    codes stay counted, as the account counter counts only failures. It leaves the count alone when
+    the window has moved on (the reservation names its window) and never goes below zero."""
     with connection.cursor() as cursor:
-        cursor.execute(UPSERT, [_hmac(FACTOR, str(user)), _window(timezone.now())])
+        cursor.execute(FACTOR_RELEASE, [reservation.key, reservation.window])
