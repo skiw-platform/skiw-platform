@@ -22,6 +22,7 @@ FIXTURES: dict[str, Fixture] = {
     "asset": Fixture(path_kwargs={"path": "index-abc.js"}),
     "shell": Fixture(),
     "auth-login": Fixture(answers=401),
+    "auth-second-factor": Fixture(),  # no "code": 400
     "auth-enrol": Fixture(answers=401),
     "auth-enrol-totp": Fixture(answers=401),  # no enrolment session: expired
     "auth-enrol-totp-confirm": Fixture(),  # no "code": 400
