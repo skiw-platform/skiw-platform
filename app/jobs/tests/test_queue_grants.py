@@ -242,6 +242,8 @@ def test_app_role_deletes_only_from_the_allow_list() -> None:
 @pytest.mark.parametrize("role", [APP_ROLE, LOOKUP_ROLE])
 def test_evidence_tables_that_exist_are_append_only_for_the_writers(role: str) -> None:
     assert separate("SELECT to_regclass('security_event') IS NOT NULL") == [(True,)]
+    # accounts.0011 (plan M3h-1): the to_regclass filter below passed vacuously until it existed.
+    assert separate("SELECT to_regclass('auth_stepup') IS NOT NULL") == [(True,)]
     rows = separate(
         "SELECT t FROM unnest(%s::text[]) t WHERE to_regclass(t) IS NOT NULL AND ("
         " has_table_privilege(%s, t, 'UPDATE') OR has_table_privilege(%s, t, 'DELETE')"

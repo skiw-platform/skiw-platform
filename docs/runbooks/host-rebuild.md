@@ -163,6 +163,10 @@ For a planned rotation, remove a version only when the report no longer lists it
 newest version by regenerating their codes. In an emergency (the key may have leaked) remove it at
 once: every code still under it is void, so tell those users to generate new ones at their next
 sign-in.
+Step-up evidence (`auth_stepup.evidence_mac`, M3h) is a MAC under this key too, its first 4 bytes the
+version. A row counts only for `SKIW_STEPUP_MAX_AGE_MIN` minutes (at most 5), so removing a version
+voids at most the last 5 minutes of step-ups: those users step up again. No report is needed before
+removing a version.
 Both `web` (`config.asgi`) and `worker` (`runworker`, from M3a) refuse to start when the file is
 missing or malformed, before the migration check and without printing the key. A version number
 has at most six digits (`v1` to `v999999`): the reader and `bootstrap-secrets restore` refuse a
@@ -399,7 +403,7 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
 - It works **once** and for `SKIW_ENROL_LINK_MIN` minutes (30). Setting the password ends it, and any
   other unused link for that user with it. The user stays `invited` (password login is refused)
   until they enrol an authenticator app (TOTP), which every user must do (spec v1.22). A passkey is
-  optional and is added later (M3h).
+  optional and is added later (M3g).
 - **After setting the password the user has `SKIW_LOGIN_PENDING_MIN` minutes (5) to finish.** In
   that time the page shows the authenticator secret and the user enters the first code; the
   confirmation signs them in and shows ten recovery codes, once. The time is not extended. If it

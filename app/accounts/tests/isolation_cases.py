@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from django.db.backends.utils import CursorWrapper
 
 from accounts.factor_model import TOTP_SECRET_CT_LENGTH
+from accounts.stepup_model import EVIDENCE_LENGTH
 from tenancy.tests.isolation import IsolationCase
 
 
@@ -45,6 +46,25 @@ def _session_revocation(
     return row
 
 
+def _auth_stepup(
+    cursor: CursorWrapper, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
+) -> uuid.UUID:
+    row = uuid.uuid4()
+    cursor.execute(
+        "INSERT INTO public.auth_stepup (id, agency_id, user_id, factor_id, purpose, verified_at,"
+        " session_key_hash, evidence_mac) VALUES (%s, %s, %s, %s, 'factor.change', now(), %s, %s)",
+        [
+            row,
+            agency,
+            parents["user_id"],
+            parents["factor_id"],
+            "0" * 64,
+            b"\x00" * EVIDENCE_LENGTH,
+        ],
+    )
+    return row
+
+
 USER = {"user_id": "public.app_user"}
 CASES = [
     IsolationCase("public.app_user", _app_user, frozenset({"SELECT", "INSERT", "UPDATE"})),
@@ -56,5 +76,11 @@ CASES = [
     ),
     IsolationCase(
         "public.session_revocation", _session_revocation, frozenset({"SELECT", "INSERT"}), USER
+    ),
+    IsolationCase(
+        "public.auth_stepup",
+        _auth_stepup,
+        frozenset({"SELECT", "INSERT"}),
+        {**USER, "factor_id": "public.user_factor"},
     ),
 ]
