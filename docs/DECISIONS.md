@@ -1231,11 +1231,11 @@
 - **Decided by:** builder (Sonnet session), on PR 129 R1 P2, PR 132 R1 P3 and PR 133 R1 P3 #1.
 
 ## 2026-11-09 — M3 order: passkeys last (M3f → M3h → M3i → M3g)
-- **Decision:** the owner chose option B on 2026-11-09 when asked where the optional passkeys (M3g) belong: build step-up, logout and factor changes (M3h), then the sign-in screens (M3i), then passkeys (M3g). The plan (`docs/plans/2026-10-31-m3-auth.md`, amended 2026-11-09) now reads M3f → M3h → M3i → M3g. This settles the "not decided here" item of "2026-11-07 — M3 plan".
+- **Decision:** the owner chose option B on 2026-11-09 when asked where the optional passkeys (M3g) belong. Option A was to keep the plan's order (M3f → M3g → M3h → M3i); B: build step-up, logout and factor changes (M3h), then the sign-in screens (M3i), then passkeys (M3g). The plan (`docs/plans/2026-10-31-m3-auth.md`, amended 2026-11-09) now reads M3f → M3h → M3i → M3g. This settles the "not decided here" item of "2026-11-07 — M3 plan".
 - **Dependency check (builder):** the plan's "M3h depends on M3g" is soft. A passkey is only an additional step-up factor, and M3g's assertion bullet already covers step-up, so M3g can add that branch later. M3h now depends on M3f; step-up accepts TOTP only until M3g. Factor changes in M3h cover TOTP and recovery codes; adding or removing a passkey arrives in M3g, behind step-up and revoking other sessions (AUTH-07), with a test.
 - **Cost:** M3g grows. The passkey button on the second-factor screen, the optional passkey step after enrolment and the virtual-authenticator e2e move from M3i into it, next to the server work, so it will probably split into M3g-1 (server) and M3g-2 (screens and e2e). M3i shrinks to the TOTP and recovery-code screens.
 - **Until M3g:** no passkey exists anywhere. Nothing is lost because a passkey is optional for everyone (spec v1.22); the app is complete with TOTP and recovery codes.
-- **Plan rows changed:** §1 table rows and Order line, §3 M3g, M3h and M3i, §4 test rows, §5 universal and frontend rows and the `make e2e` sentence, §7 item 9, A2, carry-over (f).
+- **Plan rows changed:** §1 table rows and Order line, §3 M3g, M3h and M3i, §4 test rows, §5 universal and frontend rows and the `make e2e` sentence, §7 item 9, A2, carry-over (f), "Done when" (the Playwright item).
 - **Scope / affects:** `docs/plans/2026-10-31-m3-auth.md`, `docs/DECISIONS.md`. No code.
 - **Versions:** none new.
 - **Exception to a rule?** no.
