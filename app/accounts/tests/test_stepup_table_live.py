@@ -43,10 +43,11 @@ def add_totp(cursor: CursorWrapper, user: uuid.UUID) -> uuid.UUID:
 
 def add_stepup(cursor: CursorWrapper, user: uuid.UUID, **columns: Any) -> uuid.UUID:
     row = uuid.uuid4()
+    factor = columns.pop("factor_id") if "factor_id" in columns else add_totp(cursor, user)
     values: dict[str, Any] = {
         "id": row,
         "user_id": user,
-        "factor_id": None,
+        "factor_id": factor,
         "purpose": "factor.change",
         "session_key_hash": KEY_HASH,
         "evidence_mac": b"\0" * EVIDENCE_LENGTH,
@@ -104,11 +105,11 @@ def test_the_evidence_length_is_the_key_version_then_the_mac() -> None:
     assert 4 + hashlib.sha256().digest_size == EVIDENCE_LENGTH
 
 
-def test_a_step_up_without_a_factor_is_kept(cursor: CursorWrapper) -> None:
-    """factor_id is nullable: a step-up that no factor proved is still evidence."""
-    row = add_stepup(cursor, add_user(cursor), factor_id=None)
-    cursor.execute("SELECT factor_id FROM auth_stepup WHERE id = %s", [row])
-    assert cursor.fetchall() == [(None,)]
+def test_every_step_up_names_the_factor_that_proved_it(cursor: CursorWrapper) -> None:
+    """accounts.0013 (DECISIONS M3h-2): NULL lost its only meaning with the SET NULL action."""
+    user = add_user(cursor)
+    refusal = refused_by(cursor, lambda c: add_stepup(c, user, factor_id=None))
+    assert refusal == "auth_stepup_factor_named"
 
 
 @pytest.mark.parametrize(
