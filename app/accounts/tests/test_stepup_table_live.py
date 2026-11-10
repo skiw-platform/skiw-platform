@@ -1,8 +1,9 @@
 """`auth_stepup` (spec §4.1; plan M3 §3 M3h, design M3h-1): the column rules, the append-only
-grant and the factor foreign key's `ON DELETE SET NULL (factor_id)`, as skiw_app bound to the
-configured agency. Cross-agency parents and the grants are also covered by the TEN-08 harness
-(accounts.tests.isolation_cases) and the TEN-03 audit (jobs.tests.test_queue_grants). Every test
-runs in one with_agency() transaction that is rolled back: skiw_app may not delete rows here."""
+grant and the factor foreign key (NO ACTION: a factor a step-up names is never deleted), as
+skiw_app bound to the configured agency. Cross-agency parents and the grants are also covered by
+the TEN-08 harness (accounts.tests.isolation_cases) and the TEN-03 audit
+(jobs.tests.test_queue_grants). Every test runs in one with_agency() transaction that is rolled
+back: skiw_app may not delete rows here."""
 
 import hashlib
 import os
@@ -11,8 +12,9 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from django.db import ProgrammingError, connection, transaction
+from django.db import IntegrityError, ProgrammingError, connection, transaction
 from django.db.backends.utils import CursorWrapper
+from django.db.models import ProtectedError
 
 from accounts.factor_model import UserFactor
 from accounts.stepup_model import EVIDENCE_LENGTH
@@ -103,7 +105,7 @@ def test_the_evidence_length_is_the_key_version_then_the_mac() -> None:
 
 
 def test_a_step_up_without_a_factor_is_kept(cursor: CursorWrapper) -> None:
-    """A NULL factor_id is what the foreign key leaves behind when the factor is removed."""
+    """factor_id is nullable: a step-up that no factor proved is still evidence."""
     row = add_stepup(cursor, add_user(cursor), factor_id=None)
     cursor.execute("SELECT factor_id FROM auth_stepup WHERE id = %s", [row])
     assert cursor.fetchall() == [(None,)]
@@ -119,54 +121,44 @@ def test_skiw_app_cannot_change_or_remove_evidence(cursor: CursorWrapper, verb: 
         cursor.execute(verb)
 
 
-def test_removing_a_factor_clears_it_from_its_step_ups_and_keeps_the_rows(
-    cursor: CursorWrapper,
-) -> None:
-    """The owner decision behind the replacement flow: a TOTP the step-up was made with can be
-    removed. The database clears factor_id (skiw_app has no UPDATE grant on the table), leaves
-    agency_id and every other column alone, and the other factor's rows are not touched."""
+def test_a_factor_a_step_up_names_cannot_be_deleted(cursor: CursorWrapper) -> None:
+    """Review R1 on PR 136: clearing factor_id would void genuine evidence that the M9 executor
+    and the M16 drive_writer verify later. The delete is refused, as skiw_app, and nothing moves;
+    a factor no step-up names is deleted as before; the other factor's rows are untouched."""
     user = add_user(cursor)
-    gone, kept = add_totp(cursor, user), add_totp(cursor, user)
-    first = add_stepup(cursor, user, factor_id=gone)
-    second = add_stepup(cursor, user, factor_id=gone)
-    other = add_stepup(cursor, user, factor_id=kept)
-    cursor.execute("DELETE FROM user_factor WHERE id = %s", [gone])
-    cursor.execute(
-        "SELECT id, factor_id, agency_id = guard.current_agency(), purpose, session_key_hash"
-        " FROM auth_stepup WHERE user_id = %s",
-        [user],
-    )
-    rows = {row[0]: row[1:] for row in cursor.fetchall()}
-    assert rows == {
-        first: (None, True, "factor.change", KEY_HASH),
-        second: (None, True, "factor.change", KEY_HASH),
-        other: (kept, True, "factor.change", KEY_HASH),
-    }
+    named, other, free = add_totp(cursor, user), add_totp(cursor, user), add_totp(cursor, user)
+    first = add_stepup(cursor, user, factor_id=named)
+    second = add_stepup(cursor, user, factor_id=other)
+    refused = pytest.raises(IntegrityError, match="auth_stepup_factor_id_fk")
+    with refused, transaction.atomic():
+        cursor.execute("DELETE FROM user_factor WHERE id = %s", [named])
+    cursor.execute("DELETE FROM user_factor WHERE id = %s", [free])
+    cursor.execute("SELECT id, factor_id FROM auth_stepup WHERE user_id = %s", [user])
+    assert dict(cursor.fetchall()) == {first: named, second: other}
+    cursor.execute("SELECT count(*) FROM user_factor WHERE id IN (%s, %s)", [named, other])
+    assert cursor.fetchall() == [(2,)]
 
 
-def test_the_factor_key_is_set_null_on_the_factor_column_only(cursor: CursorWrapper) -> None:
-    """agency_id is NOT NULL, so a plain SET NULL would fail the delete: the action names its
-    column. Pinned in the catalog because every single-agency test above passes without it."""
+def test_the_factor_key_has_no_referential_action(cursor: CursorWrapper) -> None:
+    """Pinned in the catalog: it is the composite (agency_id, id) key, and carries no ON DELETE
+    action (no SET NULL, no CASCADE), which would change or remove evidence."""
     cursor.execute(
         "SELECT pg_get_constraintdef(oid) FROM pg_constraint"
         " WHERE conrelid = 'public.auth_stepup'::regclass AND conname = 'auth_stepup_factor_id_fk'"
     )
     assert cursor.fetchall() == [
-        (
-            "FOREIGN KEY (agency_id, factor_id) REFERENCES user_factor(agency_id, id)"
-            " ON DELETE SET NULL (factor_id)",
-        )
+        ("FOREIGN KEY (agency_id, factor_id) REFERENCES user_factor(agency_id, id)",)
     ]
 
 
-def test_removing_a_factor_through_the_orm_does_not_try_to_update_step_ups(
+def test_deleting_a_named_factor_through_the_orm_is_refused_before_the_database(
     cursor: CursorWrapper,
 ) -> None:
-    """The model says DO_NOTHING: with SET_NULL Django would run an UPDATE on auth_stepup first,
-    which skiw_app may not run. M3h-6 removes a TOTP this way."""
+    """The model says PROTECT, so Django raises ProtectedError and runs no DELETE at all."""
     user = add_user(cursor)
-    gone = add_totp(cursor, user)
-    row = add_stepup(cursor, user, factor_id=gone)
-    UserFactor.objects.get(id=gone).delete()
+    named = add_totp(cursor, user)
+    row = add_stepup(cursor, user, factor_id=named)
+    with pytest.raises(ProtectedError):
+        UserFactor.objects.get(id=named).delete()
     cursor.execute("SELECT factor_id FROM auth_stepup WHERE id = %s", [row])
-    assert cursor.fetchall() == [(None,)]
+    assert cursor.fetchall() == [(named,)]

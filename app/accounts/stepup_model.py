@@ -3,10 +3,11 @@ re-verified a factor just now, for one purpose. Append-only (TEN-03: skiw_app ma
 INSERT only). `evidence_mac` is a 4-byte `tenant_source_key` version, then an HMAC-SHA-256 over
 every other column (accounts.auth.stepup, M3h-2), so a row written by SQL authorises nothing.
 
-`factor_id` is the factor that proved it. Its foreign key is `ON DELETE SET NULL (factor_id)`
-(accounts.0012): removing a TOTP is allowed even when a step-up was made with it, and the
-database, not skiw_app, clears the column; the changed row no longer verifies. The model uses
-DO_NOTHING because Django would emulate SET_NULL with an UPDATE that skiw_app may not run."""
+`factor_id` is the factor that proved it. Its foreign key is NO ACTION (accounts.0012): a factor
+that a step-up names cannot be deleted, so the row keeps verifying and keeps saying which factor
+proved it, for consumers that check it later and outside the session (the M9 executor, the M16
+drive_writer). Factors are retired, not deleted (M3h-6 TOTP, M3g passkeys). The model says
+PROTECT, so the ORM refuses first (ProtectedError) instead of reaching the database error."""
 
 import uuid
 
@@ -28,13 +29,13 @@ PURPOSE = r"^[a-z]+(_[a-z]+)*(\.[a-z]+(_[a-z]+)*)?$"
 class AuthStepup(TenantModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     # Composite FKs (agency_id, user_id) -> app_user (tenant_table()) and (agency_id, factor_id)
-    # -> user_factor ON DELETE SET NULL (factor_id) (accounts.0012).
+    # -> user_factor, NO ACTION (accounts.0012).
     user = models.ForeignKey(
         AppUser, on_delete=models.PROTECT, db_constraint=False, db_index=False, related_name="+"
     )
     factor = models.ForeignKey(
         UserFactor,
-        on_delete=models.DO_NOTHING,
+        on_delete=models.PROTECT,
         null=True,
         db_constraint=False,
         db_index=False,
@@ -67,7 +68,7 @@ class AuthStepup(TenantModel):
                 fields=["agency_id", "session_key_hash", "purpose", "verified_at"],
                 name="auth_stepup_recent",
             ),
-            # The referential action that nulls factor_id scans by (agency_id, factor_id).
+            # The foreign key's check on deleting a factor scans by (agency_id, factor_id).
             models.Index(fields=["agency_id", "factor"], name="auth_stepup_factor"),
         )
 

@@ -164,9 +164,13 @@ newest version by regenerating their codes. In an emergency (the key may have le
 once: every code still under it is void, so tell those users to generate new ones at their next
 sign-in.
 Step-up evidence (`auth_stepup.evidence_mac`, M3h) is a MAC under this key too, its first 4 bytes the
-version. A row counts only for `SKIW_STEPUP_MAX_AGE_MIN` minutes (at most 5), so removing a version
-voids at most the last 5 minutes of step-ups: those users step up again. No report is needed before
-removing a version.
+version. Until M9 (approvals and the executor) and M16 (Drive operations) store step-up ids, a row
+counts only for `SKIW_STEPUP_MAX_AGE_MIN` minutes (at most 5), so removing a version voids at most the
+last 5 minutes of step-ups: those users step up again, and no report is needed. **From M9 and M16 that
+stops being true:** an approved-but-unsent action or a waiting Drive operation is checked later against
+its stored step-up, so a version is removed only after no pending approval or Drive operation
+references a step-up under it. The report that block will add must list them; until it exists, do not
+remove a version while any exists.
 Both `web` (`config.asgi`) and `worker` (`runworker`, from M3a) refuse to start when the file is
 missing or malformed, before the migration check and without printing the key. A version number
 has at most six digits (`v1` to `v999999`): the reader and `bootstrap-secrets restore` refuse a

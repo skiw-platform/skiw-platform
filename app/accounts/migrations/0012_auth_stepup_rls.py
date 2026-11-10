@@ -3,11 +3,11 @@
 # policies and skiw_app's grant. SELECT and INSERT only: the evidence is append-only (TEN-03).
 # Runs as skiw_migrator.
 #
-# The composite FK (agency_id, factor_id) -> user_factor is added here, not by the template:
-# it is ON DELETE SET NULL (factor_id), a column list (PostgreSQL 15+, the project runs 17) so
-# agency_id, which is NOT NULL, is never touched. Removing a TOTP (M3h-6) then works even when a
-# step-up was made with it. The referential action runs as the table owner, so skiw_app still has
-# no UPDATE grant; the cleared row no longer verifies, because factor_id is inside evidence_mac.
+# The composite FK (agency_id, factor_id) -> user_factor is added here, not by the template, with
+# the default NO ACTION: a factor that a step-up names cannot be deleted, so the evidence keeps
+# verifying and keeps saying which factor proved it, for the later consumers (the M9 executor, the
+# M16 drive_writer) that check it outside the session. Factors are retired, not deleted (M3h-6
+# TOTP, M3g passkeys). Review R1 on PR 136 replaced an earlier ON DELETE SET NULL (factor_id).
 
 from django.db import migrations
 
@@ -29,7 +29,6 @@ class Migration(migrations.Migration):
             sql=(
                 "ALTER TABLE auth_stepup ADD CONSTRAINT auth_stepup_factor_id_fk"
                 " FOREIGN KEY (agency_id, factor_id) REFERENCES user_factor(agency_id, id)"
-                " ON DELETE SET NULL (factor_id)"
             ),
             reverse_sql="ALTER TABLE auth_stepup DROP CONSTRAINT auth_stepup_factor_id_fk",
         ),
