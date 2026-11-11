@@ -62,6 +62,12 @@ class Signed:
     seen_at: datetime
 
 
+def nothing(body: Mapping[str, Any]) -> None:
+    """The schema of an action that takes no input: exactly `{}`."""
+    if body:
+        raise InvalidInput
+
+
 def _signed(session: SessionStore) -> Signed | None:
     """The completed login in the session, or None. Only login() writes these keys (UTC-aware
     times), and a row that fails the MAC (M2c) loads as empty with no key, so a session that has

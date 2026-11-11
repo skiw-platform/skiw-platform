@@ -2,7 +2,7 @@
 edge the TEN-10 contract allows (owner Q10 (a)). The login steps run before there is a signed-in
 session, so they are reviewed PUBLIC_ROUTES entries (app/tests/test_route_registry.py), not
 authorized_action handlers; so is enrolment, which a user without a password reaches by link.
-Step-up is signed in, so it is an authorized_action handler.
+Step-up, logout and password change are signed in, so they are authorized_action handlers.
 Every answer is one of a few fixed bodies; a failure never says why (AUTH-05)."""
 
 import json
@@ -12,15 +12,16 @@ from typing import Any, TypeGuard
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.middleware.csrf import get_token
+from django.middleware.csrf import get_token, rotate_token
 
-from accounts.auth import enrol, factors, password_step, second_factor
+from accounts.auth import enrol, factors, password_change, password_step, second_factor
 from accounts.auth.blob import EMAIL_MAX
 from accounts.auth.login import login
+from accounts.auth.revoke import mark
 from accounts.auth.stepup import PURPOSES, StepUp
 from accounts.auth.stepup import verify as verify_stepup
 from accounts.auth.throttle import client_ip
-from accounts.auth.wrapper import InvalidInput, Signed, authorized_action
+from accounts.auth.wrapper import InvalidInput, Signed, authorized_action, nothing
 from accounts.user_model import AppUser
 from tenancy.binding import with_agency
 
@@ -212,3 +213,42 @@ def stepup(request: HttpRequest, signed: Signed, data: tuple[str, str]) -> HttpR
         return _answer(*STEPUP_REFUSED[outcome])
     until = outcome.verified_at + timedelta(minutes=settings.SKIW_STEPUP_MAX_AGE_MIN)
     return _answer({"next": "verified", "until": until.isoformat()}, 200)
+
+
+@authorized_action(schema=nothing, permission="auth.logout")
+def logout(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
+    """POST /api/auth/logout, body `{}` (AUTH-13, server half): a marker for this session and the
+    row delete commit together in the wrapper's transaction, so the old cookie, and the old row put
+    back by SQL, are refused; the empty session makes the middleware delete the cookie. A session
+    the wrapper refuses (idle, revoked) is signed out already."""
+    mark(signed.agency_id, signed.user_id, str(request.session.session_key))
+    request.session.flush()
+    rotate_token(request)
+    return _answer({"next": "signed_out", "csrf": get_token(request)}, 200)
+
+
+def _password_body(body: Mapping[str, Any]) -> tuple[str, str]:
+    """Exactly `{"current": text, "new": text}`, the new one without NUL (UNI-03)."""
+    current, new = body.get("current"), body.get("new")
+    if body.keys() != {"current", "new"} or not _text(current) or not _text(new) or "\x00" in new:
+        raise InvalidInput
+    return current, new
+
+
+PASSWORD_ANSWERS: dict[password_change.Outcome, tuple[dict[str, str], int]] = {
+    "short": ({"error": "password-short"}, 400),  # nothing counted
+    "limited": ({"error": "limited"}, 429),  # the login form's budget or lock
+    "wrong": ({"error": "password-wrong"}, 401),
+    "signed-out": ({"error": "signed-out"}, 401),
+    "conflict": ({"error": "changed"}, 409),  # changed by another request meanwhile
+}
+
+
+@authorized_action(schema=_password_body, permission="auth.password", own_transaction=True)
+def password(request: HttpRequest, signed: Signed, data: tuple[str, str]) -> HttpResponse:
+    """POST /api/auth/password: the current password and a new one (DECISIONS M3h-4). Right: every
+    other session of the user ends (AUTH-07) and this one gets a new key, so a new CSRF token."""
+    outcome = password_change.change(request, signed, *data)
+    if outcome != "changed":
+        return _answer(*PASSWORD_ANSWERS[outcome])
+    return _answer({"next": "changed", "csrf": get_token(request)}, 200)
