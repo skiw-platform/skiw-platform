@@ -18,6 +18,12 @@ ENV UV_COMPILE_BYTECODE=1 \
     PATH="/srv/.venv/bin:$PATH" \
     PYTHONPATH=/srv/app
 
+# REMOVE-WHEN-UPSTREAM-REBUILDS (DECISIONS 2026-11-11, "base images krb5-libs"): krb5-libs (pulled in
+# by libtirpc) is 1.22.2-r1 in the pinned base, with 16 fixed HIGH CVEs, and Docker Hub has no
+# rebuild of the python alpine tag yet. `>=` is deliberate: an exact pin breaks when Alpine's index
+# drops the version.
+RUN apk add --no-cache "krb5-libs>=1.22.3-r0"
+
 RUN adduser -S -u 10001 -h /nonexistent -H -s /sbin/nologin skiw
 
 WORKDIR /srv

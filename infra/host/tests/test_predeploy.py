@@ -350,6 +350,11 @@ def bases(text: str) -> dict[str, str]:
     return found
 
 
+# The one apk layer allowed (DECISIONS 2026-11-11, "base images krb5-libs"): only these packages,
+# each at a minimum fixed version, from Alpine's signed repository; `>=` is a deliberate exception.
+APK_FIX = r'apk add --no-cache( "(krb5-libs|libxslt)>=[0-9][0-9.]*-r[0-9]+")+'
+
+
 def check_dockerfile(text: str) -> None:
     """The dump image's build rules (DECISIONS 2026-10-23, "Dump image passes the Trivy gate")."""
     steps = instructions(text)
@@ -366,7 +371,9 @@ def check_dockerfile(text: str) -> None:
         adds[0],
     ), adds
     runs = " ".join(value for kind, value in steps if kind == "RUN")
-    assert not re.search(r"\b(curl|wget|apk|go get|go install)\b|@latest", runs)  # unchecked input
+    assert not re.search(r"\b(curl|wget|go get|go install)\b|@latest", runs)  # unchecked input
+    apk = [value for kind, value in steps if kind == "RUN" and re.search(r"\bapk\b", value)]
+    assert len(apk) <= 1 and all(re.fullmatch(APK_FIX, value) for value in apk), apk
     env = " ".join(value for kind, value in steps if kind == "ENV").split()
     assert {"CGO_ENABLED=0", "GOFLAGS=-mod=readonly", "GOTOOLCHAIN=local"} <= set(env)
     assert not [x for x in env if x.startswith(("GONOSUMDB", "GONOSUMCHECK", "GOSUMDB", "GOPROXY"))]
@@ -401,6 +408,13 @@ def test_the_dump_image_pins_every_input() -> None:
         (r"USER 10003:10003", "USER root"),
         (r"(RUN tar)", r"ENV GONOSUMDB=*\n\1"),
         (r"(RUN rm)", r"RUN wget -O /tmp/x https://example.invalid/x\n\1"),
+        (r"(RUN rm)", r"RUN apk add --no-cache curl\n\1"),  # any other apk package
+        (r"(RUN rm)", r'RUN apk add --no-cache "krb5-libs>=1.22.3-r0" openssl\n\1'),  # a rider
+        (r"(RUN rm)", r"RUN apk upgrade --no-cache\n\1"),
+        (r'"libxslt>=1\.1\.43-r4"', '"busybox>=1.37.0-r0"'),  # a versioned, unlisted package
+        (r"(RUN rm)", r"RUN curl -fsSL https://example.invalid/x\n\1"),
+        (r'"krb5-libs>=1\.22\.3-r0" ', '"krb5-libs" '),  # no minimum version
+        (r"(RUN rm)", r'RUN apk add --no-cache "libxslt>=1.1.43-r4"\n\1'),  # a second apk layer
     ],
 )
 def test_the_pin_check_fails_on_a_weakened_dockerfile(old: str, new: str) -> None:
