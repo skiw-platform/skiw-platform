@@ -22,6 +22,10 @@ RUN mkdir -p /out/usr/local/bin /out/usr/local/lib \
         /out/usr/local/lib/python3.12/ensurepip
 
 FROM postgres:17.11-alpine3.24@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+# REMOVE-WHEN-UPSTREAM-REBUILDS (DECISIONS 2026-11-11, "base images krb5-libs"): the postgres base
+# ships krb5-libs 1.22.2-r1 and libxslt 1.1.43-r3, both with fixed HIGH CVEs, and Docker Hub has no
+# rebuild yet. These are the only apk packages allowed here (test_predeploy.py); `>=` is deliberate.
+RUN apk add --no-cache "krb5-libs>=1.22.3-r0" "libxslt>=1.1.43-r4"
 COPY --from=python /out/ /
 COPY --from=age /out/age /usr/local/bin/age
 RUN rm /usr/local/bin/gosu \
