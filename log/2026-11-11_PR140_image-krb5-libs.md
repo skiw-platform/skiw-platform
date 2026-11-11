@@ -4,7 +4,7 @@
 - **Gate breaches:** none. The review's head SHA equals the PR's final head; the receipt (`reviews/PR-140.receipt`, 2026-11-11T04:39:22Z, review-file hash c37a99c2, review commit 2dab9dc) precedes the merge by 21 seconds.
 - **Approval receipt:** `reviews/PR-140.receipt` on agent-logs (written by `approved 140` after the whole review file was archived and its hash confirmed equal to the local copy).
 - **Merge evidence:** `gh pr view 140` state MERGED, mergedAt 2026-11-11T04:39:43Z, merge commit 5f3cac2; `git merge-base --is-ancestor` against fetched origin/main: reachable.
-- **Built by:** Sonnet 5.5 builder (no deep-tier design needed: build inputs only) · **Final verdict:** Approved (Round 1, no revision round); reviewed on the deep tier as the owner required
+- **Built by:** Sonnet 5.5 builder (no deep-tier design needed: build inputs only) · **Final verdict:** Approved (Round 1, no revision round); **reviewed on the standard tier (Sonnet 5.5), not the deep tier the owner required (condition 3)**. The reviewer built and Trivy-scanned both images and probed the test rule, but did not give the backup path a deep-tier read.
 - **Spec:** v1.22 (hash 79a9a40e, unchanged) · **Plan:** none · **Milestone:** not a milestone: the base-image refresh PR that PR 139 R1 P2 deferred
 
 ## What changed
@@ -14,7 +14,7 @@ One `RUN apk add --no-cache` line per image: the app `Dockerfile` (runtime stage
 From 2026-11-11 CI `image` failed on `main` and every PR (found by PR 139 R1, P2): Trivy v0.75.0, 16 HIGH CVEs, all `krb5-libs` 1.22.2-r1 in the app image; the dump image (scanned after it) had 18 (`krb5-libs`, `libxslt`). Upstream had not rebuilt either base, so re-pinning (the 2026-11-07 route) did not work.
 
 ## Review rounds
-- R1: Approved, nothing required, no deferred conditions.
+- R1: Approved, nothing required. Two optional P3s, both open: (1) `APK_FIX` accepts lowered floors (`>=1-r0`), a duplicate package or a missing `libxslt`; compare the apk line to the exact string held in one constant, with a planted lowered-floor case; (2) the marker quotes `"base images krb5-libs"`, which is not a substring of the DECISIONS heading; make it one. Both: in the removal PR or the next change to this file.
 
 ## Deferred conditions
 - None.
@@ -26,6 +26,8 @@ From 2026-11-11 CI `image` failed on `main` and every PR (found by PR 139 R1, P2
 
 ## Follow-ups
 - PR 139 (M3h-3): rebase on main (expect a DECISIONS.md end-of-file conflict, keep both entries), push a new head, wait for green `image`; the review covers head 894bca4, so ask the owner whether the reviewer must confirm the new head before `approved 139`.
+- Optional P3s above (removal PR or next change to the files).
+- **Tier gap:** condition 3 asked for a deep-tier review; this one was standard. Told to the owner at `merged 140`; the owner decides whether a deep-tier read of the backup-path change is still wanted.
 - Watch for upstream rebuilds of the python and postgres alpine tags; remove the layers then.
 
 ## Appendix — final review round
