@@ -63,11 +63,12 @@ Spec wins for *what we should build*. If two of these disagree, stop and ask Yin
 
 ## 4. Repository
 
-- **Remote:** https://github.com/skiw-platform/skiw-platform (private) <!-- created 2026-10-05 under the owner's personal account `charliekhc`; moved to the organization `skiw-platform` on 2026-10-21 (docs/DECISIONS.md). The old app repo https://github.com/apiskiw/skiw-assistant is read-only reference only. -->
+- **Remote:** https://github.com/skiw-dev1/skiw-platform (private) <!-- created 2026-10-05 under the owner's personal account `charliekhc`; moved to the organization `skiw-platform` on 2026-10-21 and to the organization `skiw-dev1` on 2026-11-11 because the old organization hit the GitHub Actions spending limit (docs/DECISIONS.md, 2026-11-11 repo move). The old app repo https://github.com/apiskiw/skiw-assistant is read-only reference only. -->
 - **Default branch:** main <!-- local repo initialised on `main` 2026-10-05; GitHub default branch is set when the first push creates it (owner-approved baseline push) -->
 - **Merge policy:** Reviewer approves → Ying merges. The builder never merges. The reviewer never merges.
 - **Commit trailer:** `none`
 - **PR size target:** 400 LOC (spec §9: "PR size target ≈ 400 LOC; each milestone is 1–4 PRs")
+- **PR size rule:** the target is 400 LOC. Past about 450 LOC (code, tests and docs together) the builder splits the PR, or states in the PR body why it cannot be split safely and, past 600, stops and asks the owner first. The reviewer judges the reason; a larger PR is not itself a finding (docs/DECISIONS.md, 2026-11-11 repo move)
 
 ## 5. Milestones
 
