@@ -17,9 +17,10 @@ from django.db import connection
 from django.middleware.csrf import get_token
 from django.test import Client, RequestFactory
 
-from accounts.auth import blob, password_step, passwords
+from accounts.auth import blob, factors, password_step, passwords
 from accounts.auth.login import AUTH_AT, FACTOR, login
 from accounts.auth.revoke import mark
+from accounts.auth.second_factor import Passed, attempt
 from accounts.session import SessionStore, stored_key
 from accounts.user_model import AppUser
 from tenancy.binding import with_agency
@@ -27,7 +28,7 @@ from tests.test_csrf_gate import CASES_URLCONF, ORIGIN, assert_csrf_refused
 
 from . import test_second_factor_live as sign_in
 from .conftest import COOKIE, assert_deleted, committed_user, row_deadline
-from .logins import PASSWORD, consecutive, enrolled, random_ip, unseal
+from .logins import PASSWORD, consecutive, enrolled, factor_count, random_ip, unseal
 from .test_action_wrapper_live import markers, put_back, saved_row, signed_in
 from .test_auth_throttle_live import events as locked_events
 from .test_stepup_route_live import step_up
@@ -97,16 +98,20 @@ def test_logout_takes_no_input_and_then_the_session_stays() -> None:
     assert probe(cookie) == 200
 
 
-def test_logout_rotates_the_csrf_token_and_the_old_one_is_refused() -> None:
+def csrf_browser(user: AppUser) -> tuple[Client, str]:
+    """A CSRF-checking browser signed in as `user`, and its token."""
     browser = Client(enforce_csrf_checks=True)
     request = RequestFactory().post("/", secure=True)
     request.session = store = SessionStore()
-    login(request, committed_user(), factor="totp")
+    login(request, user, factor="totp")
     store.save()
     browser.cookies[settings.SESSION_COOKIE_NAME] = str(store.session_key)
     browser.cookies[settings.CSRF_COOKIE_NAME] = request.META["CSRF_COOKIE"]
-    old = get_token(request)
-    response = logout(browser, secure=True, headers={"Origin": ORIGIN, "X-CSRFToken": old})
+    return browser, get_token(request)
+
+
+def assert_rotated(browser: Client, response: "Response", old: str) -> None:
+    """The answer's `csrf` passes the gate and the token from before is refused."""
     assert response.status_code == 200
     new = json.loads(response.content)["csrf"]
 
@@ -117,6 +122,38 @@ def test_logout_rotates_the_csrf_token_and_the_old_one_is_refused() -> None:
 
     assert_csrf_refused(send(old), "token-invalid")
     assert send(new).status_code == 200
+
+
+def test_logout_rotates_the_csrf_token_and_the_old_one_is_refused() -> None:
+    browser, old = csrf_browser(committed_user())
+    response = logout(browser, secure=True, headers={"Origin": ORIGIN, "X-CSRFToken": old})
+    assert_rotated(browser, response, old)
+
+
+def test_a_password_change_rotates_the_csrf_token_and_the_old_one_is_refused() -> None:
+    """PR 141 R1 P3 #1: `reissue` rotates the token."""
+    browser, old = csrf_browser(enrolled()[0])
+    body = json.dumps({"current": PASSWORD, "new": NEW})
+    headers = {"Origin": ORIGIN, "X-CSRFToken": old}
+    kind, ip = "application/json", random_ip()
+    response = browser.post(
+        "/api/auth/password", body, content_type=kind, secure=True, headers=headers, REMOTE_ADDR=ip
+    )
+    assert_rotated(browser, response, old)
+
+
+def test_a_password_change_ends_a_login_waiting_for_its_second_factor() -> None:
+    """PR 141 R1 P2: someone past the password step with the old password cannot finish; a login
+    with the new password, after the change, can."""
+    user, secret, _ = sign_in.signing_in()
+    waiting = sign_in.pending_login(user)
+    assert change(signed_in(user, factor="totp")).status_code == 200
+    assert attempt(waiting, sign_in.code_at(secret, sign_in.STEP)) == "unavailable"
+    assert factor_count(user.id) == 0 and sign_in.stored_step(user) == 0
+    assert not any(key in waiting.session for key in factors.PENDING_KEYS)
+    assert signs_in(user.email, NEW)
+    after = attempt(sign_in.pending_login(user), sign_in.code_at(secret, sign_in.STEP))
+    assert after == Passed(user.id, user.agency_id, "totp")
 
 
 def test_a_password_change_ends_every_other_session_and_reissues_this_one() -> None:

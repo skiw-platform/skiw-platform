@@ -2,7 +2,8 @@
 edge the TEN-10 contract allows (owner Q10 (a)). The login steps run before there is a signed-in
 session, so they are reviewed PUBLIC_ROUTES entries (app/tests/test_route_registry.py), not
 authorized_action handlers; so is enrolment, which a user without a password reaches by link.
-Step-up, logout and password change are signed in, so they are authorized_action handlers.
+Step-up, logout, password change and the factor routes are signed in, so they are
+authorized_action handlers.
 Every answer is one of a few fixed bodies; a failure never says why (AUTH-05)."""
 
 import json
@@ -14,7 +15,14 @@ from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token, rotate_token
 
-from accounts.auth import enrol, factors, password_change, password_step, second_factor
+from accounts.auth import (
+    enrol,
+    factor_change,
+    factors,
+    password_change,
+    password_step,
+    second_factor,
+)
 from accounts.auth.blob import EMAIL_MAX
 from accounts.auth.login import login
 from accounts.auth.revoke import mark
@@ -252,3 +260,55 @@ def password(request: HttpRequest, signed: Signed, data: tuple[str, str]) -> Htt
     if outcome != "changed":
         return _answer(*PASSWORD_ANSWERS[outcome])
     return _answer({"next": "changed", "csrf": get_token(request)}, 200)
+
+
+@authorized_action(schema=nothing, permission="auth.factors")
+def factor_list(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
+    """GET /api/auth/factors: the signed-in user's own TOTP factor ids (M3i names the one to
+    retire) and how many recovery codes are left; no secret, no step-up [A] (DECISIONS M3h-5)."""
+    own = factor_change.listing(signed)
+    totp = [{"id": str(factor)} for factor in own.totp]
+    return _answer({"totp": totp, "recovery_left": own.recovery_left}, 200)
+
+
+STEPUP_REQUIRED = ({"error": "stepup-required"}, 403)
+
+
+@authorized_action(schema=nothing, permission="auth.factor-change")
+def factor_totp_begin(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
+    """POST /api/auth/factors/totp, body `{}`: after a `factor.change` step-up of this session, a
+    new TOTP secret to add, as text and as an otpauth:// link, shown once; nothing is stored until
+    its first code is confirmed. A second call replaces the unconfirmed secret."""
+    setup = factor_change.begin(request, signed)
+    if setup == "stepup-required":
+        return _answer(*STEPUP_REQUIRED)
+    return _answer({"secret": setup.secret, "uri": setup.uri}, 200)
+
+
+def _code_body(body: Mapping[str, Any]) -> str:
+    """Exactly `{"code": text}` (UNI-03); its shape is `factor_change.confirm`'s to judge."""
+    code = body.get("code")
+    if body.keys() != {"code"} or not _text(code):
+        raise InvalidInput
+    return code
+
+
+ADD_REFUSED: dict[factor_change.Refused, tuple[dict[str, str], int]] = {
+    "no-pending": ({"error": "no-pending"}, 409),  # nothing begun, or already confirmed
+    "invalid": ({"error": "invalid"}, 400),  # not six ASCII digits: nothing counted
+    "stepup-required": STEPUP_REQUIRED,
+    "signed-out": ({"error": "signed-out"}, 401),
+    "wrong_code": ({"error": "code-wrong"}, 401),
+    "limited": ({"error": "limited"}, 429),
+}
+
+
+@authorized_action(schema=_code_body, permission="auth.factor-change", own_transaction=True)
+def factor_totp_confirm(request: HttpRequest, signed: Signed, data: str) -> HttpResponse:
+    """POST /api/auth/factors/totp/confirm: the first code of the begun secret (DECISIONS M3h-5).
+    Right: the factor is added, every other session of the user ends (AUTH-07) and this one gets a
+    new key, so a new CSRF token. Wrong codes count on the user's one budget, not the lock run."""
+    outcome = factor_change.confirm(request, signed, data)
+    if isinstance(outcome, str):
+        return _answer(*ADD_REFUSED[outcome])
+    return _answer({"next": "added", "factor_id": str(outcome), "csrf": get_token(request)}, 200)

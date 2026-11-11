@@ -39,6 +39,9 @@ from tenancy.binding import with_agency
 PENDING_USER = "_skiw_pending_user"
 PENDING_AGENCY = "_skiw_pending_agency"
 PENDING_UNTIL = "_skiw_pending_until"  # UTC ISO-8601; the second factor must come before it
+# When the password step passed (UTC ISO-8601, the app clock): a credential change at or after it
+# ends the pending state (factors.pending, DECISIONS M3h-5).
+PENDING_AT = "_skiw_pending_at"
 # Set only by the enrolment route: this pending user has no second factor yet and may add a first
 # one (M3f, M3g), which makes them `active`. A login's pending state never carries it.
 PENDING_ENROL = "_skiw_pending_enrol"
@@ -98,11 +101,13 @@ def start_pending(request: HttpRequest, verified: Verified, *, enrol: bool = Fal
         with with_agency(agency):
             mark(agency, uuid.UUID(previous), key)
             session.flush()
-    until = timezone.now() + timedelta(minutes=settings.SKIW_LOGIN_PENDING_MIN)
+    now = timezone.now()
+    until = now + timedelta(minutes=settings.SKIW_LOGIN_PENDING_MIN)
     session.update(
         {
             PENDING_USER: str(verified.user_id),
             PENDING_AGENCY: str(verified.agency_id),
+            PENDING_AT: now.isoformat(timespec="microseconds"),
             PENDING_UNTIL: until.isoformat(timespec="microseconds"),
         }
     )

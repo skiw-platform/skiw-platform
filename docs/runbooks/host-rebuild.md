@@ -444,8 +444,16 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   its 12-hour end, and gets a new cookie. Wrong current passwords count on the login form's own
   budget and lock for that email (5 per 15 minutes; 10 in a row write `account.locked`), so a
   session thief guessing here can lock the login for 30 minutes. A sign-in already past the
-  password step when the change happens can still finish within `SKIW_LOGIN_PENDING_MIN` (5) with
-  an authenticator code. A forgotten password is still the owner's reset (Flow 5.1, not built yet).
+  password step when the change happens cannot finish (it answers "login expired"); so does any
+  change of the user's authenticators. A forgotten password is still the owner's reset (Flow 5.1,
+  not built yet).
+- **Add an authenticator** (M3h): a signed-in user steps up with an authenticator code
+  (`POST /api/auth/stepup`, purpose `factor.change`), then within `SKIW_STEPUP_MAX_AGE_MIN` (5)
+  starts (`POST /api/auth/factors/totp`, shows a new secret once) and confirms it with its first
+  code (`POST /api/auth/factors/totp/confirm`). Wrong codes count on the one code budget but not
+  toward the ten-in-a-row lock (a lock already on still refuses). Every other session of the user ends; this one stays with a new cookie and
+  its 12-hour end. `GET /api/auth/factors` lists the user's authenticators and recovery codes
+  left. Removing one is not built yet (M3h-6).
 - **Sign out** (`POST /api/auth/logout`): the server ends the session; a copied cookie, or the
   session row put back from a dump, stops working. An idle or revoked session is signed out
   already.
