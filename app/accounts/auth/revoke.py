@@ -2,8 +2,10 @@
 
 A marker with `session_key_hash` revokes one session (idle expiry, logout, a login over an
 authenticated session); a user-wide marker revokes every session of the user that signed in at or
-before `revoked_at`. `revoked_at` is the database's statement time and `_skiw_auth_at` the web
-process's clock; both containers read the host's one clock, and a tie counts as revoked.
+before `revoked_at`. `revoked_at` is the database's transaction start time (`CURRENT_TIMESTAMP`)
+and `_skiw_auth_at` the web process's clock; both containers read the host's one clock, and a tie
+counts as revoked. A user-wide marker also ends a login still at its second factor whose password
+step passed at or before it (`changed_since`, DECISIONS M3h-5).
 
 `mark()` and `revoked()` run in the caller's with_agency() transaction, so a marker and the
 session row delete commit together, and a failed insert leaves the session as it was.
@@ -34,10 +36,19 @@ def mark(agency: uuid.UUID, user: uuid.UUID, session_key: str | None) -> None:
     SessionRevocation.objects.create(agency_id=agency, user_id=user, session_key_hash=key_hash)
 
 
+def _user_wide(user: uuid.UUID, since: datetime) -> Q:
+    return Q(user_id=user, session_key_hash__isnull=True, revoked_at__gte=since)
+
+
 def revoked(user: uuid.UUID, session_key: str, auth_at: datetime) -> bool:
     by_key = Q(session_key_hash=stored_key(session_key))
-    user_wide = Q(user_id=user, session_key_hash__isnull=True, revoked_at__gte=auth_at)
-    return SessionRevocation.objects.filter(by_key | user_wide).exists()
+    return SessionRevocation.objects.filter(by_key | _user_wide(user, auth_at)).exists()
+
+
+def changed_since(user: uuid.UUID, since: datetime) -> bool:
+    """Inside the caller's with_agency(): a user-wide marker (a credential change) at or after
+    `since`, a tie included."""
+    return SessionRevocation.objects.filter(_user_wide(user, since)).exists()
 
 
 def hold(signed: "Signed", session_key: str) -> bool:

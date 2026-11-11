@@ -103,6 +103,7 @@ def test_a_link_sets_the_password_and_leaves_only_a_pending_enrolment(
     assert session_of(response) == {
         password_step.PENDING_USER: str(user.id),
         password_step.PENDING_AGENCY: str(user.agency_id),
+        password_step.PENDING_AT: clock.now.isoformat(timespec="microseconds"),
         password_step.PENDING_UNTIL: until.isoformat(timespec="microseconds"),
         password_step.PENDING_ENROL: True,
     }

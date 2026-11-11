@@ -1,9 +1,9 @@
 """TEST ONLY: config.urls plus three cookie-auth POST routes, so the CSRF gate's mutating cases run
 before the first real mutating route exists (plan M2d): `csrf-probe`, a plain view,
 `action-probe`, an `authorized_action` handler (plan M3d: the gate with a logged-in session), and
-`stepup-probe`, the test-only consumer of `stepup.recent()` (M3h-3) until the factor changes
-(M3h-5) consume it. Mounted only by tests (`pytest.mark.urls`), never by config.urls
-(test_route_registry checks that no probe is served)."""
+`stepup-probe`, a test-only consumer of `stepup.recent()` (M3h-3; the password-change tests still
+use it beside the real consumers, the factor changes of M3h-5). Mounted only by tests
+(`pytest.mark.urls`), never by config.urls (test_route_registry checks that no probe is served)."""
 
 from collections.abc import Mapping
 from typing import Any

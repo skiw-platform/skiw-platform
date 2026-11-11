@@ -92,6 +92,7 @@ def test_the_right_password_leaves_only_a_pending_state(
     assert session_of(response) == {
         password_step.PENDING_USER: str(user.id),
         password_step.PENDING_AGENCY: str(user.agency_id),
+        password_step.PENDING_AT: clock.now.isoformat(timespec="microseconds"),
         password_step.PENDING_UNTIL: until.isoformat(timespec="microseconds"),
     }
     store = SessionStore(response.cookies[SESSION].value)
