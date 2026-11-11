@@ -3,11 +3,12 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      Only accounts.auth.stepup writes or reads auth_stepup (spec §4.1 "inserted only by
-      accounts.auth (lint)", plan M3 §3 M3h, DECISIONS M3h-2): record() signs every row it inserts
-      with evidence_mac, recent() checks that MAC. A row written elsewhere carries no valid MAC and
-      authorises nothing, and a read elsewhere would trust a row recent() would refuse. Call
-      accounts.auth.stepup; the accounts tests forge rows by SQL on purpose.
+      Only accounts.auth.stepup touches auth_stepup through the ORM or the model (spec §4.1
+      "inserted only by accounts.auth (lint)", plan M3 §3 M3h, DECISIONS M3h-2): record() signs
+      every row it inserts with evidence_mac, recent() checks that MAC. A row written elsewhere
+      carries no valid MAC and authorises nothing, and a read of the model elsewhere would trust a
+      row recent() would refuse. Call accounts.auth.stepup; the accounts tests forge rows by SQL on
+      purpose. Raw SQL is flagged only when it writes the table (a migration or trigger may read it).
     paths:
       exclude:
         - /app/accounts/auth/stepup.py

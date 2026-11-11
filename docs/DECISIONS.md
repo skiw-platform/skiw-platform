@@ -1274,3 +1274,10 @@
 - **Scope / affects:** `app/accounts/auth/stepup.py`, `stepup_model.py`, migration 0013, `semgrep/auth-stepup-insert-stepup-only.{yml,py}`, `tests/test_auth_stepup.py`, `tests/test_stepup_table_live.py`, plan, this file. No route, setting, dependency or runbook change (UNI-16: no new env var).
 - **Versions:** none new. **Exception to a rule?** no.
 - **Decided by:** builder (Sonnet session) on the Opus deep-tier M3h-2 design.
+
+## 2026-11-11 — M3h-2b: `record`, `recent` built; PR 137 P3s taken
+- **Decision:** `accounts/auth/stepup.py` gains `StepUp`, `record(request, factor, purpose)` and `recent(request, purpose)` as designed in 'M3h-2a'. `FACTOR_KINDS = {totp}` (passkey joins in M3g). User, agency and session come only from the signed session (`_signed`, TEN-11). `recent` skips a row whose MAC fails with one fixed warning (logger `django.security.SuspiciousStepUp`, no row, key or session material).
+- **PR 137 P3s:** (1) `_message` raises `ValueError` on a timezone-naive `verified_at`, as `source_key._mac` does; (2) the Semgrep rule message now says it governs the ORM and model, and flags raw SQL only when it writes (a migration or trigger may read the table); (3) live stored-then-read test keeps microseconds and instant. PR 136 R2 P3 #1 (`record` refuses a recovery or another user's factor) is done.
+- **Scope / affects:** `app/accounts/auth/stepup.py`, `semgrep/auth-stepup-insert-stepup-only.yml`, `tests/test_auth_stepup.py`, `tests/test_auth_stepup_live.py`.
+- **Versions:** none new. **Exception to a rule?** no.
+- **Decided by:** builder (Sonnet session) on the Opus deep-tier design.

@@ -1,16 +1,19 @@
 """Step-up evidence MAC, purposes and the transaction rule (accounts.auth.stepup; spec §4.1
 `auth_stepup`, AUTH-09; plan M3 §3 M3h, DECISIONS M3h-2). No database: rows are built in memory.
-`record` and `recent` are tested in M3h-2b."""
+The live tests are in test_auth_stepup_live.py."""
 
 import hashlib
 import hmac
 import re
 import uuid
 from collections.abc import Callable
+from dataclasses import fields
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from django.db.transaction import TransactionManagementError
+from django.test import RequestFactory
 
 from accounts import source_key
 from accounts.auth import recovery, stepup, throttle
@@ -146,6 +149,35 @@ def test_the_label_is_apart_from_every_other_use_of_the_source_key() -> None:
     assert not any(label.startswith(other) or other.startswith(label) for other in others)
 
 
-def test_every_purpose_fits_the_table_check() -> None:
+def test_every_purpose_fits_the_table_check_and_only_a_totp_proves_one() -> None:
     assert {"factor.change"} == stepup.PURPOSES
     assert all(re.fullmatch(PURPOSE, purpose) for purpose in stepup.PURPOSES)
+    assert {"totp"} == stepup.FACTOR_KINDS  # spec D7; M3g adds the passkey
+
+
+def test_a_step_up_carries_no_mac_and_no_session_hash() -> None:
+    assert [f.name for f in fields(stepup.StepUp)] == ["id", "factor_id", "purpose", "verified_at"]
+
+
+CALLS: dict[str, Callable[[str], object]] = {
+    "record": lambda purpose: stepup.record(RequestFactory().post("/"), uuid.uuid4(), purpose),
+    "recent": lambda purpose: stepup.recent(RequestFactory().get("/"), purpose),
+}
+
+
+@pytest.mark.parametrize("call", sorted(CALLS))
+def test_both_refuse_an_unknown_purpose(call: str) -> None:
+    with pytest.raises(ValueError, match="unknown step-up purpose"):
+        CALLS[call]("export")
+
+
+@pytest.mark.parametrize("call", sorted(CALLS))
+def test_both_refuse_to_run_outside_a_transaction(call: str) -> None:
+    with pytest.raises(TransactionManagementError):
+        CALLS[call](stepup.FACTOR_CHANGE)
+
+
+def test_a_timezone_naive_instant_is_never_signed(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_source_keys(monkeypatch, key_line(1))
+    with pytest.raises(ValueError, match="timezone-aware"):
+        stepup.evidence(row(verified_at=datetime(2026, 11, 1, 12, 0, 0)))
