@@ -25,9 +25,9 @@ import secrets
 import uuid
 
 from django.db import connection
-from django.db.transaction import TransactionManagementError
 
 from accounts import source_key
+from accounts.auth.transactions import require_open
 from accounts.factor_model import RECOVERY_VERSION_BYTES, UserFactor
 
 LABEL = b"skiw-recovery-v1"  # keeps this use of the key apart from the session MAC and throttle
@@ -44,12 +44,6 @@ CONSUME = (
     "DELETE FROM user_factor WHERE user_id = %s AND kind = 'recovery' AND secret_ct = ANY(%s)"
     " RETURNING id"
 )
-
-
-def _in_transaction() -> None:
-    """Fail loudly, not by RLS's empty answer, when called outside the caller's with_agency()."""
-    if not connection.in_atomic_block:
-        raise TransactionManagementError("recovery codes run inside the caller's with_agency()")
 
 
 def _new_code() -> str:
@@ -83,7 +77,7 @@ def generate(agency: uuid.UUID, user: uuid.UUID) -> list[str]:
     """Replaces every recovery code of `user` with COUNT new ones and returns them for display:
     the only time they exist outside this call. The user row is locked first, so two
     regenerations take turns and leave exactly COUNT rows."""
-    _in_transaction()
+    require_open("recovery codes")
     codes = [_new_code() for _ in range(COUNT)]
     with connection.cursor() as cursor:
         cursor.execute(LOCK_USER, [user])
@@ -98,7 +92,7 @@ def generate(agency: uuid.UUID, user: uuid.UUID) -> list[str]:
 def consume(user: uuid.UUID, candidate: str) -> bool:
     """True when `candidate` is one of `user`'s unused codes, which is then deleted, so it never
     works again; False for anything else, with no query when it cannot be a code."""
-    _in_transaction()
+    require_open("recovery codes")
     code = normalise(candidate)
     if code is None:
         return False

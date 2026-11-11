@@ -10,7 +10,12 @@ reviewed as public. The steps run in AUTH-01 order and a failing step stops the 
    `permission` names the §6 matrix entry M4-rest will check), else 403;
 4. input: `schema` parses the JSON object body (UNI-03); InvalidInput gives 400;
 5. idempotency: no M3 action needs it;
-6. the handler, in the same tenant transaction.
+6. the handler, in the same tenant transaction; or, with `own_transaction=True`, after steps 1-4
+   have committed and outside any transaction, for a handler that counts attempts (the factor
+   counters refuse an open transaction). Such a handler opens with_agency(signed.agency_id) itself
+   for every tenant query (TEN-09); steps 1-4 and their order are the same in both modes.
+
+Every refusal is `Cache-Control: no-store` (AUTH-05).
 
 The agency is the session's, never the client's: nothing here reads an agency from the body, the
 query or a header (TEN-11). `_skiw_seen_at` is written at most once a minute, because each session
@@ -88,11 +93,13 @@ def _body(request: HttpRequest) -> Mapping[str, Any]:
 
 
 def _refused(status: int, code: str) -> HttpResponse:
-    return JsonResponse({"error": code}, status=status)
+    response = JsonResponse({"error": code}, status=status)
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 def authorized_action[T](
-    *, schema: Callable[[Mapping[str, Any]], T], permission: str
+    *, schema: Callable[[Mapping[str, Any]], T], permission: str, own_transaction: bool = False
 ) -> Callable[[Callable[[HttpRequest, Signed, T], HttpResponse]], Callable[..., HttpResponse]]:
     if not permission:
         raise ImproperlyConfigured("authorized_action needs the permission it checks")
@@ -130,7 +137,9 @@ def authorized_action[T](
                     return _refused(400, "invalid")
                 if now - signed.seen_at >= SEEN_STEP:
                     session[SEEN_AT] = now.isoformat(timespec="microseconds")
-                return handler(request, signed, data)
+                if not own_transaction:
+                    return handler(request, signed, data)
+            return handler(request, signed, data)  # own_transaction: the checks have committed
 
         vars(view).update(skiw_action=permission)  # the route registry reads it
         return view

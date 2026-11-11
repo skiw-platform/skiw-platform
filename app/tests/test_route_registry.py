@@ -84,6 +84,11 @@ def test_every_route_is_wrapped_or_reviewed_as_public() -> None:
     assert unauthorized() == []
 
 
+def test_the_app_serves_no_test_only_probe() -> None:
+    """The probes of tests.csrf_urls (`stepup-probe` reads step-up evidence) exist only there."""
+    assert [name for name, _ in walk(import_module(URLCONF).urlpatterns) if "probe" in name] == []
+
+
 def test_a_route_without_the_wrapper_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     added(monkeypatch, lambda request: HttpResponse())
     assert unauthorized() == ["added: neither wrapped by authorized_action nor in PUBLIC_ROUTES"]

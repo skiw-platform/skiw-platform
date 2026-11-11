@@ -1,13 +1,16 @@
-"""TEST ONLY: config.urls plus two cookie-auth POST routes, so the CSRF gate's mutating cases run
-before the first real mutating route exists (plan M2d): `csrf-probe`, a plain view, and
-`action-probe`, an `authorized_action` handler (plan M3d: the gate with a logged-in session).
-Mounted only by the gate tests."""
+"""TEST ONLY: config.urls plus three cookie-auth POST routes, so the CSRF gate's mutating cases run
+before the first real mutating route exists (plan M2d): `csrf-probe`, a plain view,
+`action-probe`, an `authorized_action` handler (plan M3d: the gate with a logged-in session), and
+`stepup-probe`, the test-only consumer of `stepup.recent()` (M3h-3) until the factor changes
+(M3h-5) consume it. Mounted only by tests (`pytest.mark.urls`), never by config.urls
+(test_route_registry checks that no probe is served)."""
 
 from collections.abc import Mapping
 from typing import Any
 
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 
+from accounts.auth.stepup import FACTOR_CHANGE, recent
 from accounts.auth.wrapper import Signed, authorized_action
 from config.routes import route
 from config.urls import urlpatterns as app_urlpatterns
@@ -26,8 +29,16 @@ def action_probe(request: HttpRequest, signed: Signed, data: Mapping[str, Any]) 
     return HttpResponse(b"done")
 
 
+@authorized_action(schema=any_object, permission="test.stepup-probe")
+def stepup_probe(request: HttpRequest, signed: Signed, data: Mapping[str, Any]) -> HttpResponse:
+    if recent(request, FACTOR_CHANGE) is None:
+        return JsonResponse({"error": "stepup-required"}, status=403)
+    return HttpResponse(b"done")
+
+
 urlpatterns = [
     route("csrf-probe", csrf_probe, name="csrf-probe", methods=("POST",), auth="cookie"),
     route("action-probe", action_probe, name="action-probe", methods=("POST",), auth="cookie"),
+    route("stepup-probe", stepup_probe, name="stepup-probe", methods=("POST",), auth="cookie"),
     *app_urlpatterns,
 ]
