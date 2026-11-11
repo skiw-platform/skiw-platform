@@ -7,6 +7,7 @@ authorized_action handlers.
 Every answer is one of a few fixed bodies; a failure never says why (AUTH-05)."""
 
 import json
+import uuid
 from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any, TypeGuard
@@ -312,3 +313,45 @@ def factor_totp_confirm(request: HttpRequest, signed: Signed, data: str) -> Http
     if isinstance(outcome, str):
         return _answer(*ADD_REFUSED[outcome])
     return _answer({"next": "added", "factor_id": str(outcome), "csrf": get_token(request)}, 200)
+
+
+def _id_body(body: Mapping[str, Any]) -> uuid.UUID:
+    """Exactly `{"id": a UUID in text}` (UNI-03)."""
+    factor = body.get("id")
+    if body.keys() != {"id"} or not _text(factor):
+        raise InvalidInput
+    try:
+        return uuid.UUID(factor)
+    except ValueError:
+        raise InvalidInput from None
+
+
+CHANGE_REFUSED = {
+    "stepup-required": STEPUP_REQUIRED,
+    "signed-out": ({"error": "signed-out"}, 401),
+    "not-found": ({"error": "not-found"}, 404),  # not one of the user's TOTPs in use
+    "last-factor": ({"error": "last-factor"}, 409),  # TOTP is required (spec D7)
+}
+
+
+@authorized_action(schema=_id_body, permission="auth.factor-change")
+def factor_totp_remove(request: HttpRequest, signed: Signed, data: uuid.UUID) -> HttpResponse:
+    """POST /api/auth/factors/totp/remove, body `{"id"}` (DECISIONS M3h-6): after a
+    `factor.change` step-up, retires one of the user's TOTP factors, never the last. Every other
+    session of the user ends (AUTH-07) and this one gets a new key, so a new CSRF token."""
+    outcome = factor_change.remove(request, signed, data)
+    if outcome != "removed":
+        return _answer(*CHANGE_REFUSED[outcome])
+    return _answer({"next": "removed", "csrf": get_token(request)}, 200)
+
+
+@authorized_action(schema=nothing, permission="auth.factor-change")
+def recovery_regenerate(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
+    """POST /api/auth/factors/recovery, body `{}` (DECISIONS M3h-6): after a `factor.change`
+    step-up, new recovery codes replace the old ones and are in this answer, the only time they
+    are shown. Every other session ends (AUTH-07); this one gets a new key and CSRF token."""
+    outcome = factor_change.regenerate(request, signed)
+    if isinstance(outcome, str):
+        return _answer(*CHANGE_REFUSED[outcome])
+    body = {"next": "regenerated", "recovery_codes": outcome, "csrf": get_token(request)}
+    return _answer(body, 200)

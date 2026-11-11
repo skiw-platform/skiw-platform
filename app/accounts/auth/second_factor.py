@@ -146,8 +146,9 @@ def _check(
 
 def match_totp(user: AppUser, candidate: str) -> UserFactor | None:
     """The user's TOTP factor whose code `candidate` is, with that step now used up, or None.
-    Inside the caller's with_agency(); only `counted` checks may call it (the step is stored)."""
-    rows = list(UserFactor.objects.filter(user_id=user.id, kind="totp"))
+    Inside the caller's with_agency(); only `counted` checks may call it (the step is stored).
+    A retired factor (M3h-6) is never read, and one retired after the read is not used."""
+    rows = list(UserFactor.objects.filter(user_id=user.id, kind="totp", retired_at__isnull=True))
     if not rows:
         totp.accept(NO_SECRET, candidate, 0)  # the same work, whatever the answer
         return None
@@ -156,9 +157,11 @@ def match_totp(user: AppUser, candidate: str) -> UserFactor | None:
             bytes(row.secret_ct or b""), row.id, user.id, user.agency_id
         )
         step = None if secret is None else totp.accept(secret, candidate, row.sign_count)
-        # The row count decides: another request may have taken this step since the row was read.
-        if step is not None and UserFactor.objects.filter(id=row.id, sign_count__lt=step).update(
-            sign_count=step
-        ):
+        if step is None:
+            continue
+        # The row count decides: another request may have taken this step, or retired the factor
+        # (factor_change.remove), since the row was read.
+        unused = UserFactor.objects.filter(id=row.id, sign_count__lt=step, retired_at__isnull=True)
+        if unused.update(sign_count=step):
             return row
     return None
