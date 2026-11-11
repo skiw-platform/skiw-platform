@@ -2,19 +2,25 @@
 edge the TEN-10 contract allows (owner Q10 (a)). The login steps run before there is a signed-in
 session, so they are reviewed PUBLIC_ROUTES entries (app/tests/test_route_registry.py), not
 authorized_action handlers; so is enrolment, which a user without a password reaches by link.
+Step-up is signed in, so it is an authorized_action handler.
 Every answer is one of a few fixed bodies; a failure never says why (AUTH-05)."""
 
 import json
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import Any, TypeGuard
 
+from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 
 from accounts.auth import enrol, factors, password_step, second_factor
 from accounts.auth.blob import EMAIL_MAX
 from accounts.auth.login import login
+from accounts.auth.stepup import PURPOSES, StepUp
+from accounts.auth.stepup import verify as verify_stepup
 from accounts.auth.throttle import client_ip
+from accounts.auth.wrapper import InvalidInput, Signed, authorized_action
 from accounts.user_model import AppUser
 from tenancy.binding import with_agency
 
@@ -174,3 +180,35 @@ def login_second_factor(request: HttpRequest) -> HttpResponse:
         user = AppUser.objects.get(id=outcome.user_id)
     login(request, user, factor=outcome.factor)
     return _answer({"next": "signed_in", "csrf": get_token(request)}, 200)
+
+
+def _stepup_body(body: Mapping[str, Any]) -> tuple[str, str]:
+    """Exactly `{"purpose": a listed purpose, "code": text}` (UNI-03); the code's shape is
+    `stepup.verify`'s to judge."""
+    purpose, code = body.get("purpose"), body.get("code")
+    if body.keys() != {"purpose", "code"} or not _text(purpose) or not _text(code):
+        raise InvalidInput
+    if purpose not in PURPOSES:  # after the type check: an unhashable value would raise
+        raise InvalidInput
+    return purpose, code
+
+
+STEPUP_REFUSED = {
+    "invalid": ({"error": "invalid"}, 400),  # not six ASCII digits: nothing counted
+    "unavailable": ({"error": "signed-out"}, 401),  # the user stopped being `active`
+    "wrong_code": ({"error": "code-wrong"}, 401),
+    "limited": ({"error": "limited"}, 429),  # the budget or the factor lock, as at sign-in
+}
+
+
+@authorized_action(schema=_stepup_body, permission="auth.stepup", own_transaction=True)
+def stepup(request: HttpRequest, signed: Signed, data: tuple[str, str]) -> HttpResponse:
+    """POST /api/auth/stepup: a TOTP code proves the signed-in user for `purpose` (spec D7,
+    AUTH-09; DECISIONS M3h-3). Wrong codes are counted on the user's one second-factor budget and
+    feed the same lock as sign-in. The session key stays, so the CSRF token does too. The answer
+    names when the step-up stops counting."""
+    outcome = verify_stepup(request, signed, *data)
+    if not isinstance(outcome, StepUp):
+        return _answer(*STEPUP_REFUSED[outcome])
+    until = outcome.verified_at + timedelta(minutes=settings.SKIW_STEPUP_MAX_AGE_MIN)
+    return _answer({"next": "verified", "until": until.isoformat()}, 200)

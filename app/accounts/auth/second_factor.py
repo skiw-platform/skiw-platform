@@ -1,8 +1,10 @@
 """The second factor of a login (spec Flow 5.1 (2), D7, AUTH-06; plan M3 §3 M3f, DECISIONS
-M3f-3c-1). No route yet: M3f-3c-2 calls `attempt` from `POST /api/auth/second-factor`, then
-`login()`. It checks one code for the user a password step left pending (`factors.pending`, not an
-enrolment's): a TOTP code or a recovery code, told apart by shape (a TOTP code is exactly six
-ASCII digits, a recovery code is sixteen symbols).
+M3f-3c-1). `POST /api/auth/second-factor` calls `attempt`, then `login()`; step-up
+(`stepup.verify`, M3h-3) shares `counted` and `match_totp`, so one user's sign-in and step-up
+codes share one budget, one lock run and one `sign_count`. `attempt` checks one code for the user
+a password step left pending (`factors.pending`, not an enrolment's): a TOTP code or a recovery
+code, told apart by shape (a TOTP code is exactly six ASCII digits, a recovery code is sixteen
+symbols).
 
 Order: the pending state; the attempt is counted (`throttle.factor_reserve`, one atomic statement,
 before anything is checked; over the limit, or while the factor lock holds, is `limited` and
@@ -28,6 +30,7 @@ is a use of the factor, not a change to the factor set, so it writes no revocati
 plan M3f lists only adding, removing and regenerating)."""
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -40,6 +43,7 @@ from accounts.user_model import AppUser
 from tenancy.binding import with_agency
 
 NO_SECRET = bytes(totp.SECRET_BYTES)  # for a user with no TOTP row; its result is never used
+Counted = Literal["ok", "unavailable", "limited", "wrong_code"]
 
 
 @dataclass(frozen=True)
@@ -51,7 +55,8 @@ class Passed:
     factor: Literal["totp", "recovery"]
 
 
-def _is_totp(candidate: str) -> bool:
+def is_totp(candidate: str) -> bool:
+    """The shape of a TOTP code: exactly six ASCII digits."""
     return len(candidate) == totp.DIGITS and candidate.isascii() and candidate.isdigit()
 
 
@@ -70,50 +75,82 @@ def attempt(request: HttpRequest, candidate: str) -> Passed | Failure:
     state = factors.pending(request)
     if state is None or state.enrol:
         return "unavailable"
-    reservation = throttle.factor_reserve(state.user_id)
-    if reservation is None:
-        return "limited"
-    kind: Literal["totp", "recovery"] = "totp" if _is_totp(candidate) else "recovery"
-    seen = _Seen()
-    try:
-        result = _check(state, candidate, kind, seen)
-    except BaseException:
-        # Only a fault BEFORE the comparison is not a guess. After a wrong comparison the guess
-        # stays counted (and counts toward the lock) even if leaving the transaction failed:
-        # otherwise a failure an attacker can provoke would hand every guess back (PR 130 R1 P3).
-        if seen.wrong:
-            throttle.factor_failed(state.user_id, seen.email, throttle.client_ip(request))
-        else:
-            throttle.factor_release(reservation)
-        raise
-    if result == "wrong_code":
-        throttle.factor_failed(state.user_id, seen.email, throttle.client_ip(request))
-        return result  # the attempt stays counted
-    throttle.factor_release(reservation)
-    if result == "unavailable":
+    kind: Literal["totp", "recovery"] = "totp" if is_totp(candidate) else "recovery"
+
+    def check(user: AppUser) -> bool:
+        if kind == "totp":
+            return match_totp(user, candidate) is not None
+        return recovery.consume(user.id, candidate)
+
+    result = counted(request, state.user_id, state.agency_id, check, feeds_lock=True)
+    if result != "ok":
         return result
-    throttle.factor_reset(state.user_id)
     factors.clear_pending(request)
     return Passed(state.user_id, state.agency_id, kind)
 
 
+def counted(
+    request: HttpRequest,
+    user_id: uuid.UUID,
+    agency_id: uuid.UUID,
+    check: Callable[[AppUser], bool],
+    *,
+    feeds_lock: bool,
+) -> Counted:
+    """The one copy of the count, fault and lock rules for a code check (UNI-05; DECISIONS
+    M3h-3), used by sign-in and step-up. `check(user)` runs inside with_agency(agency_id) on the
+    user's `active` row and says whether the code was right; whatever it writes commits only with
+    that transaction. Outside any transaction (the factor counters refuse one).
+
+    "limited": refused by `factor_reserve` (budget or factor lock), nothing checked.
+    "unavailable": the user is no longer `active`; the attempt is given back. "wrong_code": the
+    attempt stays counted and, if `feeds_lock`, feeds the factor lock's run. "ok": the attempt is
+    given back and, if `feeds_lock`, the run ends. A fault before the comparison gives the attempt
+    back; after a wrong comparison it keeps the count (and feeds the run if `feeds_lock`)."""
+    reservation = throttle.factor_reserve(user_id)
+    if reservation is None:
+        return "limited"
+    seen = _Seen()
+    try:
+        result = _check(user_id, agency_id, check, seen)
+    except BaseException:
+        # Only a fault BEFORE the comparison is not a guess. After a wrong comparison the guess
+        # stays counted (and counts toward the lock) even if leaving the transaction failed:
+        # otherwise a failure an attacker can provoke would hand every guess back (PR 130 R1 P3).
+        if not seen.wrong:
+            throttle.factor_release(reservation)
+        elif feeds_lock:
+            throttle.factor_failed(user_id, seen.email, throttle.client_ip(request))
+        raise
+    if result == "wrong_code":
+        if feeds_lock:
+            throttle.factor_failed(user_id, seen.email, throttle.client_ip(request))
+        return result  # the attempt stays counted
+    throttle.factor_release(reservation)
+    if result == "ok" and feeds_lock:
+        throttle.factor_reset(user_id)
+    return result
+
+
 def _check(
-    state: factors.Pending, candidate: str, kind: Literal["totp", "recovery"], seen: _Seen
+    user_id: uuid.UUID, agency_id: uuid.UUID, check: Callable[[AppUser], bool], seen: _Seen
 ) -> Literal["ok", "unavailable", "wrong_code"]:
-    with with_agency(state.agency_id):
-        user = AppUser.objects.filter(id=state.user_id, status="active").first()
+    with with_agency(agency_id):
+        user = AppUser.objects.filter(id=user_id, status="active").first()
         if user is None:
             return "unavailable"
-        right = _totp(user, candidate) if kind == "totp" else recovery.consume(user.id, candidate)
+        right = check(user)
         seen.wrong, seen.email = not right, user.email  # the comparison is done
     return "ok" if right else "wrong_code"
 
 
-def _totp(user: AppUser, candidate: str) -> bool:
+def match_totp(user: AppUser, candidate: str) -> UserFactor | None:
+    """The user's TOTP factor whose code `candidate` is, with that step now used up, or None.
+    Inside the caller's with_agency(); only `counted` checks may call it (the step is stored)."""
     rows = list(UserFactor.objects.filter(user_id=user.id, kind="totp"))
     if not rows:
         totp.accept(NO_SECRET, candidate, 0)  # the same work, whatever the answer
-        return False
+        return None
     for row in rows:
         secret = blob.open_factor_secret(
             bytes(row.secret_ct or b""), row.id, user.id, user.agency_id
@@ -123,5 +160,5 @@ def _totp(user: AppUser, candidate: str) -> bool:
         if step is not None and UserFactor.objects.filter(id=row.id, sign_count__lt=step).update(
             sign_count=step
         ):
-            return True
-    return False
+            return row
+    return None

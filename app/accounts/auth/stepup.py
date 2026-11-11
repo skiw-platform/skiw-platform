@@ -1,6 +1,7 @@
 """Step-up evidence (spec §4.1 `auth_stepup`, D7, AUTH-09; plan M3 §3 M3h, DECISIONS M3h-1, M3h-2).
-No route yet: M3h-3's `verify` calls `record` after a right TOTP code, in the transaction that used
-the code; the factor changes (M3h-5, M3h-6) and later consumers call `recent`.
+`verify` (the `POST /api/auth/stepup` route, M3h-3) checks a TOTP code through the sign-in's
+`second_factor.counted` and calls `record` in the transaction that used the code; the factor
+changes (M3h-5, M3h-6) and later consumers call `recent`.
 
 `evidence_mac` is the newest `tenant_source_key` version in RECOVERY_VERSION_BYTES big-endian
 bytes, then HMAC-SHA-256 under that version over LABEL, then every other column in a fixed order,
@@ -25,18 +26,21 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from django.conf import settings
-from django.db import connection
-from django.db.transaction import TransactionManagementError
 from django.http import HttpRequest
 from django.utils import timezone
 
 from accounts import source_key
+from accounts.auth import second_factor
 from accounts.auth.login import AGENCY, USER
+from accounts.auth.transactions import require_open
+from accounts.auth.wrapper import Signed
 from accounts.factor_model import RECOVERY_VERSION_BYTES, UserFactor
 from accounts.session import SessionStore, stored_key
 from accounts.stepup_model import AuthStepup
+from accounts.user_model import AppUser
 
 LABEL = b"skiw-stepup-v1"  # apart from the session, recovery and throttle uses of the key
 VERSION_BYTES = RECOVERY_VERSION_BYTES  # the same 4-byte prefix as a recovery code's secret_ct
@@ -44,6 +48,7 @@ FACTOR_CHANGE = "factor.change"  # add or remove a TOTP, regenerate recovery cod
 # Closed list; a consumer adds its purpose when it is built (outbox.approve M9, drive.write M16).
 PURPOSES = frozenset({FACTOR_CHANGE})
 FACTOR_KINDS = frozenset({"totp"})  # spec D7: a passkey too, from M3g
+Refused = Literal["invalid", "unavailable", "limited", "wrong_code"]
 log = logging.getLogger("django.security.SuspiciousStepUp")
 
 
@@ -55,12 +60,6 @@ class StepUp:
     factor_id: uuid.UUID
     purpose: str
     verified_at: datetime
-
-
-def _in_transaction() -> None:
-    """Fail loudly, not by RLS's empty answer, when called outside the caller's with_agency()."""
-    if not connection.in_atomic_block:
-        raise TransactionManagementError("step-up runs inside the caller's with_agency()")
 
 
 def _known(purpose: str) -> None:
@@ -125,7 +124,7 @@ def record(request: HttpRequest, factor: uuid.UUID, purpose: str) -> StepUp:
     purpose, a session with no completed login, or a factor that is not one of the user's own
     TOTP factors (another user's, a recovery code, a passkey before M3g, none)."""
     _known(purpose)
-    _in_transaction()
+    require_open("step-up records")
     signed = _signed(request)
     if signed is None:
         raise ValueError("step-up needs a signed-in session")
@@ -151,7 +150,7 @@ def recent(request: HttpRequest, purpose: str) -> StepUp | None:
     SKIW_STEPUP_MAX_AGE_MIN old (inclusive) and not in the future; None when there is none or the
     session has no completed login. Raises ValueError for an unknown purpose."""
     _known(purpose)
-    _in_transaction()
+    require_open("step-up records")
     signed = _signed(request)
     if signed is None:
         return None
@@ -169,3 +168,30 @@ def recent(request: HttpRequest, purpose: str) -> StepUp | None:
             return _stepup(row)
         log.warning("step-up row rejected: its evidence does not verify")
     return None
+
+
+def verify(request: HttpRequest, signed: Signed, purpose: str, candidate: str) -> StepUp | Refused:
+    """Steps the session's user up for `purpose` with a TOTP code (DECISIONS M3h-3). Outside any
+    transaction: the attempt is counted like a sign-in code (`second_factor.counted`, feeding the
+    lock), on the same budget, run and `sign_count`, so a code used at sign-in is refused here in
+    the same step and the reverse. The evidence row is written in the transaction that used the
+    step, so a fault there rolls the use back and gives the attempt back. "invalid": not six ASCII
+    digits (a recovery code is never step-up), nothing counted. Raises ValueError for an unknown
+    purpose. `signed` is the wrapper's, from the session (TEN-11)."""
+    _known(purpose)
+    if not second_factor.is_totp(candidate):
+        return "invalid"
+    proved: list[StepUp] = []
+
+    def check(user: AppUser) -> bool:
+        row = second_factor.match_totp(user, candidate)
+        if row is not None:
+            proved.append(record(request, row.id, purpose))
+        return row is not None
+
+    result = second_factor.counted(
+        request, signed.user_id, signed.agency_id, check, feeds_lock=True
+    )
+    if result == "ok":
+        return proved[0]
+    return result

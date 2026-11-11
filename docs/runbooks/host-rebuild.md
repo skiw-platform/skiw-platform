@@ -420,12 +420,14 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   once regenerating exists (M3h); the owner's reset (Flow 5.1, not built yet) is only for a user who
   lost the authenticator too.
 - **Too many wrong codes** (`SKIW_AUTH_FAILS_PER_ACCOUNT`, 5, in `SKIW_AUTH_WINDOW_MIN`, 15 minutes)
-  stop all code checks for that user, at enrolment and at sign-in alike (`POST /api/auth/second-factor`), until
-  the window ends. A new invite link does not shorten that, so tell the user to wait up to 15 minutes.
+  stop all code checks for that user, at enrolment, at sign-in (`POST /api/auth/second-factor`) and
+  at step-up (`POST /api/auth/stepup`, M3h) alike, until the window ends: one budget per user. A new invite link does not shorten that, so tell the user to wait up to 15 minutes.
 - **Ten wrong codes in a row** (`SKIW_AUTH_LOCK_AFTER`, across any number of windows, and not
   cleared by signing in with the password again) lock that user's second factor for
   `SKIW_AUTH_LOCK_MIN` (30 minutes), TOTP and recovery codes alike, and the right code is refused
-  too until it ends. It is checked at sign-in too, and a locked user gets the same `limited` answer as one who used up the budget. The lock writes a `factor.locked`
+  too until it ends. It is checked at sign-in and at step-up, wrong step-up codes count toward it
+  (a signed-in session guessing at step-up can lock the user's sign-in), and a locked user gets the
+  same `limited` answer as one who used up the budget. The lock writes a `factor.locked`
   event (HMACs of the email and IP, and the count) and a `second factor soft-locked` warning in the
   web log. That is the M3 stand-in for the owner alert (owner Q4 (a)): **nobody is sent anything**
   until that alert path exists, so look. After the `compose` helper of "Rotating

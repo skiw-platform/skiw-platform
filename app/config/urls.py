@@ -4,6 +4,7 @@ from accounts.views import (
     enrol_password,
     login_password,
     login_second_factor,
+    stepup,
 )
 from config.routes import route
 from health.views import healthz
@@ -37,5 +38,6 @@ urlpatterns = [
         methods=("POST",),
         auth="cookie",
     ),
+    route("api/auth/stepup", stepup, name="auth-stepup", methods=("POST",), auth="cookie"),
     route("", shell, name="shell", methods=("GET",), auth="cookie"),
 ]
