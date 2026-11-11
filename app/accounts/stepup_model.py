@@ -3,11 +3,12 @@ re-verified a factor just now, for one purpose. Append-only (TEN-03: skiw_app ma
 INSERT only). `evidence_mac` is a 4-byte `tenant_source_key` version, then an HMAC-SHA-256 over
 every other column (accounts.auth.stepup, M3h-2), so a row written by SQL authorises nothing.
 
-`factor_id` is the factor that proved it. Its foreign key is NO ACTION (accounts.0012): a factor
-that a step-up names cannot be deleted, so the row keeps verifying and keeps saying which factor
-proved it, for consumers that check it later and outside the session (the M9 executor, the M16
-drive_writer). Factors are retired, not deleted (M3h-6 TOTP, M3g passkeys). The model says
-PROTECT, so the ORM refuses first (ProtectedError) instead of reaching the database error."""
+`factor_id` is the factor that proved it, never NULL (`auth_stepup_factor_named`, accounts.0013).
+Its foreign key is NO ACTION (accounts.0012): a factor that a step-up names cannot be deleted, so
+the row keeps verifying and keeps saying which factor proved it, for consumers that check it later
+and outside the session (the M9 executor, the M16 drive_writer). Factors are retired, not deleted
+(M3h-6 TOTP, M3g passkeys). The model says PROTECT, so the ORM refuses first (ProtectedError)
+instead of the database."""
 
 import uuid
 
@@ -61,6 +62,11 @@ class AuthStepup(TenantModel):
             models.CheckConstraint(
                 condition=Exact(Length("evidence_mac"), EVIDENCE_LENGTH),
                 name="auth_stepup_evidence_mac_length",
+            ),
+            # Every step-up names the factor that proved it (accounts.0013, DECISIONS M3h-2). A
+            # CHECK, not NOT NULL, so the migration only adds (UNI-15), as accounts.0010 did.
+            models.CheckConstraint(
+                condition=models.Q(factor__isnull=False), name="auth_stepup_factor_named"
             ),
         )
         indexes = (
