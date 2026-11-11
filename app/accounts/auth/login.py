@@ -9,19 +9,28 @@ row put back by SQL is still refused (plan M3 §3 M3d "a rotation of an authenti
 login() must run outside any atomic block; a failed marker insert leaves the old session as it was.
 
 Semgrep `start-new-lifetime-login-only` keeps `start_new_lifetime()` in this module: anything
-else that renews the absolute deadline would let a session outlive SKIW_SESSION_ABSOLUTE_H."""
+else that renews the absolute deadline would let a session outlive SKIW_SESSION_ABSOLUTE_H.
+
+`reissue()` gives the session of a credential change a new key and login time after the user-wide
+marker, so it alone survives that marker (AUTH-07); it keeps the absolute deadline (DECISIONS
+M3h-4)."""
 
 import uuid
+from typing import TYPE_CHECKING
 
 from django.http import HttpRequest
 from django.middleware.csrf import rotate_token
 from django.utils import timezone
 
 from accounts.auth.revoke import mark
+from accounts.auth.transactions import require_open
 from accounts.factor_model import KINDS
 from accounts.session import SessionStore
 from accounts.user_model import AppUser
 from tenancy.binding import with_agency
+
+if TYPE_CHECKING:  # wrapper imports this module
+    from accounts.auth.wrapper import Signed
 
 USER = "_skiw_user"
 AGENCY = "_skiw_agency"
@@ -55,6 +64,22 @@ def login(request: HttpRequest, user: AppUser, *, factor: str) -> None:
             FACTOR: factor,
         }
     )
+    rotate_token(request)
+
+
+def reissue(request: HttpRequest, signed: "Signed") -> None:
+    """Inside the caller's with_agency(), after `revoke.hold` and the user-wide marker: this key is
+    retired with its own marker (a saved row put back by SQL stays refused) and replaced; the new
+    login time is the app's clock, after the marker's statement time, so the session outlives the
+    marker. The factor stays, and so does the deadline: a credential change is not a new login."""
+    session = request.session
+    if not isinstance(session, SessionStore):
+        raise TypeError("reissue() needs the accounts session store")
+    require_open("reissue()")
+    mark(signed.agency_id, signed.user_id, str(session.session_key))
+    session.cycle_key()
+    now = timezone.now().isoformat(timespec="microseconds")
+    session.update({AUTH_AT: now, SEEN_AT: now})
     rotate_token(request)
 
 

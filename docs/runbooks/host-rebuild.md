@@ -436,9 +436,19 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   FROM security_event WHERE kind = 'factor.locked' GROUP BY 1 ORDER BY 2 DESC`. The hash cannot be
   turned back into a name: you learn who it is from the user (they are the one locked out) or from
   Ying. A user who is locked out just waits; only a right code, after the lock ends,
-  clears the run. **There is no password change yet** (the owner's reset, Flow 5.1, is not built
-  and `accounts_invite` only invites), so if locks repeat for one user, who may have a password
-  someone else knows, the step for now is to tell Ying.
+  clears the run. If locks repeat for one user, who may have a password someone else knows, have
+  them change it (below) and tell Ying.
+- **Change the password** (M3h): a signed-in user changes it with the current password
+  (`POST /api/auth/password`, no authenticator code); the new one has the same minimum length. Every
+  other session of that user ends at once; the session that made the change stays signed in, keeps
+  its 12-hour end, and gets a new cookie. Wrong current passwords count on the login form's own
+  budget and lock for that email (5 per 15 minutes; 10 in a row write `account.locked`), so a
+  session thief guessing here can lock the login for 30 minutes. A sign-in already past the
+  password step when the change happens can still finish within `SKIW_LOGIN_PENDING_MIN` (5) with
+  an authenticator code. A forgotten password is still the owner's reset (Flow 5.1, not built yet).
+- **Sign out** (`POST /api/auth/logout`): the server ends the session; a copied cookie, or the
+  session row put back from a dump, stops working. An idle or revoked session is signed out
+  already.
 - **The password must be at least `SKIW_PW_MIN_LENGTH` characters (12)**, with no other
   rules. A shorter one is refused with the same answer as a bad link and doesn't use the link up,
   so the user can try again with the same link while it is valid.

@@ -4,6 +4,8 @@ from accounts.views import (
     enrol_password,
     login_password,
     login_second_factor,
+    logout,
+    password,
     stepup,
 )
 from config.routes import route
@@ -39,5 +41,7 @@ urlpatterns = [
         auth="cookie",
     ),
     route("api/auth/stepup", stepup, name="auth-stepup", methods=("POST",), auth="cookie"),
+    route("api/auth/logout", logout, name="auth-logout", methods=("POST",), auth="cookie"),
+    route("api/auth/password", password, name="auth-password", methods=("POST",), auth="cookie"),
     route("", shell, name="shell", methods=("GET",), auth="cookie"),
 ]
