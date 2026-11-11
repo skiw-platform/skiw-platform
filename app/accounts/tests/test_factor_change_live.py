@@ -6,13 +6,14 @@ test_logout_password_live). Users, factors and markers are committed and kept.""
 import base64
 import json
 import threading
+import uuid
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from django.db import connection
 from django.test import RequestFactory
 
-from accounts.auth import factor_change, factors, recovery, second_factor
+from accounts.auth import blob, factor_change, factors, recovery, second_factor, totp
 from accounts.auth.login import FACTOR
 from accounts.auth.revoke import mark
 from accounts.auth.second_factor import Passed, attempt
@@ -144,6 +145,22 @@ def test_nothing_begun_is_409_and_counts_nothing() -> None:
     user, _, cookie = stepped_up()
     assert answer(confirm(cookie, "123456")) == (409, {"error": "no-pending"})
     assert factor_count(user.id) == 0
+
+
+def test_a_begun_secret_that_does_not_open_is_409_and_counts_nothing() -> None:
+    """PR 142 R1 P3 #1: a sealed secret bound to another factor id is not a guess."""
+    user, _, cookie = stepped_up()
+    secret = totp.new_secret()
+    sealed = blob.seal_factor_secret(secret, uuid.uuid4(), user.id, user.agency_id)
+    store = SessionStore(cookie)
+    store[factor_change.ADD_TOTP] = {
+        "id": str(uuid.uuid4()),
+        "ct": base64.b64encode(sealed).decode(),
+    }
+    store.save()
+    assert answer(confirm(cookie, sign_in.code_at(secret, STEP))) == (409, {"error": "no-pending"})
+    assert factor_count(user.id) == 0 and len(totps(user)) == 1 and markers(user) == []
+    assert probe(cookie) == 200
 
 
 def test_the_list_shows_only_the_users_own_totps_and_recovery_count() -> None:

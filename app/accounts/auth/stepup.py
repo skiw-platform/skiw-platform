@@ -122,15 +122,16 @@ def record(request: HttpRequest, factor: uuid.UUID, purpose: str) -> StepUp:
     """Writes evidence that the session's user proved `factor` just now, for `purpose`. Call only
     after the factor was verified, in the same transaction. Raises ValueError for an unknown
     purpose, a session with no completed login, or a factor that is not one of the user's own
-    TOTP factors (another user's, a recovery code, a passkey before M3g, none)."""
+    TOTP factors (another user's, a recovery code, a passkey before M3g, a retired one, none)."""
     _known(purpose)
     require_open("step-up records")
     signed = _signed(request)
     if signed is None:
         raise ValueError("step-up needs a signed-in session")
     user, agency, key_hash = signed
-    if not UserFactor.objects.filter(id=factor, user_id=user, kind__in=FACTOR_KINDS).exists():
-        raise ValueError("step-up is proved by one of the user's own TOTP factors")
+    own = UserFactor.objects.filter(id=factor, user_id=user, kind__in=FACTOR_KINDS)
+    if not own.filter(retired_at__isnull=True).exists():
+        raise ValueError("step-up is proved by one of the user's own TOTP factors, not retired")
     row = AuthStepup(
         id=uuid.uuid4(),
         agency_id=agency,

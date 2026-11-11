@@ -6,7 +6,13 @@ is unique across agencies: the second factor's credential is resolved before the
 `secret_ct` has one length per kind (M3f-3a), and a TOTP or recovery row must have one: a TOTP
 secret is the 48-byte sealed blob (accounts.auth.blob.seal_factor_secret); a recovery row is the
 `tenant_source_key` version that signed it, 4 bytes big-endian, then its 32-byte HMAC-SHA-256
-(accounts.auth.recovery). Passkey rows are left to M3g."""
+(accounts.auth.recovery). Passkey rows are left to M3g.
+
+A factor a step-up names is never deleted (`auth_stepup.factor_id` FK, NO ACTION; DECISIONS
+M3h-1): replacing one sets `retired_at` and clears its secret material (M3h-6). Kind-agnostic, so
+M3g retires a passkey the same way. A retired row holds no `secret_ct`, `public_key` or
+`lookup_blob_ct` (`user_factor_retired_no_secret`), so it cannot verify anything even for code
+that ignored the column; a recovery row is deleted, never retired (its length rule forbids NULL)."""
 
 import uuid
 
@@ -26,11 +32,14 @@ RECOVERY_VERSION_BYTES = 4
 RECOVERY_SECRET_CT_LENGTH = RECOVERY_VERSION_BYTES + 32  # version || HMAC-SHA-256: 36
 
 
-def _secret_ct_length(kind: str, length: int) -> models.CheckConstraint:
-    """A `kind` row has a `secret_ct` of exactly `length` bytes; other kinds are not checked."""
+def _secret_ct_length(kind: str, length: int, *, retirable: bool) -> models.CheckConstraint:
+    """A `kind` row has a `secret_ct` of exactly `length` bytes, unless `retirable` and retired;
+    other kinds are not checked."""
+    exempt = ~models.Q(kind=kind)
+    if retirable:
+        exempt |= models.Q(retired_at__isnull=False)
     return models.CheckConstraint(
-        condition=~models.Q(kind=kind)
-        | models.Q(Exact(Length("secret_ct"), length), secret_ct__isnull=False),
+        condition=exempt | models.Q(Exact(Length("secret_ct"), length), secret_ct__isnull=False),
         name=f"user_factor_{kind}_secret_ct_length",
     )
 
@@ -47,6 +56,7 @@ class UserFactor(TenantModel):
     sign_count = models.BigIntegerField(db_default=0)
     secret_ct = models.BinaryField(null=True)
     lookup_blob_ct = models.BinaryField(null=True)
+    retired_at = models.DateTimeField(null=True)  # set once, by factor_change.remove (M3h-6)
 
     class Meta(TenantModel.Meta):
         db_table = "user_factor"
@@ -62,8 +72,15 @@ class UserFactor(TenantModel):
                 condition=Exact(Length("lookup_blob_ct"), LOOKUP_BLOB_LENGTH),
                 name="user_factor_lookup_blob_ct_length",
             ),
-            _secret_ct_length("totp", TOTP_SECRET_CT_LENGTH),
-            _secret_ct_length("recovery", RECOVERY_SECRET_CT_LENGTH),
+            _secret_ct_length("totp", TOTP_SECRET_CT_LENGTH, retirable=True),
+            _secret_ct_length("recovery", RECOVERY_SECRET_CT_LENGTH, retirable=False),
+            models.CheckConstraint(
+                condition=models.Q(retired_at__isnull=True)
+                | models.Q(
+                    secret_ct__isnull=True, public_key__isnull=True, lookup_blob_ct__isnull=True
+                ),
+                name="user_factor_retired_no_secret",
+            ),
         )
 
     def __str__(self) -> str:

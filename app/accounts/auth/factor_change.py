@@ -1,6 +1,6 @@
 """A signed-in user's own factors (spec D7, AUTH-07, AUTH-09; plan M3 §3 M3h; owner decision
-2026-11-06 item 4; DECISIONS M3h-5): the list, and adding a TOTP behind step-up. Removing a TOTP
-and regenerating recovery codes are M3h-6.
+2026-11-06 item 4; DECISIONS M3h-5, M3h-6): the list, adding and removing a TOTP and
+regenerating the recovery codes, each change behind a `factor.change` step-up of this session.
 
 Adding is two calls, as at enrolment, with a session key of its own (ADD_TOTP, never enrolment's
 `_skiw_pending_totp`), so the two flows cannot be mixed. `begin` needs a recent `factor.change`
@@ -13,15 +13,22 @@ of every credential change (DECISIONS M3h-4): `revoke.hold`, `stepup.recent`, th
 `sign_count` = the accepted step (so the confirming code cannot sign in again), the pending secret
 dropped, a user-wide marker (AUTH-07: every other session ends) and `login.reissue` for this one.
 A refusal inside the check (revoked, no step-up, a secret that does not open) is not a guess: the
-attempt is given back. No TOTP count cap [A]. No secret or code is logged (UNI-09)."""
+attempt is given back. No TOTP count cap [A].
+
+Removing a TOTP retires it: the row stays, so step-up evidence naming it still verifies (the FK is
+NO ACTION, DECISIONS M3h-1), with `retired_at` set and the secret cleared; every lookup skips a
+retired row. The user's last TOTP is never removed (spec D7: TOTP is required); replacing one is
+add, step up again, remove. Remove and regenerate run in the wrapper's with_agency() in the same
+order as every credential change. No secret or code is logged (UNI-09)."""
 
 import uuid
 from dataclasses import dataclass
 from typing import Literal
 
+from django.db.models.functions import Now
 from django.http import HttpRequest
 
-from accounts.auth import blob, factors, second_factor, totp
+from accounts.auth import blob, factors, recovery, second_factor, totp
 from accounts.auth.login import reissue
 from accounts.auth.revoke import hold, mark
 from accounts.auth.stepup import FACTOR_CHANGE, recent
@@ -32,6 +39,7 @@ from accounts.user_model import AppUser
 
 ADD_TOTP = "_skiw_add_totp"  # {"id": factor id, "ct": the sealed secret, base64}
 Refused = Literal["no-pending", "invalid", "stepup-required", "signed-out", "limited", "wrong_code"]
+Unchanged = Literal["stepup-required", "signed-out"]
 
 
 @dataclass(frozen=True)
@@ -45,8 +53,55 @@ def listing(signed: Signed) -> Listing:
     with_agency(); no secret, nothing else about a factor."""
     require_open("the factor list")
     own = UserFactor.objects.filter(user_id=signed.user_id)
-    ids = own.filter(kind="totp").order_by("id").values_list("id", flat=True)
-    return Listing(list(ids), own.filter(kind="recovery").count())
+    return Listing(_totps(signed), own.filter(kind="recovery").count())
+
+
+def _totps(signed: Signed) -> list[uuid.UUID]:
+    """The session user's TOTP factors that are not retired."""
+    own = UserFactor.objects.filter(user_id=signed.user_id, kind="totp", retired_at__isnull=True)
+    return list(own.order_by("id").values_list("id", flat=True))
+
+
+def _changing(request: HttpRequest, signed: Signed) -> Unchanged | None:
+    """`hold` then `recent`, first in a change made in the wrapper's with_agency(); a session
+    `hold` refuses is flushed."""
+    if not hold(signed, str(request.session.session_key)):
+        request.session.flush()
+        return "signed-out"
+    return "stepup-required" if recent(request, FACTOR_CHANGE) is None else None
+
+
+def _changed(request: HttpRequest, signed: Signed) -> None:
+    mark(signed.agency_id, signed.user_id, None)  # AUTH-07: every other session ends
+    reissue(request, signed)
+
+
+def remove(
+    request: HttpRequest, signed: Signed, factor: uuid.UUID
+) -> Literal["removed", "not-found", "last-factor"] | Unchanged:
+    """Retires `factor`, one of the session user's TOTP factors that is not retired, unless it is
+    the last one. "not-found": anything else (another user's, a recovery row, a retired one)."""
+    refused = _changing(request, signed)
+    if refused is not None:
+        return refused
+    ids = _totps(signed)  # after the lock: a parallel remove has committed or waits
+    if factor not in ids:
+        return "not-found"
+    if len(ids) <= 1:
+        return "last-factor"
+    UserFactor.objects.filter(id=factor).update(retired_at=Now(), secret_ct=None)
+    _changed(request, signed)
+    return "removed"
+
+
+def regenerate(request: HttpRequest, signed: Signed) -> list[str] | Unchanged:
+    """Replaces the session user's recovery codes with new ones, returned to be shown once."""
+    refused = _changing(request, signed)
+    if refused is not None:
+        return refused
+    codes = recovery.generate(signed.agency_id, signed.user_id)
+    _changed(request, signed)
+    return codes
 
 
 def begin(request: HttpRequest, signed: Signed) -> factors.Setup | Literal["stepup-required"]:
@@ -70,13 +125,10 @@ def confirm(request: HttpRequest, signed: Signed, candidate: str) -> uuid.UUID |
     refused: list[Refused] = []
 
     def check(user: AppUser) -> bool:
-        if not hold(signed, str(request.session.session_key)):
-            request.session.flush()
-            refused.append("signed-out")
+        unchanged = _changing(request, signed)
+        if unchanged is not None:
+            refused.append(unchanged)
             return True  # not a guess: the attempt is given back
-        if recent(request, FACTOR_CHANGE) is None:
-            refused.append("stepup-required")
-            return True
         secret = blob.open_factor_secret(sealed, factor, user.id, user.agency_id)
         if secret is None:
             refused.append("no-pending")
@@ -93,8 +145,7 @@ def confirm(request: HttpRequest, signed: Signed, candidate: str) -> uuid.UUID |
             sign_count=step,
         )
         request.session.pop(ADD_TOTP)
-        mark(signed.agency_id, signed.user_id, None)  # AUTH-07: every other session ends
-        reissue(request, signed)
+        _changed(request, signed)
         return True
 
     result = second_factor.counted(

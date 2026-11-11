@@ -161,8 +161,8 @@ SQL
 ```
 For a planned rotation, remove a version only when the report no longer lists it; users get the
 newest version by regenerating their codes. In an emergency (the key may have leaked) remove it at
-once: every code still under it is void, so tell those users to generate new ones at their next
-sign-in.
+once: every code still under it is void, so tell those users to make new ones: signed in, they step
+up with their authenticator and regenerate (`POST /api/auth/factors/recovery`, M3h).
 Step-up evidence (`auth_stepup.evidence_mac`, M3h) is a MAC under this key too, its first 4 bytes the
 version. Until M9 (approvals and the executor) and M16 (Drive operations) store step-up ids, a row
 counts only for `SKIW_STEPUP_MAX_AGE_MIN` minutes (at most 5), so removing a version voids at most the
@@ -416,9 +416,13 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   link, and the user sets a new password and starts the authenticator step again. Nothing is kept
   from the first try, so an old authenticator entry is not valid.
 - **Recovery codes are shown once**, in the answer to the first correct code. The operator cannot
-  see or resend them. A user who lost the codes but still has the authenticator can make new ones
-  once regenerating exists (M3h); the owner's reset (Flow 5.1, not built yet) is only for a user who
-  lost the authenticator too.
+  see or resend them. A user who lost the codes but still has the authenticator makes new ones
+  signed in: step up with an authenticator code, then regenerate (`POST /api/auth/factors/recovery`,
+  M3h). The ten new codes are shown once and every old one stops working; every other session of
+  the user ends, this one stays with a new cookie. A recovery code is never a step-up, so a user who
+  lost the authenticator cannot regenerate, add or remove anything: only the owner's reset helps
+  (Flow 5.1), which is **not built yet** (a must-have of M4-rest "Manage staff", before real data);
+  until then tell Ying.
 - **Too many wrong codes** (`SKIW_AUTH_FAILS_PER_ACCOUNT`, 5, in `SKIW_AUTH_WINDOW_MIN`, 15 minutes)
   stop all code checks for that user, at enrolment, at sign-in (`POST /api/auth/second-factor`) and
   at step-up (`POST /api/auth/stepup`, M3h) alike, until the window ends: one budget per user. A new invite link does not shorten that, so tell the user to wait up to 15 minutes.
@@ -445,15 +449,21 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   budget and lock for that email (5 per 15 minutes; 10 in a row write `account.locked`), so a
   session thief guessing here can lock the login for 30 minutes. A sign-in already past the
   password step when the change happens cannot finish (it answers "login expired"); so does any
-  change of the user's authenticators. A forgotten password is still the owner's reset (Flow 5.1,
+  change of the user's authenticators or recovery codes. A forgotten password is still the owner's reset (Flow 5.1,
   not built yet).
 - **Add an authenticator** (M3h): a signed-in user steps up with an authenticator code
   (`POST /api/auth/stepup`, purpose `factor.change`), then within `SKIW_STEPUP_MAX_AGE_MIN` (5)
   starts (`POST /api/auth/factors/totp`, shows a new secret once) and confirms it with its first
   code (`POST /api/auth/factors/totp/confirm`). Wrong codes count on the one code budget but not
   toward the ten-in-a-row lock (a lock already on still refuses). Every other session of the user ends; this one stays with a new cookie and
-  its 12-hour end. `GET /api/auth/factors` lists the user's authenticators and recovery codes
-  left. Removing one is not built yet (M3h-6).
+  its 12-hour end. `GET /api/auth/factors` lists the user's authenticators in use and recovery
+  codes left.
+- **Replace or remove an authenticator** (M3h): add the new one (above; the add re-issues the
+  session, so the step-up is gone), step up again with either authenticator, then remove the old
+  one by its id (`POST /api/auth/factors/totp/remove`). The last authenticator cannot be removed
+  (answer `last-factor`; TOTP is required). Every other session ends; this one stays with a new
+  cookie. A removed authenticator is kept as a retired row with its secret erased (step-up records
+  name it), so its codes are refused everywhere and it is no longer listed.
 - **Sign out** (`POST /api/auth/logout`): the server ends the session; a copied cookie, or the
   session row put back from a dump, stops working. An idle or revoked session is signed out
   already.

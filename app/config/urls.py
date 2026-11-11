@@ -5,10 +5,12 @@ from accounts.views import (
     factor_list,
     factor_totp_begin,
     factor_totp_confirm,
+    factor_totp_remove,
     login_password,
     login_second_factor,
     logout,
     password,
+    recovery_regenerate,
     stepup,
 )
 from config.routes import route
@@ -58,6 +60,20 @@ urlpatterns = [
         "api/auth/factors/totp/confirm",
         factor_totp_confirm,
         name="auth-factor-totp-confirm",
+        methods=("POST",),
+        auth="cookie",
+    ),
+    route(
+        "api/auth/factors/totp/remove",
+        factor_totp_remove,
+        name="auth-factor-totp-remove",
+        methods=("POST",),
+        auth="cookie",
+    ),
+    route(
+        "api/auth/factors/recovery",
+        recovery_regenerate,
+        name="auth-recovery-regenerate",
         methods=("POST",),
         auth="cookie",
     ),

@@ -8,6 +8,7 @@ import hashlib
 import os
 import uuid
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime
 from typing import Any
 
 import psycopg
@@ -24,6 +25,7 @@ pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 LOOKUP_BLOB_LENGTH = 60
 TOTP_SECRET_CT = 48  # accounts.0010: the sealed factor secret
 RECOVERY_SECRET_CT = 36  # accounts.0010: 4-byte key version, then the 32-byte HMAC-SHA-256
+RETIRED = datetime(2026, 11, 11, tzinfo=UTC)
 SECRET_CT = {"totp": TOTP_SECRET_CT, "recovery": RECOVERY_SECRET_CT}
 # A stored_key()-shaped value, derived so no high-entropy literal sits in the source.
 KEY_HASH = hashlib.sha256(b"session-revocation-test").hexdigest()
@@ -163,6 +165,37 @@ def test_a_totp_or_recovery_secret_has_exactly_its_length(
     user = add_user(cursor)
     refusal = refused_by(cursor, lambda c: add_factor(c, user, kind=kind, secret_ct=secret))
     assert refusal == f"user_factor_{kind}_secret_ct_length"
+
+
+@pytest.mark.parametrize("kind", ["passkey", "totp"])
+def test_a_retired_factor_holds_no_secret(cursor: CursorWrapper, kind: str) -> None:
+    """accounts.0014 (DECISIONS M3h-6): a retired TOTP is exempt from its length rule."""
+    add_factor(cursor, add_user(cursor), kind=kind, secret_ct=None, retired_at=RETIRED)
+
+
+@pytest.mark.parametrize(
+    ("columns", "constraint"),
+    [
+        ({"kind": "totp", "secret_ct": b"\0" * TOTP_SECRET_CT}, "user_factor_retired_no_secret"),
+        ({"kind": "passkey", "public_key": b"\0" * 77}, "user_factor_retired_no_secret"),
+        (
+            {"kind": "passkey", "lookup_blob_ct": b"\0" * LOOKUP_BLOB_LENGTH},
+            "user_factor_retired_no_secret",
+        ),
+        ({"kind": "recovery", "secret_ct": None}, "user_factor_recovery_secret_ct_length"),
+        (
+            {"kind": "recovery", "secret_ct": b"\0" * RECOVERY_SECRET_CT},
+            "user_factor_retired_no_secret",
+        ),
+    ],
+    ids=["totp-secret", "passkey-key", "passkey-lookup", "recovery-none", "recovery-mac"],
+)
+def test_a_retired_factor_with_secret_material_or_a_retired_recovery_code_is_refused(
+    cursor: CursorWrapper, columns: dict[str, object], constraint: str
+) -> None:
+    user = add_user(cursor)
+    refusal = refused_by(cursor, lambda c: add_factor(c, user, retired_at=RETIRED, **columns))
+    assert refusal == constraint
 
 
 @pytest.mark.parametrize(
