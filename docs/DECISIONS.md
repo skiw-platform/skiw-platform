@@ -1382,3 +1382,15 @@
 - **Scope / affects:** `accounts.auth.wrapper` (`_tenant_step`, `signed_in`; the wrapper's behaviour is unchanged), `accounts.views`, `config.urls`, `tests/csrf_fixtures.py`, `tests/test_route_registry.py`, the shell tests, one new live test file, the runbook, this log. No migration, setting or dependency.
 - **Versions:** none new. **Exception to a rule?** no.
 - **Decided by:** owner (the PR); builder (Opus deep-tier sub-agent: the shape of the answer and the read-only rule)
+
+## 2026-11-12 — M3i-1: sign-in and second-factor screens
+- **Decision:** the page asks `GET /api/auth/session` on load and shows one of: sign-in, code entry, an unfinished-enrolment notice (M3i-2 builds the real screen), or Today with a sign-out button. `web/src/api.ts` is the only code that calls the server; it keeps the CSRF token from `<meta name="csrf-token">` and replaces it from each answer's `csrf`. No router and no new dependency (`@testing-library/user-event` was tried and dropped; tests use `fireEvent`).
+- **First render is the loading state.** The static markup in `shell.html` is the loading screen, and a vitest test compares it with `renderToStaticMarkup(<App />)`, so hydration cannot drift. Focus stays where it is on first load; it moves to `main` only after the person acts.
+- **Errors:** one message for any wrong sign-in (AUTH-05), `limited` for 429, a network message for status 0; a wrong code clears the field and keeps the step; `login-expired` returns to sign-in with a notice. Messages sit in a polite live region linked with `aria-describedby` (A11Y-03). The password field is cleared and focused after a failure.
+- **Accepted deviations [A]:** (1) FE-32: signing in needs JavaScript, because the login routes answer JSON, not a redirect; without it the page is the loading state. A no-JS sign-in would need a server-rendered form flow, which the plan does not have. (2) Second-factor and signed-in screens are covered by vitest with a mocked `fetch`, not by a browser: a browser test needs a seeded user, which M3i-3 adds (plan M3i). The sign-in screen, its error state, `/enrol`, axe, keyboard, overflow and CSP are covered in Chromium at desktop and mobile widths. (3) One code field takes either an authenticator code or a recovery code, because the server accepts both on one route.
+- **Carried from PR 149 review P3 #1:** a live test posts to `/api/auth/login` with the `csrf` the session route returned and shows it passes the gate (a wrong value is refused).
+- **Alternatives rejected:** a router (nothing needs one yet); separate screens for recovery codes (the server has one route); a client-side state library.
+- **Scope / affects:** `web/src/{App,api,forms,content}`, `web/src/screens/*`, `styles.css`, `app/shell/templates/shell/shell.html`, e2e specs `auth.spec.ts` and `shell.spec.ts` (the old shell-content assertions became loading-state ones).
+- **Versions:** none.
+- **Exception to a rule?** FE-32, as above.
+- **Decided by:** builder; the owner approves by merging.

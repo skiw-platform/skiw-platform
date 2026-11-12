@@ -9,8 +9,8 @@
   {% for href in styles %}<link rel="stylesheet" href="{{ href }}">
   {% endfor %}</head>
 <body>
-  {# Static copy of the shell. React hydrates it when JavaScript runs; keep the markup byte-equal to web/src/App.tsx output: React hydrates it, and whitespace between tags is a hydration mismatch. #}
-  <div id="root"><div class="app"><a class="skip-link" href="#main">Skip to content</a><header class="topbar"><p class="brand">SKIW</p></header><nav class="sidebar" aria-label="Primary"><ul><li><a href="/" aria-current="page">Today</a></li></ul></nav><main id="main" tabindex="-1"><h1>Today</h1><section class="card" aria-labelledby="empty-title"><h2 id="empty-title">Nothing here yet</h2><p>Modules appear here as they are built.</p></section></main></div></div>
+  {# Static copy of the shell. React hydrates it when JavaScript runs; keep the markup byte-equal to web/src/App.tsx's first render (web/src/App.test.tsx checks it): React hydrates it, and whitespace between tags is a hydration mismatch. #}
+  <div id="root"><div class="app app--solo"><a class="skip-link" href="#main">Skip to content</a><header class="topbar"><p class="brand">SKIW</p></header><main id="main" tabindex="-1"><h1>Loading</h1><p role="status">Checking your session</p></main></div></div>
   <script type="module" nonce="{{ nonce }}" src="{{ script }}"></script>
 </body>
 </html>

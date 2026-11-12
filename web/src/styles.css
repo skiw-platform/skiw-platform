@@ -11,6 +11,7 @@
   --color-accent: #ffb300;
   --color-accent-contrast: #001c30;
   --color-border: #d9e0e6;
+  --color-error: #9b1c1c;
   --color-focus: #001c30;
   --color-focus-on-primary: #ffb300;
   --space-1: 0.25rem;
@@ -161,5 +162,88 @@ h1 {
 
   .sidebar ul {
     flex-direction: column;
+  }
+}
+
+.app--solo {
+  grid-template-areas: "topbar" "main";
+  grid-template-rows: auto 1fr;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.form {
+  display: grid;
+  gap: var(--space-4);
+  max-inline-size: 26rem;
+}
+
+.field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.field label {
+  font-weight: 600;
+}
+
+.field-help {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+input {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-text-muted);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+input[aria-invalid="true"] {
+  border-width: 2px;
+  border-color: var(--color-error);
+}
+
+button {
+  padding: var(--space-3) var(--space-5);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+button.link {
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.message {
+  min-block-size: 1.5rem;
+  color: var(--color-error);
+  font-weight: 600;
+}
+
+@media (min-width: 48rem) {
+  .app--solo {
+    grid-template-areas: "topbar" "main";
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
   }
 }
