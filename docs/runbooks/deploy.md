@@ -127,11 +127,11 @@ Workflow `.github/workflows/ci.yml` ([ci.md](ci.md)). On a push to `main`, after
    config (same layers, with `org.opencontainers.image.source`);
 2. runs Trivy (HIGH/CRITICAL, as the `image` job) on that exact image; the push step first checks
    that the image ID is the one scanned;
-3. pushes `ghcr.io/skiw-platform/skiw-platform:<commit>` with the job's own token, reads the pushed
+3. pushes `ghcr.io/skiw-dev1/skiw-platform:<commit>` with the job's own token, reads the pushed
    digest (exactly one `sha256:` repo digest of that repository), writes it to the job summary and
    uploads the artifact **`image-digest`**: one file, `digest.txt`, holding exactly the digest
    (kept 30 days). When the owner has turned it on (below), the same job also builds, scans and
-   pushes the pre-migration dump image `ghcr.io/skiw-platform/skiw-predeploy:<commit>` and uploads
+   pushes the pre-migration dump image `ghcr.io/skiw-dev1/skiw-predeploy:<commit>` and uploads
    **`predeploy-digest`** the same way. A Trivy finding in either image fails the job, and nothing
    reaches staging.
 
@@ -156,7 +156,7 @@ Needs the staging host built (host-rebuild.md) with its `ghcr_read_token`, `SKIW
 2. **The staging deploy key** (T25). On the owner's machine, in an empty directory:
    ```
    ssh-keygen -q -t ed25519 -N '' -C staging-deploy -f ./staging-deploy
-   gh secret set STAGING_DEPLOY_KEY --repo skiw-platform/skiw-platform < ./staging-deploy
+   gh secret set STAGING_DEPLOY_KEY --repo skiw-dev1/skiw-platform < ./staging-deploy
    cat ./staging-deploy.pub
    rm ./staging-deploy ./staging-deploy.pub
    ```
@@ -176,31 +176,31 @@ Needs the staging host built (host-rebuild.md) with its `ghcr_read_token`, `SKIW
    staging console, never `ssh-keyscan`). `production.env` holds the same two values; a test fails
    if they differ.
 4. **Turn it on:** `gh variable set SKIW_STAGING_DEPLOY --body enabled --repo
-   skiw-platform/skiw-platform`. The next push to `main` deploys. Check it with
-   `gh run list --repo skiw-platform/skiw-platform --workflow ci --branch main --limit 1` and then
-   `gh run view <run id> --repo skiw-platform/skiw-platform --log | grep 'skiw-deploy:'`, which shows
+   skiw-dev1/skiw-platform`. The next push to `main` deploys. Check it with
+   `gh run list --repo skiw-dev1/skiw-platform --workflow ci --branch main --limit 1` and then
+   `gh run view <run id> --repo skiw-dev1/skiw-platform --log | grep 'skiw-deploy:'`, which shows
    the host's `... deployed; previous ...; staging checks passed` line.
 
-Turn it off: `gh variable delete SKIW_STAGING_DEPLOY --repo skiw-platform/skiw-platform`. Rotate the
+Turn it off: `gh variable delete SKIW_STAGING_DEPLOY --repo skiw-dev1/skiw-platform`. Rotate the
 key yearly and on suspicion: repeat step 2 and remove the old line from staging's `authorized_keys`.
 No production credential is ever a secret or a variable (Q42): `gh secret list --repo
-skiw-platform/skiw-platform` shows only `STAGING_DEPLOY_KEY`, and
-`gh api repos/skiw-platform/skiw-platform/environments` shows no environment secret.
+skiw-dev1/skiw-platform` shows only `STAGING_DEPLOY_KEY`, and
+`gh api repos/skiw-dev1/skiw-platform/environments` shows no environment secret.
 
 ### Publish the pre-migration dump image and set `SKIW_BACKUP_IMAGE` (owner)
 The image in `infra/host/backup/predeploy/` passes the Trivy gate (DECISIONS 2026-10-23, "Dump
 image passes the Trivy gate"); the `image` job scans it on every PR, so a new finding fails there
 first. Do these in order, once that fix is merged: first `SKIW_PUBLISH_PREDEPLOY`, then
 `SKIW_BACKUP_IMAGE` (no deploy runs while it is empty).
-1. `gh variable set SKIW_PUBLISH_PREDEPLOY --body enabled --repo skiw-platform/skiw-platform`.
+1. `gh variable set SKIW_PUBLISH_PREDEPLOY --body enabled --repo skiw-dev1/skiw-platform`.
 2. After the next green push to `main`, read the digest (replace `<run id>`):
    ```
    d=$(mktemp -d)
-   gh run download <run id> --repo skiw-platform/skiw-platform -n predeploy-digest -D "$d"
+   gh run download <run id> --repo skiw-dev1/skiw-platform -n predeploy-digest -D "$d"
    cat "$d/digest.txt"; echo; rm -r "$d"
    ```
-   The `publish` job summary shows the same `pushed ghcr.io/skiw-platform/skiw-predeploy@sha256:…`.
-3. In a PR, set `SKIW_BACKUP_IMAGE=ghcr.io/skiw-platform/skiw-predeploy@<that digest>` in
+   The `publish` job summary shows the same `pushed ghcr.io/skiw-dev1/skiw-predeploy@sha256:…`.
+3. In a PR, set `SKIW_BACKUP_IMAGE=ghcr.io/skiw-dev1/skiw-predeploy@<that digest>` in
    `infra/host/env/staging.env` and `production.env`, then install the env file on each host as
    usual. The hosts' `ghcr_read_token` must be able to read this package too (G10; a new package
    is private and is linked to the repository by its `org.opencontainers.image.source` label).
@@ -224,9 +224,9 @@ chmod 600 ~/.config/skiw/deploy-prod.env
 Read the host key on the production console (never with `ssh-keyscan`). The key file must be yours
 and not readable by group or others. Each deploy:
 1. Find the green `main` run of the digest that staging runs:
-   `gh run list --repo skiw-platform/skiw-platform --workflow ci --branch main --event push --status success --limit 5`.
+   `gh run list --repo skiw-dev1/skiw-platform --workflow ci --branch main --event push --status success --limit 5`.
    Its digest is in the `publish` job summary, or:
-   `d=$(mktemp -d); gh run download <run id> --repo skiw-platform/skiw-platform -n image-digest -D "$d"; cat "$d/digest.txt"; echo; rm -r "$d"`.
+   `d=$(mktemp -d); gh run download <run id> --repo skiw-dev1/skiw-platform -n image-digest -D "$d"; cat "$d/digest.txt"; echo; rm -r "$d"`.
    Check staging with the smoke test below.
 2. From the repository root: `scripts/deploy-prod <digest> <run id>` (`--config <file>` for another
    config file). It refuses (exit 2, nothing sent to production) unless `gh run view` shows that run

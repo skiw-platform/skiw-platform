@@ -1359,3 +1359,13 @@
 - **Versions:** none
 - **Exception to a rule?** no
 - **Decided by:** owner (the move); builder (the wording of the size rule, from the PR 143 review suggestion; the owner approves it by merging)
+
+## 2026-11-12 — Image paths follow the repo: `ghcr.io/skiw-dev1/...`
+- **Decision:** the app image is `ghcr.io/skiw-dev1/skiw-platform` and the dump image `ghcr.io/skiw-dev1/skiw-predeploy`; `scripts/deploy-prod` and the runbooks name the repository `skiw-dev1/skiw-platform`. Everything that named `ghcr.io/skiw-platform/...` or the `skiw-platform/skiw-platform` repository outside this log and the M1 plan was changed (found with `git grep`, not from the earlier list).
+- **Why:** the first `publish` run on the new organization (run 43142490809, `2c19338`) failed at the push with `denied: permission_denied: The requested installation does not exist.` The job's own `GITHUB_TOKEN` can write only its own repository's organization.
+- **Alternatives rejected:** keeping the old organization's packages (needs a second token with write access there, no benefit now that the repo moved).
+- **Scope / affects:** `.github/workflows/ci.yml` (`IMAGE`, `PREDEPLOY_IMAGE`), `infra/host/env/{ci,staging,production}.env`, `scripts/deploy-prod` (`REPO`, the provenance check), the deploy, ci and host-rebuild runbooks, host tests. The M1 plan keeps the old names (a record of what was built then).
+- **Owner steps after merge:** (1) the hosts' `ghcr_read_token` must read packages of `skiw-dev1`; (2) the first `publish` creates the packages private, linked to the repository; (3) nothing is deployed from these images yet (no VPS), so no host needs a change today.
+- **Versions:** none
+- **Exception to a rule?** no
+- **Decided by:** builder (follows the owner's move on 2026-11-11); the owner approves by merging
