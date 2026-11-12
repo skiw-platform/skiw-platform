@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -6,42 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import { content } from "./content";
-
-type Answer = { status: number; body: Record<string, unknown> };
-
-/** Answers fetch() from a queue, in order, and records what the page sent. */
-function server(...answers: Answer[]) {
-  const calls: { path: string; init: RequestInit }[] = [];
-  const queue = [...answers];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn((path: string, init: RequestInit) => {
-      calls.push({ path, init });
-      const next = queue.shift();
-      if (next === undefined) return Promise.reject(new TypeError("offline"));
-      return Promise.resolve(new Response(JSON.stringify(next.body), { status: next.status }));
-    }),
-  );
-  return calls;
-}
-
-/** The JSON body of a recorded request. */
-const sent = (call: { init: RequestInit } | undefined): unknown =>
-  JSON.parse(typeof call?.init.body === "string" ? call.init.body : "null");
-
-/** What a person does, as events: typing sets the field, a click presses the button. */
-const user = {
-  type: (field: HTMLElement, text: string) => {
-    fireEvent.change(field, { target: { value: text } });
-    return Promise.resolve();
-  },
-  click: (button: HTMLElement) => {
-    fireEvent.click(button);
-    return Promise.resolve();
-  },
-};
-
-const state = (name: string): Answer => ({ status: 200, body: { state: name, csrf: "t1" } });
+import { sent, server, state, user } from "./testkit";
 
 describe("first render", () => {
   it("equals the static markup in the shell template, so hydration has nothing to repair", () => {
@@ -177,16 +142,43 @@ describe("App", () => {
     expect(screen.getByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
   });
 
+  it("reads an unknown state, or any non-200 answer, as signed out", async () => {
+    server({ status: 200, body: { state: "admin", csrf: "t" } });
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+    cleanup();
+    server({ status: 403, body: { state: "signed_in", csrf: "t" } });
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+  });
+
+  it("does not take focus on first load, only after the person acts", async () => {
+    server(state("signed_out"));
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: content.signIn.title });
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("does not treat a 200 without next: signed_in as a sign-in", async () => {
+    server(state("second_factor"), { status: 200, body: { csrf: "t2" } });
+    render(<App />);
+    await user.type(await screen.findByLabelText(content.secondFactor.label), "123456");
+    await user.click(screen.getByRole("button", { name: content.secondFactor.submit }));
+    expect(await screen.findByText(content.errors.generic)).toBeTruthy();
+    expect(screen.queryByRole("navigation")).toBeNull();
+  });
+
+  it("shows sign-in, not an error, when sign-out finds the session already gone (idle)", async () => {
+    server(state("signed_in"), { status: 401, body: { error: "idle" } });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: content.signOut }));
+    expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+    expect(screen.queryByText(content.errors.generic)).toBeNull();
+  });
+
   it("treats a server that cannot be read as signed out, never as signed in", async () => {
     server({ status: 500, body: {} });
     render(<App />);
     await waitFor(() => { expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(content.signIn.title); });
-  });
-
-  it("does not offer a way in for an unfinished enrolment, only the way back", async () => {
-    server(state("enrol_factor"));
-    render(<App />);
-    expect(await screen.findByRole("heading", { level: 1, name: content.enrolPending.title })).toBeTruthy();
-    expect(screen.queryByLabelText(content.signIn.password)).toBeNull();
   });
 });

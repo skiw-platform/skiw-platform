@@ -91,10 +91,37 @@ test("the session route says signed out, and a reload keeps the sign-in form", a
   await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
 });
 
-test("/enrol serves the app too, without sending the fragment to the server", async ({ page }) => {
-  const requests: string[] = [];
-  page.on("request", (request) => requests.push(request.url()));
-  await page.goto("/enrol#some-token");
-  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  expect(requests.some((url) => url.includes("some-token"))).toBe(false);
+test("an invitation link shows the password form and takes the token out of the address bar", async ({
+  page,
+}) => {
+  const urls: string[] = [];
+  const bodies: string[] = [];
+  page.on("request", (request) => {
+    urls.push(request.url());
+    if (request.method() === "POST") bodies.push(request.postData() ?? "");
+  });
+  await page.goto("/enrol#bogus-token-123");
+  await expect(page.getByRole("heading", { level: 1, name: "Create your password" })).toBeVisible();
+  expect(new URL(page.url()).hash).toBe("");
+  expect(new URL(page.url()).pathname).toBe("/enrol");
+  const results = await new AxeBuilder({ page }).withTags(AA).analyze();
+  expect(results.violations).toEqual([]);
+  await page.getByLabel("New password").fill("a long enough password");
+  await page.getByRole("button", { name: "Continue" }).click();
+  const message = page.getByText(/That did not work/);
+  await expect(message).toBeVisible();
+  await expect(page.getByLabel("New password")).toHaveValue("");
+  await expect(page.getByLabel("New password")).toBeFocused();
+  expect(urls.some((url) => url.includes("bogus-token-123"))).toBe(false);
+  expect(bodies.some((body) => body.includes("bogus-token-123"))).toBe(true);
+  const again = await new AxeBuilder({ page }).withTags(AA).analyze();
+  expect(again.violations).toEqual([]);
+});
+
+test("/enrol without a token says the link is incomplete and goes to sign-in", async ({ page }) => {
+  await page.goto("/enrol");
+  await expect(page.getByRole("heading", { level: 1, name: "Invitation link" })).toBeVisible();
+  await page.getByRole("link", { name: "Go to sign in" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/");
 });

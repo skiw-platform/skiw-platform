@@ -1394,3 +1394,15 @@
 - **Versions:** none.
 - **Exception to a rule?** FE-32, as above.
 - **Decided by:** builder; the owner approves by merging.
+
+## 2026-11-12 — M3i-2: the invitation and enrolment screens
+- **Decision:** `/enrol#<token>` shows "Create your password"; the page reads the fragment once (`web/src/enrolLink.ts`), removes it from the address bar with `history.replaceState` (PR 149 review P3 #3), keeps the token in memory and sends it only in the body of `POST /api/auth/enrol`. A right password goes straight on to `POST /api/auth/enrol/totp`, shown as the setup key (in groups of four) plus an `otpauth://` link; a code confirms it (`/enrol/totp/confirm`); the answer's ten recovery codes are shown once on their own screen, with a copy button, until the person presses "I have saved my codes". The codes live only in that screen's props: no storage, no log (a vitest test checks `sessionStorage` and `localStorage`). On leaving the invitation (done, expired, "Go to sign in") the page moves the address to `/`.
+- **After a reload** in the middle of enrolment the session reads `enrol_factor` and the page offers "Show setup key" as a button, not automatically: asking replaces any earlier unconfirmed key, so a render-time call could race with itself under React StrictMode.
+- **No QR code.** Drawing one needs a library (a new dependency, FE-40, UNI-06) for a desktop-only convenience; the setup key and the `otpauth://` link work in every authenticator app. Revisit if staff ask.
+- **Password rule hint [A]:** the page hints "at least 12 characters" (`minLength` and help text) and, because the server answers every enrolment refusal the same way (AUTH-05), the failure message names both causes (short password, bad link). 12 is the default and the value in all three env files; `SKIW_PW_MIN_LENGTH` is configurable (12 to 64), so if it is raised the page's hint is a floor, never the rule: the server stays the authority.
+- **Also in this PR:** the PR 150 review's missing unit tests (an unknown `state`, a non-200 session answer, a 200 without `next: signed_in`, no focus move on first load, sign-out on an idle session), the sign-out busy state (`signOutBusy` was unused), and the shared test helpers moved to `web/src/testkit.ts`.
+- **Browser coverage:** Chromium covers the password step with a bogus token (fragment removed, token only in the POST body, never in a URL, axe clean, error state) and `/enrol` without a token. The setup and recovery-code screens need a seeded invitation: M3i-3.
+- **Alternatives rejected:** auto-calling `enrol/totp` on mount; storing the token in `sessionStorage` (it would outlive the page); a QR dependency.
+- **Scope / affects:** `web/src/{App,enrolLink,forms,content,testkit}`, `screens/{Enrol,Recovery,SecondFactor}`, `styles.css`, tests and `e2e/auth.spec.ts`. No server change.
+- **Versions:** none. **Exception to a rule?** no (FE-70 partial as above, deferred to M3i-3 by the PR 150 review).
+- **Decided by:** builder; the owner approves by merging.

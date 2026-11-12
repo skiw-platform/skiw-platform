@@ -2,10 +2,21 @@ import { useEffect, useRef, useState } from "react";
 
 import { post, sessionState, type SessionState } from "./api";
 import { content } from "./content";
+import { leaveEnrol, onEnrolPath, takeToken } from "./enrolLink";
+import { EnrolMissing, EnrolPassword, EnrolSetup, type Setup } from "./screens/Enrol";
+import { Recovery } from "./screens/Recovery";
 import { SecondFactor } from "./screens/SecondFactor";
 import { SignIn } from "./screens/SignIn";
 
-type View = { kind: "loading" } | { kind: SessionState; notice: string | null };
+type Shown = {
+  kind: SessionState | "recovery";
+  notice: string | null;
+  setup: Setup | null;
+  codes: string[];
+};
+type View = { kind: "loading" } | Shown;
+type Extra = { notice?: string; setup?: Setup; codes?: string[] };
+const NOTHING: Omit<Shown, "kind"> = { notice: null, setup: null, codes: [] };
 
 export function App() {
   const [view, setView] = useState<View>({ kind: "loading" });
@@ -16,7 +27,7 @@ export function App() {
   useEffect(() => {
     let live = true;
     void sessionState().then((kind) => {
-      if (live) setView({ kind, notice: null });
+      if (live) setView({ kind, ...NOTHING });
     });
     return () => {
       live = false;
@@ -28,18 +39,21 @@ export function App() {
     if (moves > 0) mainRef.current?.focus();
   }, [moves]);
 
-  function go(kind: SessionState, notice: string | null = null) {
-    setView({ kind, notice });
+  function go(kind: SessionState | "recovery", extra: Extra = {}) {
+    setView({ kind, ...NOTHING, ...extra });
     setMoves((count) => count + 1);
   }
 
   async function signOut() {
     setSignOutError(null);
+    setSigningOut(true);
     const { status } = await post("/api/auth/logout", {});
+    setSigningOut(false);
     if (status === 200 || status === 401) go("signed_out");
     else setSignOutError(status === 0 ? content.errors.network : content.errors.generic);
   }
 
+  const [signingOut, setSigningOut] = useState(false);
   const signedIn = view.kind === "signed_in";
   return (
     <div className={signedIn ? "app" : "app app--solo"}>
@@ -49,8 +63,8 @@ export function App() {
       <header className="topbar">
         <p className="brand">{content.product}</p>
         {signedIn ? (
-          <button type="button" className="link" onClick={() => void signOut()}>
-            {content.signOut}
+          <button type="button" className="link" disabled={signingOut} onClick={() => void signOut()}>
+            {signingOut ? content.signOutBusy : content.signOut}
           </button>
         ) : null}
       </header>
@@ -74,7 +88,13 @@ export function App() {
   );
 }
 
-function Screen({ view, go, signOutError }: { view: View; go: (kind: SessionState, notice?: string | null) => void; signOutError: string | null }) {
+type ScreenProps = {
+  view: Shown | { kind: "loading" };
+  go: (kind: SessionState | "recovery", extra?: Extra) => void;
+  signOutError: string | null;
+};
+
+function Screen({ view, go, signOutError }: ScreenProps) {
   switch (view.kind) {
     case "loading":
       return (
@@ -97,24 +117,27 @@ function Screen({ view, go, signOutError }: { view: View; go: (kind: SessionStat
         </>
       );
     case "second_factor":
-      return (
-        <SecondFactor onNext={go} />
-      );
+      return <SecondFactor onNext={go} />;
     case "enrol_factor":
+      return <EnrolSetup setup={view.setup} go={go} />;
+    case "recovery":
       return (
-        <>
-          <h1>{content.enrolPending.title}</h1>
-          <p>{content.enrolPending.body}</p>
-          <p>
-            <button type="button" className="link" onClick={() => { go("signed_out"); }}>
-              {content.enrolPending.back}
-            </button>
-          </p>
-        </>
+        <Recovery
+          codes={view.codes}
+          onDone={() => {
+            leaveEnrol();
+            go("signed_in");
+          }}
+        />
       );
     case "signed_out":
-      return (
-        <SignIn notice={view.notice} onNext={go} />
-      );
+      return <SignedOut notice={view.notice} go={go} />;
   }
+}
+
+/** `/enrol` shows the invitation screens; anywhere else a signed-out visitor signs in. */
+function SignedOut({ notice, go }: { notice: string | null; go: ScreenProps["go"] }) {
+  if (!onEnrolPath()) return <SignIn notice={notice} onNext={go} />;
+  const token = takeToken();
+  return token ? <EnrolPassword token={token} go={go} /> : <EnrolMissing go={go} />;
 }
