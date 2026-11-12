@@ -18,7 +18,7 @@ from accounts.auth.revoke import mark, revoke_user
 from accounts.session import SessionStore
 from accounts.user_model import AppUser
 from tenancy.binding import with_agency
-from tests.test_csrf_gate import CASES_URLCONF
+from tests.test_csrf_gate import CASES_URLCONF, ORIGIN
 
 from . import test_second_factor_live as sign_in
 from .conftest import COOKIE, Clock, assert_deleted, committed_user
@@ -197,3 +197,24 @@ def test_a_user_made_active_again_is_signed_in_again() -> None:
     assert state(cookie)[0] == "signed_out"
     set_status(user, "active")
     assert state(cookie)[0] == "signed_in"
+
+
+def test_the_token_in_the_answer_passes_the_csrf_gate() -> None:
+    """After a reload the HttpOnly cookie is all the page has besides this answer, so a wrong
+    value here would make every POST that follows a 403 (PR 149 review P3 #1)."""
+    browser = Client(enforce_csrf_checks=True)
+    token = json.loads(browser.get("/api/auth/session", secure=True).content)["csrf"]
+    headers = {"Origin": ORIGIN, "X-CSRFToken": token}
+    body = b'{"email": "nobody@example.com", "password": "x"}'
+    refused = browser.post(
+        "/api/auth/login",
+        body,
+        content_type="application/json",
+        secure=True,
+        headers={"Origin": ORIGIN, "X-CSRFToken": "wrong"},
+    )
+    assert (refused.status_code, refused.headers.get("X-Skiw-Csrf")) == (403, "rejected")
+    past = browser.post(
+        "/api/auth/login", body, content_type="application/json", secure=True, headers=headers
+    )
+    assert "X-Skiw-Csrf" not in past.headers and past.status_code == 401

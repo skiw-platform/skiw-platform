@@ -16,7 +16,8 @@ def test_shell_links_the_built_assets_from_the_manifest(dist: Path) -> None:
     assert '<div id="root">' in body
     assert body.count("<main") == 1
     assert body.count("<h1>") == 1
-    assert '<nav class="sidebar" aria-label="Primary">' in body
+    assert "<nav" not in body  # signed-out first render: loading state, no navigation
+    assert '<p role="status">Checking your session</p>' in body
     assert 'src="/assets/index-abc.js"' in body
     assert 'href="/assets/index-abc.css"' in body
     assert '<link rel="icon" href="/assets/icon-BOq3obf_.svg" type="image/svg+xml">' in body
