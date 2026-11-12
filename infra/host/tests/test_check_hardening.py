@@ -93,7 +93,7 @@ class Rig:
         self.put("etc/ssh/sshd_config.d/50-cloud-init.conf", "PasswordAuthentication yes\n")
         self.put(HBA, render_hba(CI_ENV), HBA_MODE)
         self.put(COMPOSE, "services: {}\n")
-        self.put(apply.STATE, f"SKIW_IMAGE=ghcr.io/skiw-platform/skiw-platform@sha256:{'3' * 64}\n")
+        self.put(apply.STATE, f"SKIW_IMAGE=ghcr.io/skiw-dev1/skiw-platform@sha256:{'3' * 64}\n")
         self.values = []  # generated per run; must never be printed
         for secret in INVENTORY:
             if "staging" not in secret.environments:  # env/ci.env is a staging host

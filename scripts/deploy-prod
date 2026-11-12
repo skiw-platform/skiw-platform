@@ -40,7 +40,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any  # parsed JSON only; every field is type-checked where it is read (UNI-01)
 
-REPO = "skiw-platform/skiw-platform"
+REPO = "skiw-dev1/skiw-platform"
 ARTIFACT = "image-digest"
 DIGEST_FILE = "digest.txt"
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")

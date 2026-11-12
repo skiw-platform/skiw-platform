@@ -323,6 +323,9 @@ the date, the host, which bundle was restored, each overridden key and its new v
 was lost, and that the new bundle was copied off the host.
 
 ### Placing `ghcr_read_token` (owner)
+The images live under the organization `skiw-dev1` (`ghcr.io/skiw-dev1/...`; DECISIONS 2026-11-11). The token
+must be able to read packages of that organization; a token issued for the old `skiw-platform` organization
+cannot pull them. A package pushed for the first time is private and linked to the repository.
 The owner issues the token (G10) and types it into the host; it is never in a file on the owner's
 machine, in shell history or in the repository:
 ```
@@ -584,7 +587,7 @@ production deploy runs.
 go to another customer, and the old disk may not be wiped (G-VENDOR item 5), so nothing that points
 at it or opens it may stay live.
 1. **Turn the staging deploy off:**
-   `gh variable delete SKIW_STAGING_DEPLOY --repo skiw-platform/skiw-platform`.
+   `gh variable delete SKIW_STAGING_DEPLOY --repo skiw-dev1/skiw-platform`.
 2. **DNS:** delete the staging site name (`SKIW_HOSTNAME` in `infra/host/env/staging.env`) and the
    staging SSH name (the host part of `SKIW_STAGING_SSH`), or point both away from the old IPv4.
    Otherwise whoever gets the address can obtain a certificate for the name and serve pages under the
@@ -594,7 +597,7 @@ at it or opens it may stay live.
    uses the same token, rotate production's too ("Placing `ghcr_read_token`" above).
 4. **Telegram:** revoke staging's bot token with BotFather (`/revoke`). Each environment has its
    own bot.
-5. **GitHub secret:** `gh secret delete STAGING_DEPLOY_KEY --repo skiw-platform/skiw-platform`.
+5. **GitHub secret:** `gh secret delete STAGING_DEPLOY_KEY --repo skiw-dev1/skiw-platform`.
 6. **UptimeRobot:** pause staging's monitor, or it alerts every 5 minutes until someone does.
 7. **Destroy the VPS** in the Hostinger panel (do not only let it expire) and note the date in
    `docs/DECISIONS.md`.
@@ -620,5 +623,5 @@ at it or opens it may stay live.
    channel"), and the UptimeRobot monitor: un-pause it and set its address, or add it
    (health-alerts.md "The uptime ping (UptimeRobot)").
 7. **Turn the staging deploy on:** `gh variable set SKIW_STAGING_DEPLOY --body enabled --repo
-   skiw-platform/skiw-platform` (deploy.md step 4), and check that the next staging deploy passes
+   skiw-dev1/skiw-platform` (deploy.md step 4), and check that the next staging deploy passes
    before any production deploy.

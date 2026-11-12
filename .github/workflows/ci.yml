@@ -159,8 +159,8 @@ jobs:
     outputs:
       digest: ${{ steps.push.outputs.digest }}
     env:
-      IMAGE: ghcr.io/skiw-platform/skiw-platform
-      PREDEPLOY_IMAGE: ghcr.io/skiw-platform/skiw-predeploy
+      IMAGE: ghcr.io/skiw-dev1/skiw-platform
+      PREDEPLOY_IMAGE: ghcr.io/skiw-dev1/skiw-predeploy
       # The pre-migration dump image is published only once the owner turns it on (deploy.md).
       PUBLISH_PREDEPLOY: ${{ vars.SKIW_PUBLISH_PREDEPLOY == 'enabled' }}
     steps:

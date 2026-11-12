@@ -54,7 +54,7 @@ if tool == "ssh":
     hang("ssh")
     print("skiw-deploy: deploy result line", file=sys.stderr)
     sys.exit(s.get("ssh_exit", 0))
-repo_ok = "--repo" in args and args[args.index("--repo") + 1] == "skiw-platform/skiw-platform"
+repo_ok = "--repo" in args and args[args.index("--repo") + 1] == "skiw-dev1/skiw-platform"
 if args[:2] == ["run", "view"]:
     hang("view")
     if "view_raw" in s:
@@ -177,7 +177,7 @@ def test_a_green_main_run_with_the_matching_artifact_deploys(
     gh = fakes.calls("gh")
     steps = [["run", "view"], ["api", "--hostname"], ["api", "--hostname"], ["run", "download"]]
     assert [c["args"][:2] for c in gh] == steps
-    assert gh[1]["args"][-1] == f"repos/skiw-platform/skiw-platform/compare/{HEAD}...main"
+    assert gh[1]["args"][-1] == f"repos/skiw-dev1/skiw-platform/compare/{HEAD}...main"
     pinned = {"GH_HOST": "github.com", "GH_PROMPT_DISABLED": "1", "GH_REPO": None}
     assert all(c["env"] == pinned for c in gh)
     (ssh,) = fakes.calls("ssh")
