@@ -10,10 +10,12 @@ type FieldProps = {
   help?: string;
   errorId?: string;
   inputRef?: Ref<HTMLInputElement>;
+  minLength?: number;
+  inputMode?: "numeric";
 };
 
 /** A labelled input. `errorId` names the message that describes it while one is showing (A11Y-03). */
-export function Field({ id, label, type, value, onChange, autoComplete, help, errorId, inputRef }: FieldProps) {
+export function Field({ id, label, type, value, onChange, autoComplete, help, errorId, inputRef, minLength, inputMode }: FieldProps) {
   const helpId = help ? `${id}-help` : undefined;
   const described = [helpId, errorId].filter(Boolean).join(" ") || undefined;
   return (
@@ -34,6 +36,8 @@ export function Field({ id, label, type, value, onChange, autoComplete, help, er
         autoCapitalize="none"
         spellCheck={false}
         required
+        minLength={minLength}
+        inputMode={inputMode}
         aria-invalid={errorId ? true : undefined}
         aria-describedby={described}
         onChange={(event: ChangeEvent<HTMLInputElement>) => { onChange(event.target.value); }}

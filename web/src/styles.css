@@ -247,3 +247,43 @@ button.link {
     grid-template-rows: auto 1fr;
   }
 }
+
+.secret {
+  display: inline-block;
+  max-inline-size: 100%;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 1.125rem;
+  letter-spacing: 0.05em;
+  overflow-wrap: anywhere;
+}
+
+.codes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  list-style: none;
+}
+
+.codes li {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 1.125rem;
+  text-align: center;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.note {
+  min-block-size: 1.5rem;
+  margin-block-start: var(--space-3);
+  color: var(--color-text-muted);
+}

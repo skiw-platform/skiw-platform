@@ -4,7 +4,7 @@ import { post, type SessionState } from "../api";
 import { content } from "../content";
 import { Field, Message } from "../forms";
 
-type Props = { onNext: (state: SessionState, notice?: string) => void };
+type Props = { onNext: (state: SessionState, extra?: { notice: string }) => void };
 
 export function SecondFactor({ onNext }: Props) {
   const [code, setCode] = useState("");
@@ -23,7 +23,7 @@ export function SecondFactor({ onNext }: Props) {
       return;
     }
     if (status === 401 && body["error"] === "login-expired") {
-      onNext("signed_out", content.errors.expired);
+      onNext("signed_out", { notice: content.errors.expired });
       return;
     }
     setCode("");
