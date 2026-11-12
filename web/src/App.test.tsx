@@ -176,6 +176,25 @@ describe("App", () => {
     expect(screen.queryByText(content.errors.generic)).toBeNull();
   });
 
+  it("disables the sign-out button and says so while the request runs", async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        calls += 1;
+        return calls === 1
+          ? Promise.resolve(new Response(JSON.stringify({ state: "signed_in", csrf: "t1" }), { status: 200 }))
+          : new Promise<Response>(() => undefined);
+      }),
+    );
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: content.signOut }));
+    const busy = await screen.findByRole("button", { name: content.signOutBusy });
+    expect((busy as HTMLButtonElement).disabled).toBe(true);
+    await user.click(busy);
+    expect(calls).toBe(2);
+  });
+
   it("treats a server that cannot be read as signed out, never as signed in", async () => {
     server({ status: 500, body: {} });
     render(<App />);
