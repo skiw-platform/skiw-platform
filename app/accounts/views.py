@@ -1,7 +1,8 @@
 """The accounts HTTP views (plan M3 §3 M3e). config.urls mounts them, the one config -> accounts
 edge the TEN-10 contract allows (owner Q10 (a)). The login steps run before there is a signed-in
 session, so they are reviewed PUBLIC_ROUTES entries (app/tests/test_route_registry.py), not
-authorized_action handlers; so is enrolment, which a user without a password reaches by link.
+authorized_action handlers; so is enrolment, which a user without a password reaches by link,
+and the session state route, which answers anyone.
 Step-up, logout, password change and the factor routes are signed in, so they are
 authorized_action handlers.
 Every answer is one of a few fixed bodies; a failure never says why (AUTH-05)."""
@@ -30,7 +31,8 @@ from accounts.auth.revoke import mark
 from accounts.auth.stepup import PURPOSES, StepUp
 from accounts.auth.stepup import verify as verify_stepup
 from accounts.auth.throttle import client_ip
-from accounts.auth.wrapper import InvalidInput, Signed, authorized_action, nothing
+from accounts.auth.wrapper import InvalidInput, Signed, authorized_action, nothing, signed_in
+from accounts.session import SessionStore
 from accounts.user_model import AppUser
 from tenancy.binding import with_agency
 
@@ -190,6 +192,27 @@ def login_second_factor(request: HttpRequest) -> HttpResponse:
         user = AppUser.objects.get(id=outcome.user_id)
     login(request, user, factor=outcome.factor)
     return _answer({"next": "signed_in", "csrf": get_token(request)}, 200)
+
+
+SESSION_PENDING = {False: "second_factor", True: "enrol_factor"}  # by Pending.enrol
+
+
+def session_state(request: HttpRequest) -> HttpResponse:
+    """GET /api/auth/session: which screen the page shows after a load (DECISIONS M3i-0).
+    `signed_in` is exactly the wrapper's checks; `second_factor` and `enrol_factor` are a live
+    pending state (`factors.pending`, which clears a stale one, as the routes that use it do);
+    anything else is `signed_out`, with one body and status whatever the reason (AUTH-05).
+    Apart from that clearing it writes nothing, counts nothing and leaves the idle clock alone.
+    Names no user."""
+    session = request.session
+    if not isinstance(session, SessionStore):
+        raise TypeError("the session route needs the accounts session store")
+    if signed_in(session):
+        state = "signed_in"
+    else:
+        pending = factors.pending(request)
+        state = "signed_out" if pending is None else SESSION_PENDING[pending.enrol]
+    return _answer({"state": state, "csrf": get_token(request)}, 200)
 
 
 def _stepup_body(body: Mapping[str, Any]) -> tuple[str, str]:

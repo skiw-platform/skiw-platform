@@ -21,6 +21,8 @@ FIXTURES: dict[str, Fixture] = {
     "readyz": Fixture(),
     "asset": Fixture(path_kwargs={"path": "index-abc.js"}),
     "shell": Fixture(),
+    "shell-enrol": Fixture(),
+    "auth-session": Fixture(),  # GET; signed out: 200 `signed_out`
     "auth-login": Fixture(answers=401),
     "auth-second-factor": Fixture(),  # no "code": 400
     "auth-enrol": Fixture(answers=401),

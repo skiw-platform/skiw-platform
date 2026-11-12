@@ -11,6 +11,7 @@ from accounts.views import (
     logout,
     password,
     recovery_regenerate,
+    session_state,
     stepup,
 )
 from config.routes import route
@@ -45,6 +46,7 @@ urlpatterns = [
         methods=("POST",),
         auth="cookie",
     ),
+    route("api/auth/session", session_state, name="auth-session", methods=("GET",), auth="cookie"),
     route("api/auth/stepup", stepup, name="auth-stepup", methods=("POST",), auth="cookie"),
     route("api/auth/logout", logout, name="auth-logout", methods=("POST",), auth="cookie"),
     route("api/auth/password", password, name="auth-password", methods=("POST",), auth="cookie"),
@@ -78,4 +80,5 @@ urlpatterns = [
         auth="cookie",
     ),
     route("", shell, name="shell", methods=("GET",), auth="cookie"),
+    route("enrol", shell, name="shell-enrol", methods=("GET",), auth="cookie"),  # invite links
 ]

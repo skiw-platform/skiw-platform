@@ -28,7 +28,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -84,6 +84,29 @@ def _signed(session: SessionStore) -> Signed | None:
         return None
 
 
+def _tenant_step(signed: Signed, key: str, now: datetime) -> Literal["live", "idle", "signed-out"]:
+    """Step 2's checks, inside the caller's with_agency(signed.agency_id); reads only. The
+    wrapper acts on a failure (marker, flush); `signed_in` only reports it."""
+    if now - signed.seen_at >= timedelta(minutes=settings.SKIW_SESSION_IDLE_MIN):
+        return "idle"
+    active = AppUser.objects.filter(id=signed.user_id, status="active").exists()
+    if not active or revoked(signed.user_id, key, signed.auth_at):
+        return "signed-out"
+    return "live"
+
+
+def signed_in(session: SessionStore) -> bool:
+    """Whether the wrapper would let this session past steps 1-3, for GET /api/auth/session
+    (DECISIONS M3i-0). The absolute deadline and the row's MAC are the store's (a row past either
+    loads empty). Changes nothing: no marker, no flush and no idle clock write, so a poll never
+    keeps a session alive; a refused session stays refused and the next wrapped call ends it."""
+    signed = _signed(session)
+    if signed is None or signed.factor not in KINDS:
+        return False
+    with with_agency(signed.agency_id):
+        return _tenant_step(signed, str(session.session_key), timezone.now()) == "live"
+
+
 def _body(request: HttpRequest) -> Mapping[str, Any]:
     if request.method in SAFE_METHODS:
         return {}
@@ -127,12 +150,12 @@ def authorized_action[T](
                 return _refused(401, "signed-out")
             now, key = timezone.now(), str(session.session_key)
             with with_agency(signed.agency_id):
-                if now - signed.seen_at >= timedelta(minutes=settings.SKIW_SESSION_IDLE_MIN):
+                state = _tenant_step(signed, key, now)
+                if state == "idle":
                     mark(signed.agency_id, signed.user_id, key)
                     session.flush()
                     return _refused(401, "idle")
-                active = AppUser.objects.filter(id=signed.user_id, status="active").exists()
-                if not active or revoked(signed.user_id, key, signed.auth_at):
+                if state == "signed-out":
                     session.flush()
                     return _refused(401, "signed-out")
                 if signed.factor not in KINDS:

@@ -27,6 +27,7 @@ def csp_nonce(response: HttpResponseBase) -> str:
     ("method", "path", "status"),
     [
         ("get", "/", 200),
+        ("get", "/enrol", 200),
         ("get", "/healthz", 200),
         ("get", "/assets/index-abc.js", 200),
         ("get", "/no-such-page", 404),
