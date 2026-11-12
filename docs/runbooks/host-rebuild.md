@@ -398,6 +398,7 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   (journald) as well as to your terminal, so the link would be kept in the journal. `exec` output
   reaches only your terminal.
 - It prints one line, `https://<SKIW_HOSTNAME>/enrol#<token>`, and on stderr how long it is valid.
+  `/enrol` serves the same app page as `/` (M3i-0); the page reads the token from the address.
   A refusal (not an email address, a user who has already enrolled, an email the agency cannot
   see) exits 1 and creates nothing.
 - **Two invites for the same new email at the same moment:** one makes the user and the other is
@@ -467,6 +468,9 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   (answer `last-factor`; TOTP is required). Every other session ends; this one stays with a new
   cookie. A removed authenticator is kept as a retired row with its secret erased (step-up records
   name it), so its codes are refused everywhere and it is no longer listed.
+- **Which screen a reload shows** (`GET /api/auth/session`, M3i-0): `signed_out`, `second_factor`,
+  `enrol_factor` or `signed_in`, by the same checks as every signed-in request. It never extends a
+  session: a page left open still signs out after 30 idle minutes.
 - **Sign out** (`POST /api/auth/logout`): the server ends the session; a copied cookie, or the
   session row put back from a dump, stops working. An idle or revoked session is signed out
   already.

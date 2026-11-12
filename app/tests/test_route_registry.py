@@ -27,6 +27,11 @@ PUBLIC_ROUTES: dict[str, str] = {
     "readyz": "readiness probe; binds the deployment agency itself and answers by status only",
     "asset": "hashed SPA build files, the same for every visitor",
     "shell": "the SPA page a signed-out visitor loads first; carries only the CSRF token",
+    "shell-enrol": "the same SPA page at the invite link's path; the token stays in the fragment,"
+    " which the browser never sends",
+    "auth-session": "says which screen to show (signed out, second factor, enrolment, signed in)"
+    " by the wrapper's own checks; one body for every signed-out case (AUTH-05), names no user,"
+    " writes nothing and does not move the idle clock",
     "auth-login": "the password step, before any session exists: uniform answers (AUTH-05) and the"
     " throttle (AUTH-06) stand in for a login; it leaves only a pending state, never a sign-in",
     "auth-second-factor": "the second factor of a sign-in, for a pending login session only (the"

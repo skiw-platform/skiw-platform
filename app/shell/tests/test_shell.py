@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,20 @@ def test_assets_cannot_escape_the_assets_folder(dist: Path, path: str) -> None:
     assert Client().get(path).status_code in {400, 404}
 
 
+def test_the_invite_path_serves_the_same_shell_and_headers(dist: Path) -> None:
+    """The invite link is /enrol#<token> (accounts_invite). A browser never sends the fragment,
+    and Referrer-Policy same-origin keeps even the path off other origins (DECISIONS M3i-0)."""
+    varying = re.compile(r'(nonce|content)="[\w-]{22,}"|nonce-[\w-]{22}')
+    home, enrol = Client().get("/"), Client().get("/enrol#token")
+    assert enrol.status_code == 200 and enrol.wsgi_request.get_full_path() == "/enrol"
+    assert {k: varying.sub("", v) for k, v in enrol.items()} == {
+        k: varying.sub("", v) for k, v in home.items()
+    }
+    assert varying.sub("", enrol.content.decode()) == varying.sub("", home.content.decode())
+    assert (enrol["Cache-Control"], enrol["Referrer-Policy"]) == ("no-store", "same-origin")
+
+
 def test_shell_and_assets_accept_get_only(dist: Path) -> None:
     assert Client().post("/").status_code == 405
+    assert Client().post("/enrol").status_code == 405
     assert Client().post("/assets/index-abc.js").status_code == 405
