@@ -24,6 +24,12 @@ export function leaveEnrol(): void {
   window.history.replaceState(window.history.state, "", "/");
 }
 
+/** The visitor is not signed out, so this invitation is not theirs to use: forget it and leave the page. */
+export function discardInvitation(): void {
+  taken = null;
+  if (onEnrolPath()) leaveEnrol();
+}
+
 /** For tests: the module remembers the token between renders on purpose. */
 export function forgetToken(): void {
   taken = undefined;

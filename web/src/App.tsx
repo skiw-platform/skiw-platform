@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { post, sessionState, type SessionState } from "./api";
 import { content } from "./content";
-import { leaveEnrol, onEnrolPath, takeToken } from "./enrolLink";
+import { discardInvitation, leaveEnrol, onEnrolPath, takeToken } from "./enrolLink";
 import { EnrolMissing, EnrolPassword, EnrolSetup, type Setup } from "./screens/Enrol";
 import { Recovery } from "./screens/Recovery";
 import { SecondFactor } from "./screens/SecondFactor";
@@ -26,7 +26,10 @@ export function App() {
 
   useEffect(() => {
     let live = true;
+    // The link's token leaves the address bar before anything else, whatever the session turns out to be.
+    if (onEnrolPath()) takeToken();
     void sessionState().then((kind) => {
+      if (kind !== "signed_out") discardInvitation();
       if (live) setView({ kind, ...NOTHING });
     });
     return () => {

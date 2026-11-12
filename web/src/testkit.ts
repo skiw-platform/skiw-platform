@@ -4,7 +4,6 @@ import { vi } from "vitest";
 export type Answer = { status: number; body: Record<string, unknown> };
 export type Call = { path: string; init: RequestInit };
 
-
 /** Answers fetch() from a queue, in order, and records what the page sent. */
 export function server(...answers: Answer[]) {
   const calls: Call[] = [];
@@ -38,4 +37,3 @@ export const user = {
 };
 
 export const state = (name: string): Answer => ({ status: 200, body: { state: name, csrf: "t1" } });
-

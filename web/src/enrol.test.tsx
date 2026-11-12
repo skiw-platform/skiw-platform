@@ -153,4 +153,54 @@ describe("enrolment", () => {
     await user.click(screen.getByRole("button", { name: content.setup.submit }));
     expect(await screen.findByText(content.setup.expired)).toBeTruthy();
   });
+
+  it.each(["signed_in", "second_factor", "enrol_factor"])(
+    "takes the token out of the address bar and drops the invitation when the session is %s",
+    async (name) => {
+      open("/enrol#tok-999");
+      server(state(name));
+      render(<App />);
+      await screen.findByRole("heading", { level: 1 });
+      await vi.waitFor(() => { expect(window.location.pathname).toBe("/"); });
+      expect(window.location.hash).toBe("");
+      expect(screen.queryByLabelText(content.enrol.password)).toBeNull();
+    },
+  );
+
+  it("does not show someone else's invitation after a signed-in person signs out", async () => {
+    open("/enrol#tok-999");
+    server(state("signed_in"), { status: 200, body: { csrf: "t3" } });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: content.signOut }));
+    expect(await screen.findByLabelText(content.signIn.email)).toBeTruthy();
+    expect(screen.queryByLabelText(content.enrol.password)).toBeNull();
+  });
+
+  it("takes the token out of the address bar before the session answer arrives", () => {
+    open("/enrol#tok-999");
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => undefined)));
+    render(<App />);
+    expect(window.location.hash).toBe("");
+    expect(window.location.pathname).toBe("/enrol");
+  });
+
+  it("does not take the fragment on other addresses", () => {
+    open("/#main");
+    server(state("signed_out"));
+    render(<App />);
+    expect(window.location.hash).toBe("#main");
+  });
+
+  it("says too many tries on a 429 at the confirm step, and keeps the page when the codes are missing", async () => {
+    open("/enrol#tok-123");
+    server(state("signed_out"), ENROLLED, SETUP, { status: 429, body: {} }, { status: 200, body: { csrf: "t4" } });
+    render(<App />);
+    await enterPassword("a long enough password");
+    await user.type(await screen.findByLabelText(content.setup.code), "000000");
+    await user.click(screen.getByRole("button", { name: content.setup.submit }));
+    expect(await screen.findByText(content.errors.limited)).toBeTruthy();
+    await user.type(screen.getByLabelText(content.setup.code), "111111");
+    await user.click(screen.getByRole("button", { name: content.setup.submit }));
+    expect(await screen.findByText(content.errors.generic)).toBeTruthy();
+  });
 });
