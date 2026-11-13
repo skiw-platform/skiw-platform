@@ -67,6 +67,7 @@ def test_anything_but_a_lowercase_hostname_is_refused(
         ("skiw.test", "https://skiw.test:443"),
         ("skiw.test", "https://SKIW.test"),
         ("skiw.test", "https://other.skiw.test"),
+        ("skiw.test", "http://localhost:8000"),  # the localhost exception needs RP ID localhost
         ("app.skiw.test", "https://skiw.test"),
         ("localhost", "http://localhost:65536"),
         ("localhost", "http://localhost:0"),
