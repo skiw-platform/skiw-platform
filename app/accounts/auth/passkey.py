@@ -51,6 +51,7 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
+from accounts.factor_model import CREDENTIAL_ID_MAX
 from accounts.session import SessionStore
 
 CHALLENGE = "_skiw_passkey_challenge"
@@ -62,7 +63,7 @@ ALGORITHMS = [
     COSEAlgorithmIdentifier.ECDSA_SHA_256,
     COSEAlgorithmIdentifier.RSASSA_PKCS1_v1_5_SHA_256,
 ]
-MAX_CREDENTIAL_ID = 1023  # WebAuthn credential id length bound
+MAX_CREDENTIAL_ID = CREDENTIAL_ID_MAX  # the bound user_factor_passkey_shape enforces too
 Purpose = Literal["register", "login", "stepup"]
 
 

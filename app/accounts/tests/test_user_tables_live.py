@@ -16,13 +16,14 @@ import pytest
 from django.db import IntegrityError, connection, transaction
 from django.db.backends.utils import CursorWrapper
 
-from accounts.factor_model import UserFactor
+from accounts.factor_model import SIGN_COUNT_MAX, UserFactor
 from accounts.user_model import LOGIN_BLOB_LENGTH
 from tenancy.binding import with_agency
 
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 
 LOOKUP_BLOB_LENGTH = 60
+BLOB = b"\0" * LOOKUP_BLOB_LENGTH
 TOTP_SECRET_CT = 48  # accounts.0010: the sealed factor secret
 RECOVERY_SECRET_CT = 36  # accounts.0010: 4-byte key version, then the 32-byte HMAC-SHA-256
 RETIRED = datetime(2026, 11, 11, tzinfo=UTC)
@@ -56,8 +57,16 @@ def add_user(cursor: CursorWrapper, email: str | None = None, **columns: Any) ->
     return row
 
 
+def passkey_columns() -> dict[str, Any]:
+    """The columns of a passkey in use (accounts.0015): a fresh credential id, a key, a blob."""
+    return {"credential_id": os.urandom(16), "public_key": b"\1" * 77, "lookup_blob_ct": BLOB}
+
+
 def add_factor(cursor: CursorWrapper, user: uuid.UUID, **columns: Any) -> None:
-    values: dict[str, Any] = {"id": uuid.uuid4(), "user_id": user, "kind": "passkey", **columns}
+    """A `kind` row (passkey by default; a passkey gets `passkey_columns()` under `columns`)."""
+    kind = columns.setdefault("kind", "passkey")
+    values: dict[str, Any] = {"id": uuid.uuid4(), "user_id": user}
+    values.update({**passkey_columns(), **columns} if kind == "passkey" else columns)
     cursor.execute(
         f"INSERT INTO user_factor (agency_id, {', '.join(values)})"  # noqa: S608 (as above)
         f" VALUES (guard.current_agency(), {', '.join(['%s'] * len(values))})",
@@ -170,18 +179,16 @@ def test_a_totp_or_recovery_secret_has_exactly_its_length(
 @pytest.mark.parametrize("kind", ["passkey", "totp"])
 def test_a_retired_factor_holds_no_secret(cursor: CursorWrapper, kind: str) -> None:
     """accounts.0014 (DECISIONS M3h-6): a retired TOTP is exempt from its length rule."""
-    add_factor(cursor, add_user(cursor), kind=kind, secret_ct=None, retired_at=RETIRED)
+    retired = {"secret_ct": None, "public_key": None, "lookup_blob_ct": None, "retired_at": RETIRED}
+    add_factor(cursor, add_user(cursor), kind=kind, **retired)
 
 
 @pytest.mark.parametrize(
     ("columns", "constraint"),
     [
         ({"kind": "totp", "secret_ct": b"\0" * TOTP_SECRET_CT}, "user_factor_retired_no_secret"),
-        ({"kind": "passkey", "public_key": b"\0" * 77}, "user_factor_retired_no_secret"),
-        (
-            {"kind": "passkey", "lookup_blob_ct": b"\0" * LOOKUP_BLOB_LENGTH},
-            "user_factor_retired_no_secret",
-        ),
+        ({"kind": "passkey", "lookup_blob_ct": None}, "user_factor_retired_no_secret"),
+        ({"kind": "passkey", "public_key": None}, "user_factor_retired_no_secret"),
         ({"kind": "recovery", "secret_ct": None}, "user_factor_recovery_secret_ct_length"),
         (
             {"kind": "recovery", "secret_ct": b"\0" * RECOVERY_SECRET_CT},
@@ -217,9 +224,74 @@ def test_a_factor_outside_the_column_rules_is_refused(
 
 def test_a_factor_takes_the_sealed_lookup_blob_and_counts_from_zero(cursor: CursorWrapper) -> None:
     user = add_user(cursor)
-    add_factor(cursor, user, kind="passkey", lookup_blob_ct=b"\0" * LOOKUP_BLOB_LENGTH)
-    cursor.execute("SELECT sign_count FROM user_factor WHERE user_id = %s", [user])
-    assert cursor.fetchall() == [(0,)]
+    add_factor(cursor, user, kind="passkey")
+    cursor.execute(
+        "SELECT sign_count, last_challenge_at FROM user_factor WHERE user_id = %s", [user]
+    )
+    assert cursor.fetchall() == [(0, None)]
+
+
+def test_a_passkey_at_the_bounds_is_accepted(cursor: CursorWrapper) -> None:
+    """accounts.0015: 1 and 1 023 byte credential ids (passkey.MAX_CREDENTIAL_ID), the largest
+    32-bit count, a challenge time; retired, a passkey keeps only its credential id."""
+    user = add_user(cursor)
+    add_factor(cursor, user, credential_id=os.urandom(1), sign_count=SIGN_COUNT_MAX)
+    add_factor(cursor, user, credential_id=os.urandom(1023), last_challenge_at=RETIRED)
+    add_factor(cursor, user, public_key=None, lookup_blob_ct=None, retired_at=RETIRED)
+
+
+@pytest.mark.parametrize(
+    ("columns", "constraint"),
+    [
+        ({"credential_id": None}, "user_factor_passkey_shape"),
+        ({"credential_id": b""}, "user_factor_passkey_shape"),
+        ({"credential_id": b"\1" * 1024}, "user_factor_passkey_shape"),
+        ({"secret_ct": b"\0" * TOTP_SECRET_CT}, "user_factor_passkey_shape"),
+        ({"sign_count": SIGN_COUNT_MAX + 1}, "user_factor_passkey_shape"),
+        ({"public_key": None}, "user_factor_passkey_in_use"),
+        ({"lookup_blob_ct": None}, "user_factor_passkey_in_use"),
+        (
+            {
+                "credential_id": None,
+                "retired_at": RETIRED,
+                "public_key": None,
+                "lookup_blob_ct": None,
+            },
+            "user_factor_passkey_shape",
+        ),
+    ],
+    ids=["no-id", "empty-id", "long-id", "secret", "count", "no-key", "no-blob", "retired-no-id"],
+)
+def test_a_passkey_outside_its_rules_is_refused(
+    cursor: CursorWrapper, columns: dict[str, object], constraint: str
+) -> None:
+    user = add_user(cursor)
+    assert refused_by(cursor, lambda c: add_factor(c, user, **columns)) == constraint
+
+
+@pytest.mark.parametrize("kind", ["totp", "recovery"])
+@pytest.mark.parametrize(
+    "column", ["credential_id", "public_key", "lookup_blob_ct", "last_challenge_at"]
+)
+def test_only_a_passkey_holds_passkey_columns(
+    cursor: CursorWrapper, kind: str, column: str
+) -> None:
+    value = RETIRED if column == "last_challenge_at" else passkey_columns()[column]
+    secret = b"\0" * SECRET_CT[kind]
+    user = add_user(cursor)
+    refusal = refused_by(
+        cursor, lambda c: add_factor(c, user, kind=kind, secret_ct=secret, **{column: value})
+    )
+    assert refusal == "user_factor_passkey_only_columns"
+
+
+def test_a_retired_passkeys_credential_id_cannot_come_back(cursor: CursorWrapper) -> None:
+    """The global key keeps a retired id: registering it again is refused (M3g-1c, PR 154 P3 #2)."""
+    user, credential = add_user(cursor), os.urandom(16)
+    retired = {"public_key": None, "lookup_blob_ct": None, "retired_at": RETIRED}
+    add_factor(cursor, user, credential_id=credential, **retired)
+    refusal = refused_by(cursor, lambda c: add_factor(c, user, credential_id=credential))
+    assert refusal == "user_factor_credential_id_key"
 
 
 def test_a_credential_id_belongs_to_one_factor(cursor: CursorWrapper) -> None:

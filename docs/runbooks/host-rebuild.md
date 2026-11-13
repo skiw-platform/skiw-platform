@@ -213,7 +213,8 @@ without printing a key (the message names the key and version). `skiw-deploy` th
   unknown email's decoy at once while real blobs stay the same, and anyone who compared lookups
   before and after could then tell the two apart. So remove the oldest `lookup_decoy_key` line only
   in the same deploy window as re-sealing every login blob (the re-seal job, not built yet); until
-  that job exists, do not remove it.
+  that job exists, do not remove it. From M3g-1b `guard.auth_lookup_credential` makes passkey
+  decoys the same way, so that re-seal must cover every passkey's `lookup_blob_ct` too.
   **Keep the two steps in separate deploys.** From M4c-4a `guard.current_agency()` reads
   `guard.tenant_mac_key` and refuses a retired version. If one deploy both adds the new line and
   removes the old one, `migrate` retires the old version before the switch, while the running

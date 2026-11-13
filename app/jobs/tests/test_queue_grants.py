@@ -265,11 +265,15 @@ def test_app_role_cannot_create_in_the_queue_schema() -> None:
     assert rows == [(False,)]
 
 
-# accounts.0009 (plan M3e-1b): the guard.auth_lookup_login owner reads exactly these two columns of
-# app_user (BYPASSRLS, before the tenant is known); every other column grant is refused.
+# accounts.0009 (plan M3e-1b) and 0015 (M3g-1b): the owner of the guard.auth_lookup_* functions
+# reads exactly these columns of app_user and user_factor (BYPASSRLS, before the tenant is known);
+# every other column grant is refused.
 COLUMN_GRANTS = {
     ("app_user", "email", LOOKUP_ROLE, "SELECT"),
     ("app_user", "login_blob_ct", LOOKUP_ROLE, "SELECT"),
+    ("user_factor", "credential_id", LOOKUP_ROLE, "SELECT"),
+    ("user_factor", "lookup_blob_ct", LOOKUP_ROLE, "SELECT"),
+    ("user_factor", "retired_at", LOOKUP_ROLE, "SELECT"),
 }
 
 
