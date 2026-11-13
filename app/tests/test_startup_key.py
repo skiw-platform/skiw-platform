@@ -34,7 +34,12 @@ def line(size: int = 32, version: int = 1) -> str:
     return f"v{version}:" + base64.b64encode(secrets.token_bytes(size)).decode()
 
 
-VALID = {"TENANT_SOURCE_KEY": line(), "LOGIN_BLOB_KEY": line(), "TENANT_TOKEN_KEY": line()}
+KEYS = {"TENANT_SOURCE_KEY": line(), "LOGIN_BLOB_KEY": line(), "TENANT_TOKEN_KEY": line()}
+RELYING_PARTY = {
+    "SKIW_WEBAUTHN_RP_ID": "localhost",
+    "SKIW_WEBAUTHN_ORIGIN": "http://localhost:8000",
+}
+VALID = {**KEYS, **RELYING_PARTY}
 
 
 def test_require_key_refuses_a_missing_key() -> None:
@@ -148,3 +153,21 @@ def test_asgi_refuses_a_bad_tenant_token_key_without_echoing_it(value: str | Non
     assert "TENANT_TOKEN_KEY" in result.stderr.splitlines()[-1]
     assert "cannot verify migrations" not in result.stderr
     assert value is None or value.rpartition(":")[2] not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("rp_id", "origin"),
+    [(None, None), ("127.0.0.1", None), ("skiw.test", "http://skiw.test")],
+    ids=["missing", "an-ip", "http-for-a-hostname"],
+)
+def test_asgi_refuses_a_bad_passkey_relying_party(rp_id: str | None, origin: str | None) -> None:
+    """Plan M3g: the RP ID and origin are checked before web serves."""
+    extra = {
+        name: value
+        for name, value in (("SKIW_WEBAUTHN_RP_ID", rp_id), ("SKIW_WEBAUTHN_ORIGIN", origin))
+        if value is not None
+    }
+    result = start("import config.asgi", **KEYS, **extra)
+    assert result.returncode != 0
+    assert "SKIW_WEBAUTHN_" in result.stderr.splitlines()[-1]
+    assert "cannot verify migrations" not in result.stderr

@@ -26,7 +26,8 @@ command `/etc/sudoers.d/skiw-deploy` allows (its arguments pinned by a regular e
   `/srv/skiw/compose.yml` with `/srv/skiw/caddy/`); `check-hardening` passes.
 - Host config in `/etc/skiw/host.env`: `SKIW_ENVIRONMENT` (`staging` or `production`, must equal the
   key role), `SKIW_IMAGE_REPOSITORY` (the one repository, `ghcr.io/<owner>/<name>`; the login user is
-  `<owner>`), `SKIW_HOSTNAME` (G9), `SKIW_DEPLOY_HEALTH_TIMEOUT_S` (60),
+  `<owner>`), `SKIW_HOSTNAME` (G9; also the passkey RP ID, so changing it later invalidates every passkey,
+  host-rebuild.md "The passkey relying party"), `SKIW_DEPLOY_HEALTH_TIMEOUT_S` (60),
   `SKIW_DEPLOY_DUMP_TIMEOUT_S` (1800: the bound on the whole pre-migration dump run).
 - `/etc/skiw/secrets/ghcr_read_token` placed (host-rebuild.md), root, 0400.
 - Production also: `SKIW_STAGING_SSH` (staging's DNS name and SSH port as `<name>:<port>`; a DNS

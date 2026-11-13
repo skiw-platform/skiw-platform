@@ -3,6 +3,7 @@ import binascii
 import os
 import re
 import uuid
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
 
@@ -27,6 +28,11 @@ MIN_KEY_BYTES = 32  # bootstrap-secrets mints 32 random bytes per key version (s
 # One canonical lowercase uuid: no list, braces, urn: prefix or upper case (PROJECT §9 gate).
 AGENCY_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 AGENCY_NAME_MAX = 200  # tenancy.Agency.name max_length
+# A lowercase DNS hostname (plan Q8 (a)): letters, digits and inner hyphens per label, no port,
+# scheme, trailing dot or IP literal (the last label must hold a letter).
+RP_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+RP_ID = re.compile(rf"(?:{RP_LABEL}\.)*(?=[a-z0-9-]*[a-z])" + RP_LABEL)
+LOCAL_ORIGIN = re.compile(r"https?://localhost(?::([1-9][0-9]{0,4}))?")
 
 
 def require(name: str) -> str:
@@ -177,3 +183,28 @@ def deployment_agency() -> tuple[uuid.UUID, str]:
             " with no leading or trailing space"
         )
     return uuid.UUID(raw), name
+
+
+@dataclass(frozen=True)
+class WebAuthnSettings:
+    rp_id: str
+    origin: str
+
+
+def webauthn() -> WebAuthnSettings:
+    """SKIW_WEBAUTHN_RP_ID and SKIW_WEBAUTHN_ORIGIN (plan M3g, Q8 (a)). The origin is checked
+    exactly. Unset, it is https://<rp id> (hosts set only the RP ID); set, it must be that, and
+    only an RP ID of localhost may use http or a port (local dev and e2e). The errors name the
+    variable, never the value."""
+    rp_id = os.environ.get("SKIW_WEBAUTHN_RP_ID", "")
+    if len(rp_id) > 253 or RP_ID.fullmatch(rp_id) is None:
+        raise ImproperlyConfigured("SKIW_WEBAUTHN_RP_ID must be a lowercase DNS hostname")
+    origin = os.environ.get("SKIW_WEBAUTHN_ORIGIN", f"https://{rp_id}")
+    local = LOCAL_ORIGIN.fullmatch(origin) if rp_id == "localhost" else None
+    port = local.group(1) if local else None
+    if origin != f"https://{rp_id}" and (local is None or (port and int(port) > 65_535)):
+        raise ImproperlyConfigured(
+            "SKIW_WEBAUTHN_ORIGIN must be https:// and SKIW_WEBAUTHN_RP_ID (http and a port only"
+            " for localhost)"
+        )
+    return WebAuthnSettings(rp_id, origin)

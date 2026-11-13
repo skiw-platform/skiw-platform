@@ -47,6 +47,8 @@ services:
       SKIW_PW_MIN_LENGTH: ${SKIW_PW_MIN_LENGTH:?set in .env}
       SKIW_DEPLOYMENT_AGENCY_ID: ${SKIW_DEPLOYMENT_AGENCY_ID:?set in .env}
       SKIW_DEPLOYMENT_AGENCY_NAME: ${SKIW_DEPLOYMENT_AGENCY_NAME:?set in .env}
+      SKIW_WEBAUTHN_RP_ID: ${SKIW_WEBAUTHN_RP_ID:?set in .env}
+      SKIW_WEBAUTHN_ORIGIN: ${SKIW_WEBAUTHN_ORIGIN:?set in .env}
       LOGIN_BLOB_KEY: ${LOGIN_BLOB_KEY:?set in .env}
       TENANT_TOKEN_KEY: ${TENANT_TOKEN_KEY:?set in .env}
     volumes:

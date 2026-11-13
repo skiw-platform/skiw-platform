@@ -383,6 +383,19 @@ uuid; the owner gave the staging and production names (2026-11-03).
   gives it back and its row is visible. A `tenant_token_key` that differs from the stored one, or a
   missing row, then fails the deploy health check and the deploy switches back.
 
+### The passkey relying party (M3g)
+`web` gets `SKIW_WEBAUTHN_RP_ID` from `SKIW_HOSTNAME` in `infra/host/compose.yml` (owner Q8 (a): the
+exact app hostname per environment); `SKIW_WEBAUTHN_ORIGIN` is left unset, so the app uses
+`https://<SKIW_HOSTNAME>`. There is nothing else to set: until the owner names the hostnames (G9),
+Compose refuses to render, as for Caddy. `web` checks both at start-up and exits ≠ 0 on a value that
+is not a lowercase hostname, so the deploy health check fails and the deploy switches back.
+- **Changing `SKIW_HOSTNAME` on a host where passkeys exist invalidates every one of them.** Each
+  credential is bound to the RP ID by the authenticator; the stored rows stay but can no longer
+  sign in. Users sign in with TOTP (always required) and add a passkey again. Decide the hostname
+  once (G9) before the first passkey is registered.
+- **After a restore** onto a host with another hostname, the restored passkeys do not work for the
+  same reason; TOTP and recovery codes do.
+
 ### Enrol a user (M3e-3)
 Until staff invites arrive with M4-rest ("Manage staff"), the operator invites each user of the
 deployment agency with `accounts_invite`, run inside the running `web` container (it connects as
