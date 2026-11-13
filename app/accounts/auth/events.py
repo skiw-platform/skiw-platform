@@ -10,7 +10,8 @@ from collections.abc import Mapping
 from django.db import connection
 from django.utils import timezone
 
-# login.lookup is written by guard.auth_lookup_login itself (accounts.0009), not from here.
+# login.lookup and passkey.lookup are written by guard.auth_lookup_login and
+# guard.auth_lookup_credential themselves (accounts.0009, 0015), not from here.
 KINDS = frozenset({"account.locked", "factor.locked", "login.failed"})
 DETAIL_NAME = re.compile(r"[a-z_]{1,32}", re.ASCII)
 

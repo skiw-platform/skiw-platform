@@ -213,18 +213,23 @@ def test_the_runbook_report_counts_users_per_signing_version(
 
 
 def test_only_recovery_rows_are_used_or_replaced(user: AppUser) -> None:
-    """Rows of another kind, even a passkey row holding a recovery MAC, are neither consumed by a
-    use nor deleted by a regeneration: both are scoped to kind `recovery`. (The CHECK on
-    `secret_ct`, accounts.0010, stops a TOTP row from holding one.)"""
+    """Rows of another kind are neither consumed by a use nor deleted by a regeneration: both are
+    scoped to kind `recovery`. (No other kind can hold a recovery MAC: the `secret_ct` rules of
+    accounts.0010 and 0015.)"""
     code = "ABCD-EFGH-JKMN-PQRS"
-    mac = recovery.macs(user.id, recovery.normalise(code) or "")[0]
     with with_agency(user.agency_id), connection.cursor() as cursor:
-        for kind, secret in (("passkey", mac), ("totp", os.urandom(TOTP_SECRET_CT_LENGTH))):
-            cursor.execute(
-                "INSERT INTO user_factor (id, agency_id, user_id, kind, secret_ct)"
-                " VALUES (gen_random_uuid(), %s, %s, %s, %s)",
-                [user.agency_id, user.id, kind, secret],
-            )
+        cursor.execute(
+            "INSERT INTO user_factor (id, agency_id, user_id, kind, secret_ct) VALUES"
+            " (gen_random_uuid(), %s, %s, 'totp', %s)",
+            [user.agency_id, user.id, os.urandom(TOTP_SECRET_CT_LENGTH)],
+        )
+        # Retired, so the kept row holds no lookup blob: the tenancy reversal test's accounts.0008
+        # reverse puts back a 62-byte blob rule (as logins.unseal does for login blobs).
+        cursor.execute(
+            "INSERT INTO user_factor (id, agency_id, user_id, kind, credential_id, retired_at)"
+            " VALUES (gen_random_uuid(), %s, %s, 'passkey', %s, now())",
+            [user.agency_id, user.id, os.urandom(16)],
+        )
 
     def other_rows() -> int:
         with with_agency(user.agency_id):
