@@ -149,7 +149,7 @@ services:
 
   db:
     <<: *hardened
-    image: postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
+    image: postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
     user: "999:999"
     tmpfs: [/tmp, "/var/run/postgresql:uid=999,gid=999"]
     environment:
