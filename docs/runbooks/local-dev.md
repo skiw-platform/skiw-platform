@@ -4,6 +4,7 @@ Applies from M0a. Other runbooks: [README](README.md); deployment, rollback and 
 
 ## Prerequisites
 - `uv` (installs Python 3.12 from `.python-version`), Docker with Compose, GNU make.
+  Use the `uv` version CI and the `Dockerfile` pin (0.11.24; `brew install uv` may give a newer one). A newer `uv` rewrites the `uv.lock` header (`revision`), so a lockfile change you did not intend means the wrong `uv` ran.
 - Node 24.21.0 and pnpm 11 for the web shell. Use `fnm` (`fnm install` then `fnm use`; it reads `.node-version`). `make` refuses other Node majors (`make check-node`).
 - Once per clone: `make hooks` and `brew install gitleaks`. The pre-push hook then scans the commits you push for secrets and blocks the push if gitleaks is missing.
 - First end-to-end run only: `pnpm -C web exec playwright install chromium`.

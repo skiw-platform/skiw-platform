@@ -12,6 +12,7 @@ dependencies = [
     "procrastinate[django]==3.10.0",
     "cryptography==50.0.2",
     "argon2-cffi==25.1.0",
+    "webauthn==3.0.1",
 ]
 
 [dependency-groups]
@@ -84,6 +85,12 @@ name = "Only the DB boundary packages may import psycopg (TEN-10 prep)"
 type = "forbidden"
 source_modules = ["config", "health", "shell"]
 forbidden_modules = ["psycopg"]
+
+[[tool.importlinter.contracts]]
+name = "Only accounts may import py_webauthn, the passkey ceremonies (plan M3g)"
+type = "forbidden"
+source_modules = ["config", "health", "shell", "jobs", "documents", "tenancy"]
+forbidden_modules = ["webauthn"]
 
 [[tool.importlinter.contracts]]
 name = "Apps other than jobs do not import Procrastinate (spec D5)"
