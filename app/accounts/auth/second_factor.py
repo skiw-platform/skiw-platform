@@ -52,7 +52,7 @@ class Passed:
 
     user_id: uuid.UUID
     agency_id: uuid.UUID
-    factor: Literal["totp", "recovery"]
+    factor: Literal["totp", "recovery", "passkey"]  # passkey: accounts.auth.assertion (M3g-1d-1)
 
 
 def is_totp(candidate: str) -> bool:

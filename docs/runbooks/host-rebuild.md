@@ -443,10 +443,11 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   until then tell Ying.
 - **Too many wrong codes** (`SKIW_AUTH_FAILS_PER_ACCOUNT`, 5, in `SKIW_AUTH_WINDOW_MIN`, 15 minutes)
   stop all code checks for that user, at enrolment, at sign-in (`POST /api/auth/second-factor`) and
-  at step-up (`POST /api/auth/stepup`, M3h) alike, until the window ends: one budget per user. A new invite link does not shorten that, so tell the user to wait up to 15 minutes.
+  at step-up (`POST /api/auth/stepup`, M3h) alike, and a wrong passkey at sign-in (M3g-1d-1)
+  counts as a wrong code, until the window ends: one budget per user. A new invite link does not shorten that, so tell the user to wait up to 15 minutes.
 - **Ten wrong codes in a row** (`SKIW_AUTH_LOCK_AFTER`, across any number of windows, and not
   cleared by signing in with the password again) lock that user's second factor for
-  `SKIW_AUTH_LOCK_MIN` (30 minutes), TOTP and recovery codes alike, and the right code is refused
+  `SKIW_AUTH_LOCK_MIN` (30 minutes), TOTP, recovery codes and passkeys alike, and the right code is refused
   too until it ends. It is checked at sign-in and at step-up, wrong step-up codes count toward it
   (a signed-in session guessing at step-up can lock the user's sign-in), and a locked user gets the
   same `limited` answer as one who used up the budget. The lock writes a `factor.locked`
@@ -489,7 +490,16 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   `POST /api/auth/factors/passkey/remove` retires one by its id while an authenticator app stays.
   Each ends every other session of the user; this one stays with a new cookie. A removed passkey
   is kept as a retired row with its key erased, and its credential cannot be registered again (the
-  device makes a new one). Sign-in with a passkey is not built yet (M3g-1d).
+  device makes a new one).
+- **Sign in with a passkey** (M3g-1d-1): after the password, a user with a passkey in use can
+  answer the second step with it (`POST /api/auth/second-factor/passkey` gives the options,
+  `POST /api/auth/second-factor/passkey/confirm` checks the assertion) instead of a code; a user
+  with none gets `no-passkey` and uses the authenticator app. Step-up still takes an authenticator
+  code (a passkey step-up is M3g-1d-2). Every refusal is `passkey-wrong` and counts on the code
+  budget and lock above; a passkey never skips the password.
+  Each passkey answer is used once: a second sign-in with the same challenge is refused, and a
+  challenge started before one already used (another tab, say) is refused too, so the user just
+  tries again. Each assertion checked writes one `passkey.lookup` event (no detail).
 - **Which screen a reload shows** (`GET /api/auth/session`, M3i-0): `signed_out`, `second_factor`,
   `enrol_factor` or `signed_in`, by the same checks as every signed-in request. It never extends a
   session: a page left open still signs out after 30 idle minutes.
