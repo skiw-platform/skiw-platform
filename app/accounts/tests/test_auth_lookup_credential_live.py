@@ -8,6 +8,7 @@ key owner in a rolled-back transaction, the one committed passkey is deleted aft
 import hashlib
 import hmac
 import os
+import re
 import uuid
 from collections.abc import Iterator
 from importlib import import_module
@@ -103,21 +104,46 @@ def test_the_migration_literals_are_the_model_and_ceremony_bounds() -> None:
     assert migration.SIGN_COUNT_MAX == SIGN_COUNT_MAX == 2**32 - 1
 
 
+def lookup_columns(conn: psycopg.Connection[Any]) -> set[str]:
+    """The `user_factor` columns the lookup owner may SELECT."""
+    columns = conn.execute(
+        "SELECT a.attname FROM pg_attribute a WHERE a.attrelid = 'user_factor'::regclass"
+        " AND a.attnum > 0 AND NOT a.attisdropped"
+        " AND has_column_privilege(%s, 'user_factor'::regclass, a.attname, 'SELECT')",
+        (LOOKUP,),
+    ).fetchall()
+    return {name for (name,) in columns}
+
+
 def test_the_owner_reads_only_the_three_lookup_columns_of_user_factor() -> None:
     with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
-        columns = conn.execute(
-            "SELECT a.attname FROM pg_attribute a WHERE a.attrelid = 'user_factor'::regclass"
-            " AND a.attnum > 0 AND NOT a.attisdropped"
-            " AND has_column_privilege(%s, 'user_factor'::regclass, a.attname, 'SELECT')",
-            (LOOKUP,),
-        ).fetchall()
+        columns = lookup_columns(conn)
         table = conn.execute(
             "SELECT p FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']) p"
             " WHERE has_table_privilege(%s, 'user_factor', p)",
             (LOOKUP,),
         ).fetchall()
-    assert {name for (name,) in columns} == {"credential_id", "lookup_blob_ct", "retired_at"}
+    assert columns == {"credential_id", "lookup_blob_ct", "retired_at"}
     assert table == []
+
+
+@pytest.mark.parametrize(
+    ("function", "into"), [("auth_lookup_login", "found"), ("auth_lookup_credential", "stored")]
+)
+def test_the_decoy_is_built_before_the_lookup_outside_any_if(function: str, into: str) -> None:
+    """Known and unknown keys do the same work (PR 155 R1 P3 #1): the decoy's HMAC loop runs
+    before the row is read, at the top level of the body, never only for a miss."""
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        row = conn.execute(
+            "SELECT prosrc FROM pg_proc WHERE oid = to_regproc(%s)", (f"guard.{function}",)
+        ).fetchone()
+    assert row is not None
+    body: str = row[0]
+    loop, done = body.index("FOR block IN"), body.index("END LOOP")
+    assert loop < done < body.index(f"INTO {into}")
+    before = body[:loop]
+    assert len(re.findall(r"(?<!END )\bIF\b", before)) == before.count("END IF")
+    assert re.search(r"\bIF\b", body[loop:done]) is None
 
 
 def test_a_passkey_in_use_gives_its_blob_and_its_owner(cursor: CursorWrapper) -> None:
@@ -227,7 +253,8 @@ def test_accounts_0015_reverses_and_reapplies_with_the_challenge_time_kept(
         migrate("accounts", "0014")
         with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
             gone = conn.execute("SELECT to_regprocedure(%s)", (FUNCTION,)).fetchone()
-        assert gone == (None,)
+            held = lookup_columns(conn)
+        assert gone == (None,) and held == set()  # the column grant is revoked too
     finally:
         migrate()
     with with_agency(agency()), connection.cursor() as cursor:

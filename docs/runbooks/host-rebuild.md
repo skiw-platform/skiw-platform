@@ -482,6 +482,14 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   (answer `last-factor`; TOTP is required). Every other session ends; this one stays with a new
   cookie. A removed authenticator is kept as a retired row with its secret erased (step-up records
   name it), so its codes are refused everywhere and it is no longer listed.
+- **Add or remove a passkey** (M3g-1c; optional, it never replaces the authenticator app): after
+  the same `factor.change` step-up, `POST /api/auth/factors/passkey` gives the browser its
+  registration options and `POST /api/auth/factors/passkey/confirm` stores the new passkey; one
+  answer `passkey-refused` covers every failure, including a passkey already registered to anyone.
+  `POST /api/auth/factors/passkey/remove` retires one by its id while an authenticator app stays.
+  Each ends every other session of the user; this one stays with a new cookie. A removed passkey
+  is kept as a retired row with its key erased, and its credential cannot be registered again (the
+  device makes a new one). Sign-in with a passkey is not built yet (M3g-1d).
 - **Which screen a reload shows** (`GET /api/auth/session`, M3i-0): `signed_out`, `second_factor`,
   `enrol_factor` or `signed_in`, by the same checks as every signed-in request. It never extends a
   session: a page left open still signs out after 30 idle minutes.

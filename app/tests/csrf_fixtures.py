@@ -36,6 +36,9 @@ FIXTURES: dict[str, Fixture] = {
     "auth-factor-totp-confirm": Fixture(),  # an authorized_action; signed in, no "code": 400
     "auth-factor-totp-remove": Fixture(),  # an authorized_action; signed in, no "id": 400
     "auth-recovery-regenerate": Fixture(answers=403),  # an authorized_action; no step-up
+    "auth-factor-passkey": Fixture(answers=403),  # an authorized_action; signed in, no step-up
+    "auth-factor-passkey-confirm": Fixture(),  # an authorized_action; no "credential": 400
+    "auth-factor-passkey-remove": Fixture(),  # an authorized_action; signed in, no "id": 400
     "csrf-probe": Fixture(),  # test only: tests.csrf_urls
     "action-probe": Fixture(),  # test only: tests.csrf_urls, an authorized_action
     "stepup-probe": Fixture(answers=403),  # test only: signed in without a step-up
