@@ -19,8 +19,9 @@ from django.test import Client
 from django.utils import timezone
 
 from accounts import views
-from accounts.auth import blob, passkey
+from accounts.auth import assertion, blob, passkey
 from accounts.auth.login import FACTOR, SEEN_AT
+from accounts.auth.lookup import CredentialOwner, lookup_credential
 from accounts.auth.second_factor import attempt
 from accounts.factor_model import UserFactor
 from accounts.session import SessionStore
@@ -184,6 +185,35 @@ def test_a_zero_counter_signs_in_with_each_new_challenge_and_its_count_stays_zer
         browser = pending(user)
         assert finish(browser, authenticator.assertion(begun(browser)))[0] == 200
         assert stored(factor, user)[0] == 0
+
+
+def test_lookup_commits_before_a_fault_in_tenant_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user, _, authenticator, factor = passkey_user()
+    browser = pending(user)
+    credential = authenticator.assertion(begun(browser))
+    events = lookups()
+
+    def lookup(credential_id: bytes) -> CredentialOwner | None:
+        assert connection.get_autocommit() and not connection.in_atomic_block
+        assert factor_count(user.id) == 1  # reservation precedes discovery
+        return lookup_credential(credential_id)
+
+    def fault(*args: Any) -> None:
+        assert connection.in_atomic_block
+        UserFactor.objects.filter(id=factor).update(sign_count=99)
+        raise OSError("post-lookup fault")
+
+    monkeypatch.setattr(assertion, "lookup_credential", lookup)
+    monkeypatch.setattr(passkey, "verify_assertion", fault)
+    with pytest.raises(OSError, match="post-lookup fault"):
+        finish(browser, credential)
+    assert lookups() == events + 1
+    assert stored(factor, user) == (0, None)  # tenant write rolled back, event did not
+    assert factor_count(user.id) == 0 and lock_run(user.id) == 0
+    assert passkey.CHALLENGE not in session_of(browser)
+    assert probe(browser) == 401
 
 
 def stale_copy(browser: Client) -> SessionStore:

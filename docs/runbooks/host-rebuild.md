@@ -499,7 +499,9 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   budget and lock above; a passkey never skips the password.
   Each passkey answer is used once: a second sign-in with the same challenge is refused, and a
   challenge started before one already used (another tab, say) is refused too, so the user just
-  tries again. Each assertion checked writes one `passkey.lookup` event (no detail).
+  tries again. Credential discovery runs after the shared budget and lock check, before the
+  tenant transaction. Each lookup commits one `passkey.lookup` event (no detail), which remains
+  even if later verification fails with a server fault.
 - **Which screen a reload shows** (`GET /api/auth/session`, M3i-0): `signed_out`, `second_factor`,
   `enrol_factor` or `signed_in`, by the same checks as every signed-in request. It never extends a
   session: a page left open still signs out after 30 idle minutes.

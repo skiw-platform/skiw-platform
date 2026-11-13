@@ -11,9 +11,11 @@ before anything is looked up, so the lookup (and its `passkey.lookup` event) sit
 per-user budget and ten-in-a-row lock as TOTP and recovery codes, and a wrong assertion is a wrong
 code on that budget and run.
 
-`match`, inside counted's with_agency(): no challenge, an id outside 1..1023 bytes (checked before
-any lookup), an owner (`lookup.lookup_credential`) other than this user AND agency (an empty
-`allowCredentials` admits any discoverable credential, so this is the real guard), no passkey row
+`discover`, after reservation and outside with_agency(): no challenge, an id outside 1..1023
+bytes (checked before any lookup), or an owner (`lookup.lookup_credential`) other than this user
+AND agency are refused. The lookup event commits before tenant work, even if that work faults.
+An empty `allowCredentials` admits any discoverable credential, so this is the real guard.
+`match`, inside counted's with_agency(): no passkey row
 in use, or an assertion that does not verify, are all one refusal. A decoy, an unknown or retired
 id and a wrong key therefore count and answer alike. Then ONE conditional update sets `sign_count`
 and `last_challenge_at` only where the row is still in use, the stored count is below the new one
@@ -74,22 +76,42 @@ def finish_login(request: HttpRequest, credential: object) -> Passed | Failure:
     def check(user: AppUser) -> bool:
         return match(user, credential, challenge) is not None
 
-    result = second_factor.counted(request, state.user_id, state.agency_id, check, feeds_lock=True)
+    result = second_factor.counted(
+        request,
+        state.user_id,
+        state.agency_id,
+        check,
+        feeds_lock=True,
+        precheck=lambda: discover(state.user_id, state.agency_id, credential, challenge),
+    )
     if result != "ok":
         return result
     factors.clear_pending(request)
     return Passed(state.user_id, state.agency_id, "passkey")
 
 
+def discover(
+    user_id: uuid.UUID,
+    agency_id: uuid.UUID,
+    credential: object,
+    challenge: passkey.Challenge | None,
+) -> bool:
+    """Compare both sealed owner IDs outside a tenant transaction, after reservation."""
+    credential_id = passkey.asserted_id(credential)
+    return (
+        challenge is not None
+        and credential_id is not None
+        and lookup_credential(credential_id) == CredentialOwner(user_id, agency_id)
+    )
+
+
 def match(
     user: AppUser, credential: object, challenge: passkey.Challenge | None
 ) -> UserFactor | None:
     """The user's passkey that `credential` proves for `challenge`, its count and challenge time
-    now stored, or None; see the module docstring. Only `counted` checks may call it."""
+    now stored, or None. Call inside `counted`, after its `discover` precheck passed."""
     credential_id = passkey.asserted_id(credential)
     if challenge is None or credential_id is None:
-        return None
-    if lookup_credential(credential_id) != CredentialOwner(user.id, user.agency_id):
         return None
     in_use = UserFactor.objects.filter(kind="passkey", retired_at__isnull=True)
     row = in_use.filter(user_id=user.id, credential_id=credential_id).first()

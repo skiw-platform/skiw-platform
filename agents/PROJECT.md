@@ -63,7 +63,7 @@ Spec wins for *what we should build*. If two of these disagree, stop and ask Yin
 
 ## 4. Repository
 
-- **Remote:** https://github.com/skiw-dev1/skiw-platform (private) <!-- created 2026-10-05 under the owner's personal account `charliekhc`; moved to the organization `skiw-platform` on 2026-10-21 and to the organization `skiw-dev1` on 2026-11-11 because the old organization hit the GitHub Actions spending limit (docs/DECISIONS.md, 2026-11-11 repo move). The old app repo https://github.com/apiskiw/skiw-assistant is read-only reference only. -->
+- **Remote:** https://github.com/skiw-platform/skiw-platform <!-- returned from `skiw-dev1` on 2026-11-13 (owner; docs/DECISIONS.md, 2026-11-14 reconciliation). Owner policy: public while a PR is open; private after merge with no other open PR. Earlier moves remain in the decisions log. The old app repo https://github.com/apiskiw/skiw-assistant is read-only reference only. -->
 - **Default branch:** main <!-- local repo initialised on `main` 2026-10-05; GitHub default branch is set when the first push creates it (owner-approved baseline push) -->
 - **Merge policy:** Reviewer approves → Ying merges. The builder never merges. The reviewer never merges.
 - **Commit trailer:** `none`
