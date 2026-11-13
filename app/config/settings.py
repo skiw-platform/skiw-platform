@@ -72,6 +72,8 @@ SKIW_LOOKUP_DECOY_KEYS = partial(env.versioned_keys, "LOOKUP_DECOY_KEY", max_ver
 # The one deployment agency (plan M4c-5, Q2 (a)): `migrate` seeds it into `agency`, and /readyz
 # checks web can bind to it. Lazy, so settings still import where it is not set (tooling, tests).
 SKIW_DEPLOYMENT_AGENCY = env.deployment_agency
+# Passkey relying party (plan M3g, Q8 (a)); lazy like the agency, checked at web start-up.
+SKIW_WEBAUTHN = env.webauthn
 
 # Interim deployment-wide auth values until a spec change adds §8.1 rows (owner Q6 (a), plan M3b);
 # the step-up age moves into `setting` in M5. Values: T5 (Argon2id), Flow 5.1 and T18 (limits,

@@ -89,6 +89,9 @@ services:
     environment:
       <<: *app-env
       WEB_CONCURRENCY: ${SKIW_WEB_WORKERS:?}
+      # Passkey relying party (plan M3g, Q8 (a)): the app hostname, checked at web start-up; the
+      # origin is then the TLS origin on it. Changing SKIW_HOSTNAME invalidates every passkey.
+      SKIW_WEBAUTHN_RP_ID: ${SKIW_HOSTNAME:?SKIW_HOSTNAME is empty until the owner names it (G9)}
     secrets: *app-secrets
     volumes: [skiw-files:/srv/files]
     networks: [edge, app, egress]

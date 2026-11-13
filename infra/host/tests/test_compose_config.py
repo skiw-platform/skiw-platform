@@ -506,3 +506,17 @@ def test_memory_cap_parse_refuses_other_forms(value: str) -> None:
 def test_skiw_health_watches_every_service_that_always_runs(config: Config) -> None:
     always = sorted(n for n, s in services(config) if not s.get("profiles"))
     assert always == sorted(health.SERVICES) and config["name"] == health.PROJECT  # plan §3 M1j
+
+
+def test_only_web_gets_the_passkey_relying_party_from_the_hostname(config: Config) -> None:
+    """Plan M3g, owner Q8 (a): the RP ID is the app hostname (G9 names it; no other value is
+    written anywhere); SKIW_WEBAUTHN_ORIGIN is left unset, so the app takes the TLS origin on it
+    (UNI-19 keeps URLs out of this file). Worker and migrate never run a ceremony."""
+    hostname = declared("ci.env")["SKIW_HOSTNAME"]
+    holders = {
+        name: {k: v for k, v in (service.get("environment") or {}).items() if "WEBAUTHN" in k}
+        for name, service in services(config)
+    }
+    assert {name: env for name, env in holders.items() if env} == {
+        "web": {"SKIW_WEBAUTHN_RP_ID": hostname}
+    }

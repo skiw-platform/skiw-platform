@@ -105,3 +105,22 @@ def test_each_local_app_key_is_generated_never_committed(key: str) -> None:
     assert not re.search(rf"(?m)^{key}", (REPO / ".env.example").read_text())
     rule = block((REPO / "Makefile").read_text(), r"\.env:", r"\S")
     assert f"printf '{key}=v1:%s\\n' \"$$(openssl rand -base64 32)\" >> .env" in rule
+
+
+def test_local_web_takes_the_passkey_relying_party_from_the_env_file() -> None:
+    """Plan M3g: web checks both at start-up; the worker never runs a ceremony. Hosts derive them
+    from SKIW_HOSTNAME (infra/host/tests/test_compose_config.py)."""
+    names = ("SKIW_WEBAUTHN_RP_ID", "SKIW_WEBAUTHN_ORIGIN")
+    example = dict(
+        re.findall(r"(?m)^(SKIW_WEBAUTHN_[A-Z_]+)=(.*)$", (REPO / ".env.example").read_text())
+    )
+    assert example == {
+        "SKIW_WEBAUTHN_RP_ID": "localhost",
+        "SKIW_WEBAUTHN_ORIGIN": "http://localhost:8000",
+    }
+    compose = (REPO / "docker-compose.yml").read_text()
+    for name in names:
+        assert f"      {name}: ${{{name}:?set in .env}}\n" in block(
+            compose, "  app:", r"  [a-z]+:|volumes:"
+        )
+        assert name not in block(compose, "  worker:", r"  [a-z]+:|volumes:")
