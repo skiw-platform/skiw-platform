@@ -55,6 +55,14 @@ export const content = {
     copyFailed: "Could not copy. Select the codes and copy them yourself.",
     done: "I have saved my codes",
   },
+  stepUp: {
+    title: "Confirm it is you",
+    intro: "Enter the six-digit code from your authenticator app to continue.",
+    label: "Code from the app",
+    submit: "Confirm",
+    busy: "Checking",
+    cancel: "Cancel",
+  },
   signOut: "Sign out",
   signOutBusy: "Signing out",
   errors: {
