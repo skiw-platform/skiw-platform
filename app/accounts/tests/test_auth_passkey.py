@@ -6,6 +6,7 @@ test_passkey_challenge_live.py."""
 import uuid
 from typing import Any
 
+import cbor2
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 from django.http import HttpRequest
@@ -175,6 +176,21 @@ def test_an_authenticator_without_a_counter_keeps_sending_zero() -> None:
 def test_a_malformed_registration_is_refused_without_raising(mangle: Any) -> None:
     ch = challenge()
     assert passkey.verify_registration(mangle(SoftAuthenticator().register(ch.value)), ch) is None
+
+
+@pytest.mark.parametrize(
+    "cose",
+    [
+        cbor2.dumps({1: 2, 3: -7, -1: 1}),  # EC2 with no x or y: the library raises KeyError
+        cbor2.dumps({1: 2, 3: -35, -1: 2, -2: bytes(48), -3: bytes(48)}),  # ES384, not pinned
+        cbor2.dumps([1, 2]),
+        cbor2.dumps(7),
+    ],
+)
+def test_a_registration_with_a_bad_public_key_is_refused_without_raising(cose: bytes) -> None:
+    ch = challenge()
+    credential = SoftAuthenticator().register(ch.value, cose=cose)
+    assert passkey.verify_registration(credential, ch) is None
 
 
 @pytest.mark.parametrize(

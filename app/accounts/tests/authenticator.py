@@ -63,11 +63,12 @@ class SoftAuthenticator:
         origin: str = ORIGIN,
         rp_id: str = RP_ID,
         sent_id: bytes | None = None,
+        cose: bytes | None = None,
     ) -> dict[str, Any]:
-        """The PublicKeyCredential JSON of navigator.credentials.create()."""
-        attested = (
-            bytes(16) + len(self.credential_id).to_bytes(2, "big") + self.credential_id
-        ) + self.cose_key()
+        """navigator.credentials.create() as JSON; `cose` replaces the public key."""
+        attested = (bytes(16) + len(self.credential_id).to_bytes(2, "big") + self.credential_id) + (
+            cose if cose is not None else self.cose_key()
+        )
         flags = UP | AT | (UV if uv else 0)
         auth_data = (
             hashlib.sha256(rp_id.encode()).digest()

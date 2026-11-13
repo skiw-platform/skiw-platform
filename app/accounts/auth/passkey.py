@@ -43,7 +43,6 @@ from webauthn import (
 )
 from webauthn.helpers import options_to_json_dict
 from webauthn.helpers.cose import COSEAlgorithmIdentifier
-from webauthn.helpers.exceptions import WebAuthnException
 from webauthn.helpers.structs import (
     AttestationConveyancePreference,
     AuthenticatorSelectionCriteria,
@@ -218,7 +217,7 @@ def verify_registration(credential: object, challenge: Challenge) -> Registered 
             require_user_verification=True,
             supported_pub_key_algs=ALGORITHMS,
         )
-    except WebAuthnException:  # py_webauthn 3.0.1 wraps every parse and check failure in one
+    except Exception:  # untrusted input; py_webauthn also raises KeyError
         return None
     if verified.credential_id != sent_id:
         return None
@@ -248,6 +247,6 @@ def verify_assertion(
             credential_current_sign_count=sign_count,
             require_user_verification=True,
         )
-    except WebAuthnException:  # py_webauthn 3.0.1 wraps every parse and check failure in one
+    except Exception:  # untrusted input; py_webauthn also raises KeyError
         return None
     return verified.new_sign_count

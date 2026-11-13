@@ -11,6 +11,7 @@ from django.conf import settings
 from django.db import connection, transaction
 from django.http import HttpRequest
 from django.test import RequestFactory
+from django.utils import timezone
 
 from accounts.auth import passkey
 from accounts.session import SessionStore
@@ -54,6 +55,8 @@ def test_a_challenge_is_taken_once(purpose: passkey.Purpose) -> None:
     request = on(key)
     taken = passkey.take_challenge(request, purpose, USER)
     assert taken is not None and taken.value == value
+    # 1d keys its replay guard on the issue time, so it must be the time of issue, not the deadline
+    assert timezone.now() - timedelta(minutes=1) < taken.issued_at <= timezone.now()
     assert passkey.CHALLENGE not in request.session
     assert passkey.take_challenge(on(key), purpose, USER) is None
 
