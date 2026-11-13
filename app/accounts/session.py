@@ -20,6 +20,7 @@ from typing import Any
 from django.conf import settings
 from django.contrib.sessions.backends import db
 from django.contrib.sessions.backends.base import VALID_KEY_CHARS
+from django.db import transaction
 from django.utils import timezone
 
 from accounts import source_key
@@ -194,3 +195,35 @@ class SessionStore(db.SessionStore):
         key = self.session_key if session_key is None else session_key
         if key is not None and self._validate_session_key(key):
             await Session.objects.filter(session_key=stored_key(key)).adelete()
+
+    # Single-use values (plan M3g: a passkey challenge).
+
+    def take(self, name: str) -> Any:
+        """Remove `name` from the stored row and return the stored value, or None. The row is
+        locked, read and written back in its own transaction, so of two parallel requests on one
+        session only one gets the value; it never runs inside another transaction, so the removal
+        commits whatever the caller does next. The value in memory is dropped too and never used:
+        it may be older than the row."""
+        if transaction.get_connection().in_atomic_block:
+            raise RuntimeError("take() commits on its own; call it outside a transaction")
+        self.pop(name, None)
+        if self.session_key is None:
+            return None
+        with transaction.atomic():
+            row = (
+                Session.objects.select_for_update()
+                .filter(session_key=stored_key(self.session_key), expire_date__gt=timezone.now())
+                .first()
+            )
+            if row is None:
+                return None
+            blob = source_key.unseal(row.session_key, row.expire_date, row.session_data)
+            if blob is None:
+                return None
+            data = self.decode(blob)
+            if name not in data:
+                return None
+            value = data.pop(name)
+            row.session_data = source_key.seal(row.session_key, row.expire_date, self.encode(data))
+            row.save(update_fields=["session_data"])
+        return value
