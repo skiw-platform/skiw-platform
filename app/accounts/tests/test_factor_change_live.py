@@ -169,7 +169,7 @@ def test_the_list_shows_only_the_users_own_totps_and_recovery_count() -> None:
     assert neighbour.agency_id == user.agency_id
     [own] = totps(user)
     cookie = signed_in(user, factor="totp")
-    listed = {"totp": [{"id": str(own.id)}], "recovery_left": len(codes)}
+    listed = {"totp": [{"id": str(own.id)}], "passkey": [], "recovery_left": len(codes)}
     assert answer(client(cookie).get("/api/auth/factors")) == (200, listed)
     with with_agency(user.agency_id):
         assert recovery.consume(user.id, codes[0])

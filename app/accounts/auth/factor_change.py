@@ -1,6 +1,7 @@
-"""A signed-in user's own factors (spec D7, AUTH-07, AUTH-09; plan M3 §3 M3h; owner decision
-2026-11-06 item 4; DECISIONS M3h-5, M3h-6): the list, adding and removing a TOTP and
-regenerating the recovery codes, each change behind a `factor.change` step-up of this session.
+"""A signed-in user's own factors (spec D7, AUTH-07, AUTH-09; plan M3 §3 M3h, M3g; owner decision
+2026-11-06 item 4; DECISIONS M3h-5, M3h-6, M3g-1c): the list, adding and removing a TOTP or a
+passkey and regenerating the recovery codes, each change behind a `factor.change` step-up of this
+session.
 
 Adding is two calls, as at enrolment, with a session key of its own (ADD_TOTP, never enrolment's
 `_skiw_pending_totp`), so the two flows cannot be mixed. `begin` needs a recent `factor.change`
@@ -15,20 +16,35 @@ dropped, a user-wide marker (AUTH-07: every other session ends) and `login.reiss
 A refusal inside the check (revoked, no step-up, a secret that does not open) is not a guess: the
 attempt is given back. No TOTP count cap [A].
 
-Removing a TOTP retires it: the row stays, so step-up evidence naming it still verifies (the FK is
-NO ACTION, DECISIONS M3h-1), with `retired_at` set and the secret cleared; every lookup skips a
-retired row. The user's last TOTP is never removed (spec D7: TOTP is required); replacing one is
-add, step up again, remove. Remove and regenerate run in the wrapper's with_agency() in the same
-order as every credential change. No secret or code is logged (UNI-09)."""
+Adding a passkey is two calls too: `begin_passkey` (step-up checked) issues the registration
+options, the user's passkeys in use excluded, with a `register` challenge for this user in the
+session; `confirm_passkey` takes it (outside any transaction: `SessionStore.take` refuses one),
+verifies the registration, then in one with_agency() transaction runs the same `hold`, `recent`,
+row, marker and `reissue` as a TOTP. The row holds the verified credential id, public key and
+count, and `lookup_blob_ct` sealed to the user and agency with the credential id as AAD, so
+`lookup.lookup_credential` resolves it. A failed take or verify and a credential id already
+registered (to anyone, in use or retired: the global unique key) are one refusal, `refused`, with
+nothing logged; nothing is counted, since the challenge is spent either way and a registration
+guesses nothing. A passkey is optional: it never replaces a TOTP or changes what sign-in asks.
+
+Removing a TOTP or a passkey retires it: the row stays, so step-up evidence naming it still
+verifies (the FK is NO ACTION, DECISIONS M3h-1), with `retired_at` set and the secret, public key
+and lookup blob cleared; every lookup skips a retired row. A retired passkey keeps its credential
+id, so that id cannot be registered again. The user's last TOTP is never removed (spec D7: TOTP is
+required), and a passkey never counts in its place: a passkey goes only while a TOTP stays.
+Replacing a TOTP is add, step up again, remove. Remove and regenerate run in the wrapper's
+with_agency() in the same order as every credential change. No secret or code is logged (UNI-09)."""
 
 import uuid
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
+from django.db import IntegrityError, transaction
+from django.db.models import QuerySet
 from django.db.models.functions import Now
 from django.http import HttpRequest
 
-from accounts.auth import blob, factors, recovery, second_factor, totp
+from accounts.auth import blob, factors, passkey, recovery, second_factor, totp
 from accounts.auth.login import reissue
 from accounts.auth.revoke import hold, mark
 from accounts.auth.stepup import FACTOR_CHANGE, recent
@@ -36,30 +52,41 @@ from accounts.auth.transactions import require_open
 from accounts.auth.wrapper import Signed
 from accounts.factor_model import UserFactor
 from accounts.user_model import AppUser
+from tenancy.binding import with_agency
 
 ADD_TOTP = "_skiw_add_totp"  # {"id": factor id, "ct": the sealed secret, base64}
 Refused = Literal["no-pending", "invalid", "stepup-required", "signed-out", "limited", "wrong_code"]
 Unchanged = Literal["stepup-required", "signed-out"]
+Kind = Literal["totp", "passkey"]
+CREDENTIAL_KEY = "user_factor_credential_id_key"  # spec §4.1 uq(credential_id), global
 
 
 @dataclass(frozen=True)
 class Listing:
     totp: list[uuid.UUID]
+    passkey: list[uuid.UUID]
     recovery_left: int
 
 
 def listing(signed: Signed) -> Listing:
-    """The session user's TOTP factor ids and unused recovery codes, in the wrapper's
-    with_agency(); no secret, nothing else about a factor."""
+    """The session user's TOTP and passkey factor ids and unused recovery codes, in the wrapper's
+    with_agency(); no secret, key or credential id, nothing else about a factor."""
     require_open("the factor list")
     own = UserFactor.objects.filter(user_id=signed.user_id)
-    return Listing(_totps(signed), own.filter(kind="recovery").count())
+    return Listing(_totps(signed), _passkeys(signed), own.filter(kind="recovery").count())
+
+
+def _in_use(signed: Signed, kind: Kind) -> QuerySet[UserFactor]:
+    """The session user's `kind` factors that are not retired."""
+    return UserFactor.objects.filter(user_id=signed.user_id, kind=kind, retired_at__isnull=True)
 
 
 def _totps(signed: Signed) -> list[uuid.UUID]:
-    """The session user's TOTP factors that are not retired."""
-    own = UserFactor.objects.filter(user_id=signed.user_id, kind="totp", retired_at__isnull=True)
-    return list(own.order_by("id").values_list("id", flat=True))
+    return list(_in_use(signed, "totp").order_by("id").values_list("id", flat=True))
+
+
+def _passkeys(signed: Signed) -> list[uuid.UUID]:
+    return list(_in_use(signed, "passkey").order_by("id").values_list("id", flat=True))
 
 
 def _changing(request: HttpRequest, signed: Signed) -> Unchanged | None:
@@ -77,19 +104,21 @@ def _changed(request: HttpRequest, signed: Signed) -> None:
 
 
 def remove(
-    request: HttpRequest, signed: Signed, factor: uuid.UUID
+    request: HttpRequest, signed: Signed, factor: uuid.UUID, kind: Kind = "totp"
 ) -> Literal["removed", "not-found", "last-factor"] | Unchanged:
-    """Retires `factor`, one of the session user's TOTP factors that is not retired, unless it is
-    the last one. "not-found": anything else (another user's, a recovery row, a retired one)."""
+    """Retires `factor`, one of the session user's `kind` factors that is not retired, unless no
+    TOTP would be left. "not-found": anything else (another user's, another kind, a retired one)."""
     refused = _changing(request, signed)
     if refused is not None:
         return refused
-    ids = _totps(signed)  # after the lock: a parallel remove has committed or waits
-    if factor not in ids:
+    totps = _totps(signed)  # after the lock: a parallel remove has committed or waits
+    if factor not in (totps if kind == "totp" else _passkeys(signed)):
         return "not-found"
-    if len(ids) <= 1:
+    if not set(totps) - {factor}:  # TOTP is required (spec D7); a passkey never stands in for it
         return "last-factor"
-    UserFactor.objects.filter(id=factor).update(retired_at=Now(), secret_ct=None)
+    UserFactor.objects.filter(id=factor).update(
+        retired_at=Now(), secret_ct=None, public_key=None, lookup_blob_ct=None
+    )
     _changed(request, signed)
     return "removed"
 
@@ -156,3 +185,64 @@ def confirm(request: HttpRequest, signed: Signed, candidate: str) -> uuid.UUID |
     if result != "ok":
         return result
     return refused[0] if refused else factor
+
+
+def begin_passkey(
+    request: HttpRequest, signed: Signed
+) -> dict[str, Any] | Literal["stepup-required"]:
+    """In the wrapper's with_agency(): registration options for a new passkey, the user's passkeys
+    in use excluded, and a `register` challenge in the session, replacing any other challenge."""
+    if recent(request, FACTOR_CHANGE) is None:
+        return "stepup-required"
+    user = AppUser.objects.get(id=signed.user_id)
+    own = _in_use(signed, "passkey").values_list("credential_id", flat=True)
+    return passkey.begin_registration(request, user.id, user.email, [bytes(c) for c in own if c])
+
+
+def confirm_passkey(
+    request: HttpRequest, signed: Signed, credential: dict[str, Any]
+) -> uuid.UUID | Literal["refused"] | Unchanged:
+    """The new passkey's factor id once `credential` verifies against this session's `register`
+    challenge for this user; outside any transaction. "refused": no such challenge (none, another
+    purpose or user, past its deadline, taken already), a registration that does not verify, or a
+    credential id registered before. The challenge is spent whatever the outcome."""
+    challenge = passkey.take_challenge(request, "register", signed.user_id)
+    registered = None if challenge is None else passkey.verify_registration(credential, challenge)
+    if registered is None:
+        return "refused"
+    with with_agency(signed.agency_id):
+        unchanged = _changing(request, signed)
+        if unchanged is not None:
+            return unchanged
+        factor = uuid.uuid4()
+        if not _stored(signed, factor, registered):
+            return "refused"
+        _changed(request, signed)
+    return factor
+
+
+def _stored(signed: Signed, factor: uuid.UUID, registered: passkey.Registered) -> bool:
+    """Inserts the passkey row; False when its credential id is registered already (the global
+    unique key, which also sees other agencies' and retired rows). The savepoint keeps the
+    transaction usable, and the clash, whose detail echoes the id, is neither logged nor told."""
+    user, agency, credential = signed.user_id, signed.agency_id, registered.credential_id
+    try:
+        with transaction.atomic():
+            UserFactor.objects.create(
+                id=factor,
+                agency_id=agency,
+                user_id=user,
+                kind="passkey",
+                credential_id=credential,
+                public_key=registered.public_key,
+                sign_count=registered.sign_count,
+                lookup_blob_ct=blob.seal_credential(user, agency, credential),
+            )
+    except IntegrityError as clash:
+        # psycopg's diagnostics, read without importing psycopg (the TEN-10 contract keeps config,
+        # which mounts these views, clear of it)
+        diag = getattr(clash.__cause__, "diag", None)
+        if getattr(diag, "constraint_name", None) != CREDENTIAL_KEY:
+            raise
+        return False
+    return True

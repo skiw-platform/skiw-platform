@@ -86,11 +86,14 @@ type = "forbidden"
 source_modules = ["config", "health", "shell"]
 forbidden_modules = ["psycopg"]
 
+# The one named edge again (config.urls mounts accounts.views, whose passkey routes reach
+# accounts.auth.passkey, M3g-1c); every other path from these packages to webauthn still fails.
 [[tool.importlinter.contracts]]
 name = "Only accounts may import py_webauthn, the passkey ceremonies (plan M3g)"
 type = "forbidden"
 source_modules = ["config", "health", "shell", "jobs", "documents", "tenancy"]
 forbidden_modules = ["webauthn"]
+ignore_imports = ["config.urls -> accounts.views"]
 
 [[tool.importlinter.contracts]]
 name = "Apps other than jobs do not import Procrastinate (spec D5)"

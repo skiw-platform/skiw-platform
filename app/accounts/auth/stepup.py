@@ -44,7 +44,7 @@ from accounts.user_model import AppUser
 
 LABEL = b"skiw-stepup-v1"  # apart from the session, recovery and throttle uses of the key
 VERSION_BYTES = RECOVERY_VERSION_BYTES  # the same 4-byte prefix as a recovery code's secret_ct
-FACTOR_CHANGE = "factor.change"  # add or remove a TOTP, regenerate recovery codes (M3h-5, M3h-6)
+FACTOR_CHANGE = "factor.change"  # add or remove a TOTP or a passkey, new recovery codes (M3h, M3g)
 # Closed list; a consumer adds its purpose when it is built (outbox.approve M9, drive.write M16).
 PURPOSES = frozenset({FACTOR_CHANGE})
 FACTOR_KINDS = frozenset({"totp"})  # spec D7: a passkey too, from M3g

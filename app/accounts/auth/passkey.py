@@ -1,5 +1,5 @@
 """Passkey ceremonies, the WebAuthn half of an optional second factor (spec D7; plan M3 §3 M3g,
-DECISIONS M3g-1). No route and no table yet: M3g-1c adds and removes passkeys with these, M3g-1d
+DECISIONS M3g-1). `accounts.auth.factor_change` registers passkeys with these (M3g-1c); M3g-1d
 signs in and steps up with them. A passkey is never required; TOTP stays every user's factor.
 
 Relying party: SKIW_WEBAUTHN (config.env.webauthn), the exact app hostname as RP ID (owner Q8

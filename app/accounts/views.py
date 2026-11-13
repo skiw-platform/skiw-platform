@@ -288,11 +288,13 @@ def password(request: HttpRequest, signed: Signed, data: tuple[str, str]) -> Htt
 
 @authorized_action(schema=nothing, permission="auth.factors")
 def factor_list(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
-    """GET /api/auth/factors: the signed-in user's own TOTP factor ids (M3i names the one to
-    retire) and how many recovery codes are left; no secret, no step-up [A] (DECISIONS M3h-5)."""
+    """GET /api/auth/factors: the signed-in user's own TOTP and passkey factor ids in use (M3i
+    names the one to retire) and how many recovery codes are left; no secret, key or credential
+    id, no step-up [A] (DECISIONS M3h-5, M3g-1c)."""
     own = factor_change.listing(signed)
     totp = [{"id": str(factor)} for factor in own.totp]
-    return _answer({"totp": totp, "recovery_left": own.recovery_left}, 200)
+    passkeys = [{"id": str(factor)} for factor in own.passkey]
+    return _answer({"totp": totp, "passkey": passkeys, "recovery_left": own.recovery_left}, 200)
 
 
 STEPUP_REQUIRED = ({"error": "stepup-required"}, 403)
@@ -352,8 +354,8 @@ def _id_body(body: Mapping[str, Any]) -> uuid.UUID:
 CHANGE_REFUSED = {
     "stepup-required": STEPUP_REQUIRED,
     "signed-out": ({"error": "signed-out"}, 401),
-    "not-found": ({"error": "not-found"}, 404),  # not one of the user's TOTPs in use
-    "last-factor": ({"error": "last-factor"}, 409),  # TOTP is required (spec D7)
+    "not-found": ({"error": "not-found"}, 404),  # not one of the user's factors of that kind
+    "last-factor": ({"error": "last-factor"}, 409),  # no TOTP would be left (spec D7)
 }
 
 
@@ -362,7 +364,10 @@ def factor_totp_remove(request: HttpRequest, signed: Signed, data: uuid.UUID) ->
     """POST /api/auth/factors/totp/remove, body `{"id"}` (DECISIONS M3h-6): after a
     `factor.change` step-up, retires one of the user's TOTP factors, never the last. Every other
     session of the user ends (AUTH-07) and this one gets a new key, so a new CSRF token."""
-    outcome = factor_change.remove(request, signed, data)
+    return _removed(request, factor_change.remove(request, signed, data, "totp"))
+
+
+def _removed(request: HttpRequest, outcome: str) -> HttpResponse:
     if outcome != "removed":
         return _answer(*CHANGE_REFUSED[outcome])
     return _answer({"next": "removed", "csrf": get_token(request)}, 200)
@@ -378,3 +383,52 @@ def recovery_regenerate(request: HttpRequest, signed: Signed, data: None) -> Htt
         return _answer(*CHANGE_REFUSED[outcome])
     body = {"next": "regenerated", "recovery_codes": outcome, "csrf": get_token(request)}
     return _answer(body, 200)
+
+
+@authorized_action(schema=nothing, permission="auth.factor-change")
+def factor_passkey_begin(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
+    """POST /api/auth/factors/passkey, body `{}` (DECISIONS M3g-1c): after a `factor.change`
+    step-up of this session, the options for navigator.credentials.create(), the user's passkeys
+    in use excluded. A second call replaces the challenge. Nothing is stored until confirmed."""
+    options = factor_change.begin_passkey(request, signed)
+    if options == "stepup-required":
+        return _answer(*STEPUP_REQUIRED)
+    return _answer({"options": options}, 200)
+
+
+def _credential_body(body: Mapping[str, Any]) -> dict[str, Any]:
+    """Exactly `{"credential": a JSON object}` (UNI-03); its fields are `passkey`'s to judge."""
+    credential = body.get("credential")
+    if body.keys() != {"credential"} or not isinstance(credential, dict):
+        raise InvalidInput
+    return credential
+
+
+PASSKEY_REFUSED: dict[str, tuple[dict[str, str], int]] = {
+    # no challenge for this user, a registration that does not verify, or an id known already
+    "refused": ({"error": "passkey-refused"}, 400),
+    "stepup-required": STEPUP_REQUIRED,
+    "signed-out": ({"error": "signed-out"}, 401),
+}
+
+
+@authorized_action(schema=_credential_body, permission="auth.factor-change", own_transaction=True)
+def factor_passkey_confirm(
+    request: HttpRequest, signed: Signed, data: dict[str, Any]
+) -> HttpResponse:
+    """POST /api/auth/factors/passkey/confirm, body `{"credential"}`: the new passkey, as the
+    browser returned it, for the challenge begun in this session (taken outside any transaction).
+    Right: the passkey is added, every other session of the user ends (AUTH-07) and this one gets
+    a new key, so a new CSRF token. Every refusal of the credential is one answer."""
+    outcome = factor_change.confirm_passkey(request, signed, data)
+    if isinstance(outcome, str):
+        return _answer(*PASSKEY_REFUSED[outcome])
+    return _answer({"next": "added", "factor_id": str(outcome), "csrf": get_token(request)}, 200)
+
+
+@authorized_action(schema=_id_body, permission="auth.factor-change")
+def factor_passkey_remove(request: HttpRequest, signed: Signed, data: uuid.UUID) -> HttpResponse:
+    """POST /api/auth/factors/passkey/remove, body `{"id"}` (DECISIONS M3g-1c): after a
+    `factor.change` step-up, retires one of the user's passkeys while a TOTP stays. Every other
+    session of the user ends (AUTH-07) and this one gets a new key, so a new CSRF token."""
+    return _removed(request, factor_change.remove(request, signed, data, "passkey"))
