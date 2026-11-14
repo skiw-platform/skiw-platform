@@ -29,7 +29,7 @@ from accounts.auth import (
 from accounts.auth.blob import EMAIL_MAX
 from accounts.auth.login import login
 from accounts.auth.revoke import mark
-from accounts.auth.stepup import PURPOSES, StepUp
+from accounts.auth.stepup import PURPOSES, StepUp, begin_passkey, verify_passkey
 from accounts.auth.stepup import verify as verify_stepup
 from accounts.auth.throttle import client_ip
 from accounts.auth.wrapper import InvalidInput, Signed, authorized_action, nothing, signed_in
@@ -280,6 +280,48 @@ def stepup(request: HttpRequest, signed: Signed, data: tuple[str, str]) -> HttpR
     outcome = verify_stepup(request, signed, *data)
     if not isinstance(outcome, StepUp):
         return _answer(*STEPUP_REFUSED[outcome])
+    return _stepped_up(outcome)
+
+
+@authorized_action(schema=nothing, permission="auth.stepup")
+def stepup_passkey_begin(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
+    """POST /api/auth/stepup/passkey, body `{}` (DECISIONS M3g-1d-2): the options for
+    navigator.credentials.get() over the user's passkeys in use, with a `stepup` challenge
+    replacing any other; `no-passkey` begins nothing. Counts nothing."""
+    options = begin_passkey(request, signed)
+    if options == "no-passkey":
+        return _answer(*NO_PASSKEY)
+    return _answer({"options": options}, 200)
+
+
+def _stepup_passkey_body(body: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Exactly `{"purpose": a listed purpose, "credential": a JSON object}` (UNI-03)."""
+    purpose, credential = body.get("purpose"), body.get("credential")
+    if body.keys() != {"purpose", "credential"} or not _text(purpose):
+        raise InvalidInput
+    if purpose not in PURPOSES or not isinstance(credential, dict):
+        raise InvalidInput
+    return purpose, credential
+
+
+STEPUP_PASSKEY_REFUSED = {**STEPUP_REFUSED, "wrong_code": ({"error": "passkey-wrong"}, 401)}
+
+
+@authorized_action(schema=_stepup_passkey_body, permission="auth.stepup", own_transaction=True)
+def stepup_passkey(
+    request: HttpRequest, signed: Signed, data: tuple[str, dict[str, Any]]
+) -> HttpResponse:
+    """POST /api/auth/stepup/passkey/confirm: a passkey assertion for this session's `stepup`
+    challenge (taken outside any transaction, spent whatever follows) proves the signed-in user
+    for `purpose`, as a code does at POST /api/auth/stepup: the same budget, lock and answers,
+    with one `passkey-wrong` for every assertion that proves none of the user's passkeys."""
+    outcome = verify_passkey(request, signed, *data)
+    if not isinstance(outcome, StepUp):
+        return _answer(*STEPUP_PASSKEY_REFUSED[outcome])
+    return _stepped_up(outcome)
+
+
+def _stepped_up(outcome: StepUp) -> HttpResponse:
     until = outcome.verified_at + timedelta(minutes=settings.SKIW_STEPUP_MAX_AGE_MIN)
     return _answer({"next": "verified", "until": until.isoformat()}, 200)
 

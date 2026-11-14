@@ -149,10 +149,10 @@ def test_the_label_is_apart_from_every_other_use_of_the_source_key() -> None:
     assert not any(label.startswith(other) or other.startswith(label) for other in others)
 
 
-def test_every_purpose_fits_the_table_check_and_only_a_totp_proves_one() -> None:
+def test_every_purpose_fits_the_table_check_and_a_totp_or_a_passkey_proves_one() -> None:
     assert {"factor.change"} == stepup.PURPOSES
     assert all(re.fullmatch(PURPOSE, purpose) for purpose in stepup.PURPOSES)
-    assert {"totp"} == stepup.FACTOR_KINDS  # spec D7; M3g adds the passkey
+    assert {"totp", "passkey"} == stepup.FACTOR_KINDS  # spec D7 (M3g-1d); never a recovery code
 
 
 def test_a_step_up_carries_no_mac_and_no_session_hash() -> None:

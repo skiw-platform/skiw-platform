@@ -18,6 +18,8 @@ from accounts.views import (
     recovery_regenerate,
     session_state,
     stepup,
+    stepup_passkey,
+    stepup_passkey_begin,
 )
 from config.routes import route
 from health.views import healthz
@@ -67,6 +69,20 @@ urlpatterns = [
     ),
     route("api/auth/session", session_state, name="auth-session", methods=("GET",), auth="cookie"),
     route("api/auth/stepup", stepup, name="auth-stepup", methods=("POST",), auth="cookie"),
+    route(
+        "api/auth/stepup/passkey",
+        stepup_passkey_begin,
+        name="auth-stepup-passkey",
+        methods=("POST",),
+        auth="cookie",
+    ),
+    route(
+        "api/auth/stepup/passkey/confirm",
+        stepup_passkey,
+        name="auth-stepup-passkey-confirm",
+        methods=("POST",),
+        auth="cookie",
+    ),
     route("api/auth/logout", logout, name="auth-logout", methods=("POST",), auth="cookie"),
     route("api/auth/password", password, name="auth-password", methods=("POST",), auth="cookie"),
     route("api/auth/factors", factor_list, name="auth-factors", methods=("GET",), auth="cookie"),

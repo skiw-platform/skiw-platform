@@ -443,8 +443,8 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   until then tell Ying.
 - **Too many wrong codes** (`SKIW_AUTH_FAILS_PER_ACCOUNT`, 5, in `SKIW_AUTH_WINDOW_MIN`, 15 minutes)
   stop all code checks for that user, at enrolment, at sign-in (`POST /api/auth/second-factor`) and
-  at step-up (`POST /api/auth/stepup`, M3h) alike, and a wrong passkey at sign-in (M3g-1d-1)
-  counts as a wrong code, until the window ends: one budget per user. A new invite link does not shorten that, so tell the user to wait up to 15 minutes.
+  at step-up (`POST /api/auth/stepup`, M3h) alike, and a wrong passkey at sign-in (M3g-1d-1) or
+  at step-up (M3g-1d-2) counts as a wrong code, until the window ends: one budget per user. A new invite link does not shorten that, so tell the user to wait up to 15 minutes.
 - **Ten wrong codes in a row** (`SKIW_AUTH_LOCK_AFTER`, across any number of windows, and not
   cleared by signing in with the password again) lock that user's second factor for
   `SKIW_AUTH_LOCK_MIN` (30 minutes), TOTP, recovery codes and passkeys alike, and the right code is refused
@@ -494,14 +494,21 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
 - **Sign in with a passkey** (M3g-1d-1): after the password, a user with a passkey in use can
   answer the second step with it (`POST /api/auth/second-factor/passkey` gives the options,
   `POST /api/auth/second-factor/passkey/confirm` checks the assertion) instead of a code; a user
-  with none gets `no-passkey` and uses the authenticator app. Step-up still takes an authenticator
-  code (a passkey step-up is M3g-1d-2). Every refusal is `passkey-wrong` and counts on the code
+  with none gets `no-passkey` and uses the authenticator app. Every refusal is `passkey-wrong` and counts on the code
   budget and lock above; a passkey never skips the password.
   Each passkey answer is used once: a second sign-in with the same challenge is refused, and a
   challenge started before one already used (another tab, say) is refused too, so the user just
   tries again. Credential discovery runs after the shared budget and lock check, before the
   tenant transaction. Each lookup commits one `passkey.lookup` event (no detail), which remains
   even if later verification fails with a server fault.
+- **Step up with a passkey** (M3g-1d-2): a signed-in user with a passkey in use can answer any
+  step-up (every purpose, `factor.change` included) with it instead of a code:
+  `POST /api/auth/stepup/passkey` gives the options (`no-passkey` for a user with none, who uses
+  the authenticator app) and `POST /api/auth/stepup/passkey/confirm` with the `purpose` checks the
+  assertion. Answers, the budget, the lock, the one-use rule and the `passkey.lookup` event are as
+  at sign-in; a sign-in challenge never steps up and a step-up challenge never signs in. Removing a
+  passkey does not cancel a step-up it proved a moment earlier in that session: it lapses after
+  `SKIW_STEPUP_MAX_AGE_MIN` (5 minutes) or when that session ends.
 - **Which screen a reload shows** (`GET /api/auth/session`, M3i-0): `signed_out`, `second_factor`,
   `enrol_factor` or `signed_in`, by the same checks as every signed-in request. It never extends a
   session: a page left open still signs out after 30 idle minutes.
