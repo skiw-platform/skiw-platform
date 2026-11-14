@@ -2,10 +2,13 @@
 
 A marker with `session_key_hash` revokes one session (idle expiry, logout, a login over an
 authenticated session); a user-wide marker revokes every session of the user that signed in at or
-before `revoked_at`. `revoked_at` is the database's transaction start time (`CURRENT_TIMESTAMP`)
-and `_skiw_auth_at` the web process's clock; both containers read the host's one clock, and a tie
-counts as revoked. A user-wide marker also ends a login still at its second factor whose password
-step passed at or before it (`changed_since`, DECISIONS M3h-5).
+before `revoked_at`. `revoked_at` is the marker insert's own statement time
+(`statement_timestamp()`, the column's `db_default=Now()`), not the transaction start, and
+`_skiw_auth_at` the web process's clock; both containers read the host's one clock, and a tie
+counts as revoked. So a change writes the marker before `login()` or `login.reissue` sets the new
+login time: the other order would leave the new session at or before the marker, revoked. A
+user-wide marker also ends a login still at its second factor whose password step passed at or
+before it (`changed_since`, DECISIONS M3h-5).
 
 `mark()` and `revoked()` run in the caller's with_agency() transaction, so a marker and the
 session row delete commit together, and a failed insert leaves the session as it was.

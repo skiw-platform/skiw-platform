@@ -493,7 +493,8 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   (M3g-2s-1); a later sign-in does not.
   Each ends every other session of the user; this one stays with a new cookie. A removed passkey
   is kept as a retired row with its key erased, and its credential cannot be registered again (the
-  device makes a new one).
+  device makes a new one). `GET /api/auth/factors` lists each passkey in use with the time it was
+  added (`created_at`, UTC), oldest first; one added before M3g-2s-2 shows `null` and comes first.
 - **Sign in with a passkey** (M3g-1d-1): after the password, a user with a passkey in use can
   answer the second step with it (`POST /api/auth/second-factor/passkey` gives the options,
   `POST /api/auth/second-factor/passkey/confirm` checks the assertion) instead of a code; a user

@@ -9,7 +9,7 @@ import logging
 import os
 import uuid
 from collections.abc import Callable, Iterator
-from datetime import timedelta
+from datetime import UTC, timedelta
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -163,7 +163,9 @@ def test_a_right_registration_adds_the_passkey_ends_other_sessions_and_reissues_
         added.sign_count,
     )
     assert proof == 1
-    assert listed(fresh)["passkey"] == [{"id": body["factor_id"]}]
+    assert added.created_at is not None  # stamped at insert (accounts.0016)
+    created = added.created_at.astimezone(UTC).isoformat(timespec="microseconds")
+    assert listed(fresh)["passkey"] == [{"id": body["factor_id"], "created_at": created}]
     # Optional: sign-in still asks for the TOTP, which still signs in.
     at_step.step += 1
     passed = attempt(sign_in.pending_login(user), sign_in.code_at(secret, sign_in.STEP + 1))
