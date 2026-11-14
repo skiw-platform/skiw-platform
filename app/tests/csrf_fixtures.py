@@ -25,6 +25,8 @@ FIXTURES: dict[str, Fixture] = {
     "auth-session": Fixture(),  # GET; signed out: 200 `signed_out`
     "auth-login": Fixture(answers=401),
     "auth-second-factor": Fixture(),  # no "code": 400
+    "auth-second-factor-passkey": Fixture(answers=401),  # no pending login: expired
+    "auth-second-factor-passkey-confirm": Fixture(),  # no "credential": 400
     "auth-enrol": Fixture(answers=401),
     "auth-enrol-totp": Fixture(answers=401),  # no enrolment session: expired
     "auth-enrol-totp-confirm": Fixture(),  # no "code": 400

@@ -18,6 +18,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token, rotate_token
 
 from accounts.auth import (
+    assertion,
     enrol,
     factor_change,
     factors,
@@ -181,17 +182,53 @@ def login_second_factor(request: HttpRequest) -> HttpResponse:
     code = None if body is None else body.get("code")
     if not _text(code):
         return _answer({"error": "invalid"}, 400)
-    outcome = second_factor.attempt(request, code)
+    return _second_factor(request, second_factor.attempt(request, code), "code-wrong")
+
+
+def _second_factor(
+    request: HttpRequest, outcome: second_factor.Passed | factors.Failure, wrong: str
+) -> HttpResponse:
+    """The answers of a second-factor attempt, and on `Passed` the login."""
     if outcome == "unavailable":
         return _answer({"error": "login-expired"}, 401)
     if outcome == "limited":
         return _answer({"error": "limited"}, 429)
     if outcome == "wrong_code":
-        return _answer({"error": "code-wrong"}, 401)
+        return _answer({"error": wrong}, 401)
     with with_agency(outcome.agency_id):
         user = AppUser.objects.get(id=outcome.user_id)
     login(request, user, factor=outcome.factor)
     return _answer({"next": "signed_in", "csrf": get_token(request)}, 200)
+
+
+NO_PASSKEY = ({"error": "no-passkey"}, 409)  # the user has no passkey in use: nothing begun
+
+
+def login_passkey_begin(request: HttpRequest) -> HttpResponse:
+    """POST /api/auth/second-factor/passkey (no body read): the options for
+    navigator.credentials.get(), allowing only the pending user's passkeys in use, and a `login`
+    challenge replacing any other (DECISIONS M3g-1d-1). A pending-state failure is `login-expired`,
+    as above; no passkey in use is `no-passkey` and begins nothing. Counts nothing."""
+    options = assertion.begin_login(request)
+    if options == "unavailable":
+        return _answer({"error": "login-expired"}, 401)
+    if options == "no-passkey":
+        return _answer(*NO_PASSKEY)
+    return _answer({"options": options}, 200)
+
+
+def login_passkey(request: HttpRequest) -> HttpResponse:
+    """POST /api/auth/second-factor/passkey/confirm, body exactly `{"credential": <object>}` (else
+    400 `invalid`, nothing taken or counted): the assertion for this session's `login` challenge,
+    which is spent whatever follows. As the code route: `login-expired`, `limited`, or one
+    `passkey-wrong` for every assertion that does not prove one of the pending user's passkeys
+    (an unknown, retired or other user's credential, a wrong key, a replay), counted on the same
+    budget and lock as wrong codes. Right: `login()` with factor `passkey`."""
+    body = _body(request)
+    credential = None if body is None or body.keys() != {"credential"} else body["credential"]
+    if not isinstance(credential, dict):
+        return _answer({"error": "invalid"}, 400)
+    return _second_factor(request, assertion.finish_login(request, credential), "passkey-wrong")
 
 
 SESSION_PENDING = {False: "second_factor", True: "enrol_factor"}  # by Pending.enrol

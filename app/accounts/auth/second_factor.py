@@ -52,7 +52,7 @@ class Passed:
 
     user_id: uuid.UUID
     agency_id: uuid.UUID
-    factor: Literal["totp", "recovery"]
+    factor: Literal["totp", "recovery", "passkey"]  # passkey: accounts.auth.assertion (M3g-1d-1)
 
 
 def is_totp(candidate: str) -> bool:
@@ -96,11 +96,14 @@ def counted(
     check: Callable[[AppUser], bool],
     *,
     feeds_lock: bool,
+    precheck: Callable[[], bool] | None = None,
 ) -> Counted:
     """The one copy of the count, fault and lock rules for a code check (UNI-05; DECISIONS
     M3h-3), used by sign-in and step-up. `check(user)` runs inside with_agency(agency_id) on the
     user's `active` row and says whether the code was right; whatever it writes commits only with
-    that transaction. Outside any transaction (the factor counters refuse one).
+    that transaction. Optional `precheck()` runs after reservation but before with_agency(),
+    for audited pre-tenant discovery; False still counts as a wrong comparison for an active user.
+    Outside any transaction (the factor counters refuse one).
 
     "limited": refused by `factor_reserve` (budget or factor lock), nothing checked.
     "unavailable": the user is no longer `active`; the attempt is given back. "wrong_code": the
@@ -112,7 +115,8 @@ def counted(
         return "limited"
     seen = _Seen()
     try:
-        result = _check(user_id, agency_id, check, seen)
+        ready = precheck is None or precheck()
+        result = _check(user_id, agency_id, lambda user: ready and check(user), seen)
     except BaseException:
         # Only a fault BEFORE the comparison is not a guess. After a wrong comparison the guess
         # stays counted (and counts toward the lock) even if leaving the transaction failed:

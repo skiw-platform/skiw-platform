@@ -39,6 +39,13 @@ PUBLIC_ROUTES: dict[str, str] = {
     " one answer is 401 `login-expired` (AUTH-05); wrong codes are throttled per user and ten in a"
     " row lock the user (AUTH-06); the right one completes the sign-in through login(), the one"
     " place a session becomes a login",
+    "auth-second-factor-passkey": "passkey options for a pending login session only, as"
+    " `auth-second-factor`: without one the answer is 401 `login-expired`; it counts nothing,"
+    " signs nobody in and begins nothing for a user with no passkey in use",
+    "auth-second-factor-passkey-confirm": "the passkey branch of `auth-second-factor`, for a"
+    " pending login session only: the same `login-expired` answer, one `passkey-wrong` for every"
+    " assertion that is not the pending user's, the same per-user budget and lock (AUTH-06) in"
+    " front of the credential lookup; a right one completes the sign-in through login()",
     "auth-enrol": "the enrolment password, before the user has any credential: the single-use,"
     " expiring HMAC link (AUTH-08) stands in for a login, every refusal has one answer (AUTH-05);"
     " it leaves only a pending enrolment, never a sign-in",
