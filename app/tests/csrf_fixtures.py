@@ -31,6 +31,8 @@ FIXTURES: dict[str, Fixture] = {
     "auth-enrol-totp": Fixture(answers=401),  # no enrolment session: expired
     "auth-enrol-totp-confirm": Fixture(),  # no "code": 400
     "auth-stepup": Fixture(),  # an authorized_action; signed in, no "purpose" or "code": 400
+    "auth-stepup-passkey": Fixture(answers=409),  # an authorized_action; signed in, no passkey
+    "auth-stepup-passkey-confirm": Fixture(),  # an authorized_action; no "credential": 400
     "auth-logout": Fixture(),  # an authorized_action; signed in, `{}` signs out: 200
     "auth-password": Fixture(),  # an authorized_action; signed in, no "current" or "new": 400
     "auth-factors": Fixture(),  # an authorized_action (GET); signed in: 200

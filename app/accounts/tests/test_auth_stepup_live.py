@@ -260,24 +260,48 @@ def of_kind(kind: str, secret_ct: bytes | None) -> Add:
     return add
 
 
+def retired_passkey(cursor: CursorWrapper, user: uuid.UUID) -> uuid.UUID:
+    row = uuid.uuid4()
+    retired = {"retired_at": timezone.now(), "public_key": None, "lookup_blob_ct": None}
+    add_factor(cursor, user, id=row, **retired)
+    return row
+
+
 NOT_PROOF: dict[str, Add] = {
     "recovery": of_kind("recovery", bytes(RECOVERY_SECRET_CT_LENGTH)),
-    "passkey": of_kind("passkey", None),
+    "retired-passkey": retired_passkey,
+    "another-users-passkey": lambda cursor, _: of_kind("passkey", None)(cursor, add_user(cursor)),
     "another-users-totp": lambda cursor, _: add_totp(cursor, add_user(cursor)),
     "no-such-factor": lambda cursor, _: uuid.uuid4(),
 }
 
 
 @pytest.mark.parametrize("case", sorted(NOT_PROOF))
-def test_only_the_users_own_totp_proves_a_step_up(
+def test_only_the_users_own_factor_in_use_proves_a_step_up(
     signed: HttpRequest, user: AppUser, cursor: CursorWrapper, case: str
 ) -> None:
     """Review PR 136 R2: a recovery row is deleted by raw DELETE (sign-in, regenerate); a step-up
     naming it would make that DELETE fail on auth_stepup_factor_id_fk."""
-    with pytest.raises(ValueError, match="own TOTP"):
+    with pytest.raises(ValueError, match="own TOTP or passkey factors"):
         stepup.record(signed, NOT_PROOF[case](cursor, user.id), CHANGE)
     cursor.execute("SELECT count(*) FROM auth_stepup WHERE user_id = %s", [user.id])
     assert cursor.fetchall() == [(0,)]
+
+
+def test_a_passkey_in_use_proves_a_step_up_that_still_counts_once_it_is_retired(
+    signed: HttpRequest, user: AppUser, cursor: CursorWrapper
+) -> None:
+    """M3g-1d: the evidence names the passkey, and retiring it (the row stays, FK NO ACTION)
+    leaves that evidence valid for its few minutes."""
+    passkey = of_kind("passkey", None)(cursor, user.id)
+    proved = stepup.record(signed, passkey, CHANGE)
+    cursor.execute(
+        "UPDATE user_factor SET retired_at = now(), public_key = NULL, lookup_blob_ct = NULL"
+        " WHERE id = %s",
+        [passkey],
+    )
+    found = stepup.recent(signed, CHANGE)
+    assert found is not None and (found.id, found.factor_id) == (proved.id, passkey)
 
 
 def test_a_session_with_no_completed_login_has_no_step_up(cursor: CursorWrapper) -> None:

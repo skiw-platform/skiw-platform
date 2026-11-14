@@ -1,7 +1,9 @@
 """Step-up evidence (spec §4.1 `auth_stepup`, D7, AUTH-09; plan M3 §3 M3h, DECISIONS M3h-1, M3h-2).
 `verify` (the `POST /api/auth/stepup` route, M3h-3) checks a TOTP code through the sign-in's
-`second_factor.counted` and calls `record` in the transaction that used the code; the factor
-changes (M3h-5, M3h-6) and later consumers call `recent`.
+`second_factor.counted`, and `verify_passkey` (M3g-1d-2) a passkey assertion through the sign-in's
+`assertion.counted_assertion`; each calls `record` in the transaction that used the code or the
+challenge. The factor changes (M3h-5, M3h-6) and later consumers call `recent`, which takes
+evidence of either kind for every purpose (spec D7; owner, 2026-11-13).
 
 `evidence_mac` is the newest `tenant_source_key` version in RECOVERY_VERSION_BYTES big-endian
 bytes, then HMAC-SHA-256 under that version over LABEL, then every other column in a fixed order,
@@ -13,8 +15,9 @@ nothing, and a row under an older listed version keeps verifying (as recovery co
 Both functions run in the caller's with_agency() transaction and take the user, the agency and
 the session from the request's signed session (`_skiw_user`, `_skiw_agency`, the session key),
 never from input (TEN-11). Only `record` writes rows (Semgrep auth-stepup-insert-stepup-only), and
-only for one of the session user's own TOTP factors: a recovery code is never step-up, and a
-recovery row is deleted by raw DELETE, which a step-up naming it would block (FK NO ACTION).
+only for one of the session user's own TOTP or passkey factors in use: a recovery code is never
+step-up, and a recovery row is deleted by raw DELETE, which a step-up naming it would block (FK NO
+ACTION). A TOTP or passkey is retired, never deleted, so evidence naming one keeps verifying.
 
 `recent` reads the session's rows for one purpose, no older than SKIW_STEPUP_MAX_AGE_MIN and not
 in the future, newest first, and returns the first whose MAC verifies. A row that fails it is
@@ -26,14 +29,14 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 
 from django.conf import settings
 from django.http import HttpRequest
 from django.utils import timezone
 
 from accounts import source_key
-from accounts.auth import second_factor
+from accounts.auth import assertion, passkey, second_factor
 from accounts.auth.login import AGENCY, USER
 from accounts.auth.transactions import require_open
 from accounts.auth.wrapper import Signed
@@ -47,7 +50,7 @@ VERSION_BYTES = RECOVERY_VERSION_BYTES  # the same 4-byte prefix as a recovery c
 FACTOR_CHANGE = "factor.change"  # add or remove a TOTP or a passkey, new recovery codes (M3h, M3g)
 # Closed list; a consumer adds its purpose when it is built (outbox.approve M9, drive.write M16).
 PURPOSES = frozenset({FACTOR_CHANGE})
-FACTOR_KINDS = frozenset({"totp"})  # spec D7: a passkey too, from M3g
+FACTOR_KINDS = frozenset({"totp", "passkey"})  # spec D7 (M3g-1d-2); never a recovery code
 Refused = Literal["invalid", "unavailable", "limited", "wrong_code"]
 log = logging.getLogger("django.security.SuspiciousStepUp")
 
@@ -122,7 +125,7 @@ def record(request: HttpRequest, factor: uuid.UUID, purpose: str) -> StepUp:
     """Writes evidence that the session's user proved `factor` just now, for `purpose`. Call only
     after the factor was verified, in the same transaction. Raises ValueError for an unknown
     purpose, a session with no completed login, or a factor that is not one of the user's own
-    TOTP factors (another user's, a recovery code, a passkey before M3g, a retired one, none)."""
+    TOTP or passkey factors in use (another user's, a recovery code, a retired one, none)."""
     _known(purpose)
     require_open("step-up records")
     signed = _signed(request)
@@ -131,7 +134,7 @@ def record(request: HttpRequest, factor: uuid.UUID, purpose: str) -> StepUp:
     user, agency, key_hash = signed
     own = UserFactor.objects.filter(id=factor, user_id=user, kind__in=FACTOR_KINDS)
     if not own.filter(retired_at__isnull=True).exists():
-        raise ValueError("step-up is proved by one of the user's own TOTP factors, not retired")
+        raise ValueError("step-up is proved by the user's own TOTP or passkey factors, not retired")
     row = AuthStepup(
         id=uuid.uuid4(),
         agency_id=agency,
@@ -196,3 +199,32 @@ def verify(request: HttpRequest, signed: Signed, purpose: str, candidate: str) -
     if result == "ok":
         return proved[0]
     return result
+
+
+def begin_passkey(request: HttpRequest, signed: Signed) -> dict[str, Any] | assertion.NoPasskey:
+    """In the wrapper's with_agency(): assertion options and a `stepup` challenge (replacing any
+    other) for the session user's passkeys in use; "no-passkey" issues none (DECISIONS M3g-1b)."""
+    ids = assertion.credential_ids(signed.user_id)
+    if not ids:
+        return "no-passkey"
+    return passkey.begin_assertion(request, "stepup", signed.user_id, ids)
+
+
+def verify_passkey(
+    request: HttpRequest, signed: Signed, purpose: str, credential: object
+) -> StepUp | Literal["unavailable", "limited", "wrong_code"]:
+    """As `verify`, with a passkey assertion for this session's `stepup` challenge in place of a
+    code (DECISIONS M3g-1d-2), through `assertion.counted_assertion`, sign-in's one check: the
+    same budget, run and lock; the evidence names the passkey that answered. Outside any
+    transaction. Raises ValueError for an unknown purpose, before the challenge is taken."""
+    _known(purpose)
+    proved: list[StepUp] = []
+    result = assertion.counted_assertion(
+        request,
+        "stepup",
+        signed.user_id,
+        signed.agency_id,
+        credential,
+        lambda row: proved.append(record(request, row.id, purpose)),
+    )
+    return proved[0] if result == "ok" else result
