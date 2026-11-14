@@ -29,7 +29,8 @@ from accounts.auth import (
 from accounts.auth.blob import EMAIL_MAX
 from accounts.auth.login import login
 from accounts.auth.revoke import mark
-from accounts.auth.stepup import PURPOSES, StepUp, begin_passkey, verify_passkey
+from accounts.auth.stepup import FACTOR_CHANGE, PURPOSES, StepUp, begin_passkey, verify_passkey
+from accounts.auth.stepup import record as record_stepup
 from accounts.auth.stepup import verify as verify_stepup
 from accounts.auth.throttle import client_ip
 from accounts.auth.wrapper import InvalidInput, Signed, authorized_action, nothing, signed_in
@@ -145,23 +146,26 @@ def enrol_factor_confirm(request: HttpRequest) -> HttpResponse:
     """POST /api/auth/enrol/totp/confirm: the first code from the user's authenticator. Right: the
     user is active, the pending state is gone, the session is a completed login (factor `totp`) and
     the ten recovery codes are in this answer, the only time they are shown. Wrong codes are counted
-    per user (AUTH-06). `login()` runs after the enrolment commits and outside any transaction; if
-    it failed the user would be active with a factor and sign in normally, but the codes would be
-    lost (plan M3 §3 M3f, DECISIONS M3f-3b-2)."""
+    per user (AUTH-06). `login()` and then a `factor.change` step-up for the session's new key,
+    naming the new TOTP, run last in the enrolment's transaction, so a fault in either rolls the
+    enrolment back (DECISIONS M3g-2s-1): a user who just set up the TOTP may add a passkey without
+    typing a second code. No other purpose, and no plain sign-in, gets this."""
     body = _body(request)
     code = None if body is None else body.get("code")
     if not _text(code):
         return _answer({"error": "invalid"}, 400)
-    outcome = factors.confirm_totp(request, code)
+
+    def sign_in(user: AppUser, factor: uuid.UUID) -> None:
+        login(request, user, factor="totp")
+        record_stepup(request, factor, FACTOR_CHANGE)
+
+    outcome = factors.confirm_totp(request, code, sign_in)
     if outcome == "unavailable":
         return _expired()
     if outcome == "limited":
         return _answer({"error": "limited"}, 429)
     if outcome == "wrong_code":
         return _answer({"error": "code-wrong"}, 401)
-    with with_agency(outcome.agency_id):
-        user = AppUser.objects.get(id=outcome.user_id)
-    login(request, user, factor="totp")
     return _answer(
         {"next": "signed_in", "recovery_codes": outcome.codes, "csrf": get_token(request)}, 200
     )

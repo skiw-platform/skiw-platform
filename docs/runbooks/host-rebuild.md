@@ -488,6 +488,9 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   registration options and `POST /api/auth/factors/passkey/confirm` stores the new passkey; one
   answer `passkey-refused` covers every failure, including a passkey already registered to anyone.
   `POST /api/auth/factors/passkey/remove` retires one by its id while an authenticator app stays.
+  Finishing enrolment counts as that step-up for the new session, for `SKIW_STEPUP_MAX_AGE_MIN`
+  (5 minutes), so a user who has just enrolled adds a passkey without typing a second code
+  (M3g-2s-1); a later sign-in does not.
   Each ends every other session of the user; this one stays with a new cookie. A removed passkey
   is kept as a retired row with its key erased, and its credential cannot be registered again (the
   device makes a new one).

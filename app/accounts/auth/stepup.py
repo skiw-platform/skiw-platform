@@ -2,8 +2,11 @@
 `verify` (the `POST /api/auth/stepup` route, M3h-3) checks a TOTP code through the sign-in's
 `second_factor.counted`, and `verify_passkey` (M3g-1d-2) a passkey assertion through the sign-in's
 `assertion.counted_assertion`; each calls `record` in the transaction that used the code or the
-challenge. The factor changes (M3h-5, M3h-6) and later consumers call `recent`, which takes
-evidence of either kind for every purpose (spec D7; owner, 2026-11-13).
+challenge. Finishing enrolment (`POST /api/auth/enrol/totp/confirm`) calls `record` for
+`factor.change` only, naming the new TOTP, in the transaction that saves it and after login() gave
+the session its new key (DECISIONS M3g-2s-1); a plain sign-in records nothing. The factor changes
+(M3h-5, M3h-6) and later consumers call `recent`, which takes evidence of either kind for every
+purpose (spec D7; owner, 2026-11-13).
 
 `evidence_mac` is the newest `tenant_source_key` version in RECOVERY_VERSION_BYTES big-endian
 bytes, then HMAC-SHA-256 under that version over LABEL, then every other column in a fixed order,

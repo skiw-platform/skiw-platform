@@ -6,7 +6,9 @@ and a new key, the `_skiw_*` keys are written, and the CSRF token is rotated.
 A login over an authenticated session (the same user again, or another) retires that session's key
 with a `session_revocation` marker, in one with_agency() transaction with the row delete, so the old
 row put back by SQL is still refused (plan M3 §3 M3d "a rotation of an authenticated session"). So
-login() must run outside any atomic block; a failed marker insert leaves the old session as it was.
+login() over an authenticated session must run outside any atomic block (with_agency() refuses to
+nest); a failed marker insert leaves the old session as it was. Enrolment calls it inside its own
+transaction, where the session holds only a pending state (DECISIONS M3g-2s-1).
 
 Semgrep `start-new-lifetime-login-only` keeps `start_new_lifetime()` in this module: anything
 else that renews the absolute deadline would let a session outlive SKIW_SESSION_ABSOLUTE_H.

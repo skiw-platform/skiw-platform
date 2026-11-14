@@ -15,9 +15,11 @@ holds no readable secret (C3); it returns the secret and the `otpauth://` URI to
 `confirm_totp` takes the user's first code, and in ONE with_agency() transaction: locks the user,
 stores the factor (the same sealed bytes, `sign_count` = the accepted step, so that code cannot
 sign the user in again), sets the user `active`, replaces the recovery codes and writes the
-user-wide revocation marker (AUTH-07). Any failure rolls all of it back, so no user is `active`
-without a factor and recovery codes. The pending keys are cleared after the commit, so a caller
-cannot reach login() with them still set (login() keeps them).
+user-wide revocation marker (AUTH-07), then runs the caller's `then(user, factor)` last: the
+enrolment route signs the user in there (login(), a new session key) and records a `factor.change`
+step-up for that key (DECISIONS M3g-2s-1). Any failure rolls all of it back, so no user is
+`active` without a factor and recovery codes. The pending keys are cleared after the commit
+(login() keeps them).
 
 Wrong codes are counted per user (throttle.factor_reserve: the attempt is counted before the code
 is checked, and given back unless the code was wrong). The user row is locked while `invited`, so
@@ -26,6 +28,7 @@ two confirmations of one secret take turns: the second finds the user `active` a
 import base64
 import binascii
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
@@ -56,6 +59,7 @@ PENDING_KEYS = (
     PENDING_TOTP,
 )
 Failure = Literal["unavailable", "limited", "wrong_code"]
+Then = Callable[[AppUser, uuid.UUID], None]  # the user, now `active`, and the new factor's id
 
 
 @dataclass(frozen=True)
@@ -151,13 +155,15 @@ def seal_new(request: HttpRequest, key: str, user: AppUser) -> Setup:
     return Setup(totp.text(secret), totp.uri(secret, user.email))
 
 
-def confirm_totp(request: HttpRequest, candidate: str) -> Enrolled | Failure:
+def confirm_totp(
+    request: HttpRequest, candidate: str, then: Then | None = None
+) -> Enrolled | Failure:
     """Enrols the secret `begin_totp` made if `candidate` is its current code; see the module
-    docstring for what that commits. "unavailable": no usable enrolment state or the user is no
-    longer `invited`, nothing counted. "limited": too many wrong codes, nothing checked.
-    "wrong_code": counted against the user. The attempt is counted before the code is checked and
-    given back unless the code was wrong (throttle.factor_reserve), so parallel guesses cannot
-    exceed the limit."""
+    docstring for what that commits, `then` included. "unavailable": no usable enrolment state or
+    the user is no longer `invited`, nothing counted. "limited": too many wrong codes, nothing
+    checked. "wrong_code": counted against the user. The attempt is counted before the code is
+    checked and given back unless the code was wrong (throttle.factor_reserve), so parallel guesses
+    cannot exceed the limit."""
     state, stored = pending(request), stored_secret(request, PENDING_TOTP)
     if state is None or not state.enrol or stored is None:
         return "unavailable"
@@ -165,7 +171,7 @@ def confirm_totp(request: HttpRequest, candidate: str) -> Enrolled | Failure:
     if reservation is None:
         return "limited"
     try:
-        result = _confirm(state, *stored, candidate)
+        result = _confirm(state, *stored, candidate, then)
     except BaseException:
         throttle.factor_release(reservation)  # a fault is not a guess
         raise
@@ -179,7 +185,7 @@ def confirm_totp(request: HttpRequest, candidate: str) -> Enrolled | Failure:
 
 
 def _confirm(
-    state: Pending, factor: uuid.UUID, sealed: bytes, candidate: str
+    state: Pending, factor: uuid.UUID, sealed: bytes, candidate: str, then: Then | None
 ) -> list[str] | Failure:
     """The recovery codes when the first code is right, else why not."""
     with with_agency(state.agency_id):
@@ -191,10 +197,12 @@ def _confirm(
         if secret is None:
             return "unavailable"
         step = totp.accept(secret, candidate, 0)
-        return "wrong_code" if step is None else _commit(locked, factor, sealed, step)
+        return "wrong_code" if step is None else _commit(locked, factor, sealed, step, then)
 
 
-def _commit(user: AppUser, factor: uuid.UUID, sealed: bytes, step: int) -> list[str]:
+def _commit(
+    user: AppUser, factor: uuid.UUID, sealed: bytes, step: int, then: Then | None
+) -> list[str]:
     UserFactor.objects.create(
         id=factor,
         agency_id=user.agency_id,
@@ -207,4 +215,6 @@ def _commit(user: AppUser, factor: uuid.UUID, sealed: bytes, step: int) -> list[
     user.save(update_fields=["status"])
     codes = recovery.generate(user.agency_id, user.id)
     revoke.mark(user.agency_id, user.id, None)  # AUTH-07: a new factor revokes the older sessions
+    if then is not None:
+        then(user, factor)
     return codes
