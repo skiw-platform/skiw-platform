@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type SubmitEvent } from "react";
 
-import { post, readSession, signOut, type Reply, type SessionState } from "../api";
+import { endSession, post, readSession, unauthenticated, type Reply, type SessionState } from "../api";
 import { content } from "../content";
 import { aboutCode, Field, Message, refusal } from "../forms";
 import { passkeySupported, round } from "../passkey";
@@ -96,15 +96,19 @@ export function SecondFactor({ onNext }: Props) {
    * signs out and touches no state.
    */
   async function reconcile({ status, body }: Reply) {
+    const ended = async () => {
+      const { out, state } = await endSession();
+      return out === "signed_out" || unauthenticated(state);
+    };
     let clear: boolean;
     if (status === 200 && body["next"] === "signed_in" && typeof body["csrf"] === "string") {
-      clear = (await signOut()) === "signed_out";
+      clear = await ended();
     } else if (status >= 400 && status < 500 && typeof body["error"] === "string") {
       clear = true;
     } else {
       // Lost, truncated, 5xx or not the shape the server sends: only the server's own state says.
       const state = await readSession();
-      clear = state === null ? (await signOut()) === "signed_out" : state === "signed_in" ? (await signOut()) === "signed_out" : true;
+      clear = unauthenticated(state) || (await ended());
     }
     if (exit.current === "back") onNext(clear ? "signed_out" : "signed_in");
   }

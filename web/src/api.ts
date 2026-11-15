@@ -9,7 +9,7 @@ const NETWORK: Reply = { status: 0, body: {} };
 let token = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? "";
 
 function keepToken(body: Record<string, unknown>): void {
-  if (typeof body["csrf"] === "string") {
+  if (typeof body["csrf"] === "string" && body["csrf"] !== "") {
     token = body["csrf"];
   }
 }
@@ -49,12 +49,14 @@ export type SessionState = "signed_out" | "signed_in" | "second_factor" | "enrol
 
 const STATES: readonly string[] = ["signed_out", "signed_in", "second_factor", "enrol_factor"];
 
-/** What the server says this browser is, or null when the answer was unreadable. A read also
- * takes the current CSRF token from its body, so it re-synchronises the page with the server. */
+/** What the server says this browser is, or null when the answer was unreadable. An answer counts
+ * only with a listed state and a non-empty CSRF token: the read re-synchronises the page's token
+ * with the server's, so a state that came without one is unresolved, not proof. */
 export async function readSession(): Promise<SessionState | null> {
   const { status, body } = await get("/api/auth/session");
   const state = body["state"];
-  return status === 200 && typeof state === "string" && STATES.includes(state) ? (state as SessionState) : null;
+  const csrf = body["csrf"];
+  return status === 200 && typeof state === "string" && STATES.includes(state) && typeof csrf === "string" && csrf !== "" ? (state as SessionState) : null;
 }
 
 /** What the server says this browser is. Anything unexpected reads as signed out. */
@@ -63,15 +65,24 @@ export async function sessionState(): Promise<SessionState> {
 }
 
 /**
- * Signs out and proves it (AUTH-13). A logout whose answer is exactly the signed-out shape (status
+ * Signs out and proves it (AUTH-13), and reports the session state it learned on the way. A logout whose answer is exactly the signed-out shape (status
  * 200, `next: "signed_out"`, a rotated token) is proof; any other answer (lost, truncated, malformed,
  * refused) is checked against the server's own session state, which
  * also brings the token up to date. Anything else means signed-out is unproven: callers keep the
  * signed-in screen and its sign-out button as the retry.
  */
-export async function signOut(): Promise<"signed_out" | "offline" | "failed"> {
+export async function endSession(): Promise<{ out: "signed_out" | "offline" | "failed"; state: SessionState | null }> {
   const { status, body } = await logout();
-  if (status === 200 && body["next"] === "signed_out" && typeof body["csrf"] === "string" && body["csrf"] !== "") return "signed_out";
-  if ((await readSession()) === "signed_out") return "signed_out";
-  return status === 0 ? "offline" : "failed";
+  if (status === 200 && body["next"] === "signed_out" && typeof body["csrf"] === "string" && body["csrf"] !== "") return { out: "signed_out", state: "signed_out" };
+  const state = await readSession();
+  if (state === "signed_out") return { out: "signed_out", state };
+  return { out: status === 0 ? "offline" : "failed", state };
 }
+
+/** `endSession` for callers that need only whether signed-out is proven. */
+export async function signOut(): Promise<"signed_out" | "offline" | "failed"> {
+  return (await endSession()).out;
+}
+
+/** True when the server says nothing is authenticated: the sign-in flow is the right screen. */
+export const unauthenticated = (state: SessionState | null): boolean => state !== null && state !== "signed_in";
