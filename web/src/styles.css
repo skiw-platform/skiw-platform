@@ -287,3 +287,10 @@ button.link {
   margin-block-start: var(--space-3);
   color: var(--color-text-muted);
 }
+
+button.secondary {
+  border: 2px solid var(--color-primary);
+  background: var(--color-surface);
+  color: var(--color-primary);
+}
+

@@ -26,7 +26,7 @@ async function run(path: string, init: RequestInit): Promise<Reply> {
   }
 }
 
-export function post(path: string, body: Record<string, string>): Promise<Reply> {
+export function post(path: string, body: Record<string, unknown>): Promise<Reply> {
   return run(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-CSRFToken": token },

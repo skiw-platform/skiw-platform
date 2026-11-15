@@ -21,6 +21,10 @@ export const content = {
     submit: "Sign in",
     busy: "Checking",
     back: "Use a different account",
+    passkey: "Use a passkey",
+    passkeyBusy: "Waiting for your passkey",
+    passkeyFailed: "The passkey did not work. Try again, or enter a code.",
+    noPasskey: "This account has no passkey. Enter a code instead.",
   },
   enrol: {
     title: "Create your password",
@@ -62,6 +66,12 @@ export const content = {
     submit: "Confirm",
     busy: "Checking",
     cancel: "Cancel",
+    passkey: "Use a passkey instead",
+    passkeyFailed: "The passkey did not work. Try again, or enter a code.",
+    noPasskey: "You have no passkey. Enter a code instead.",
+  },
+  passkeys: {
+    unsupported: "This browser cannot use passkeys.",
   },
   signOut: "Sign out",
   signOutBusy: "Signing out",

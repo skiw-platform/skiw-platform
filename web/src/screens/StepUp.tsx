@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
 
-import { post } from "../api";
+import { post, type Reply } from "../api";
 import { content } from "../content";
-import { Field, Message } from "../forms";
+import { Field, Message, refusal } from "../forms";
+import { passkeySupported, round } from "../passkey";
 
 type Props = {
   /** One of the server's listed purposes, for example `factor.change`. */
@@ -15,47 +16,56 @@ type Props = {
 };
 
 /**
- * Asks a signed-in person for a fresh authenticator code before a sensitive action (spec D7,
- * AUTH-09). No screen uses it yet: the M3 actions it guards have no screens, and the later
- * modules that do import this one (DECISIONS "M3i-3"). The code lives in this component only.
+ * Asks a signed-in person for a fresh authenticator code, or a passkey, before a sensitive action
+ * (spec D7, AUTH-09). The passkey screens mount it for `factor.change` (DECISIONS "M3g-2a"). The
+ * code and the credential live in this component only.
  */
 export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [offerPasskey, setOfferPasskey] = useState(passkeySupported);
   const codeRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     codeRef.current?.focus();
   }, []);
 
+  /** The answers both routes share; false when the dialog stays open. */
+  function settled({ status, body }: Reply): boolean {
+    if (status === 200 && body["next"] === "verified" && typeof body["until"] === "string") onVerified(body["until"]);
+    else if (status === 401 && body["error"] === "signed-out") onSignedOut();
+    else return false;
+    return true;
+  }
+
   async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError(null);
-    const { status, body } = await post("/api/auth/stepup", { purpose, code });
+    const answer = await post("/api/auth/stepup", { purpose, code });
     setBusy(false);
-    if (status === 200 && body["next"] === "verified" && typeof body["until"] === "string") {
-      onVerified(body["until"]);
-      return;
-    }
-    if (status === 401 && body["error"] === "signed-out") {
-      onSignedOut();
-      return;
-    }
+    if (settled(answer)) return;
     setCode("");
-    setError(
-      status === 401
-        ? content.errors.codeWrong
-        : status === 429
-          ? content.errors.limited
-          : status === 400
-            ? content.errors.invalid
-            : status === 0
-              ? content.errors.network
-              : content.errors.generic,
-    );
+    setError(refusal(answer.status, content.errors.codeWrong));
     codeRef.current?.focus();
+  }
+
+  /** As at sign-in, a cancelled and a refused passkey get the same words. */
+  async function passkey() {
+    setBusy(true);
+    setError(null);
+    const { answer, outcome: result } = await round("/api/auth/stepup/passkey", "/api/auth/stepup/passkey/confirm", { purpose });
+    setBusy(false);
+    if (settled(answer)) return;
+    if (answer.status === 409 || result === "unsupported") {
+      setOfferPasskey(false);
+      setError(result === "unsupported" ? content.passkeys.unsupported : content.stepUp.noPasskey);
+      codeRef.current?.focus();
+      return;
+    }
+    const failed = content.stepUp.passkeyFailed;
+    setError(result === "failed" || answer.status === 400 ? failed : refusal(answer.status, failed));
   }
 
   function keys(event: KeyboardEvent<HTMLElement>) {
@@ -79,6 +89,11 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
           <button type="submit" disabled={busy}>
             {busy ? content.stepUp.busy : content.stepUp.submit}
           </button>
+          {offerPasskey ? (
+            <button type="button" className="secondary" disabled={busy} onClick={() => void passkey()}>
+              {content.stepUp.passkey}
+            </button>
+          ) : null}
           <button type="button" className="link" onClick={onCancel}>
             {content.stepUp.cancel}
           </button>
