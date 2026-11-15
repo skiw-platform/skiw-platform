@@ -36,6 +36,15 @@ export function post(path: string, body: Record<string, unknown>, signal: AbortS
   });
 }
 
+/** POST /api/auth/logout with the current token (AUTH-13); its answer's `csrf` replaces the token. */
+export function logout(): Promise<Reply> {
+  return post("/api/auth/logout", {});
+}
+
+/** A logout answer after which the server holds no session for this browser: 200, or the 401 of
+ * a session it already refused. */
+export const loggedOut = (status: number): boolean => status === 200 || status === 401;
+
 export function get(path: string): Promise<Reply> {
   return run(path, { method: "GET" });
 }

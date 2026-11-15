@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type SubmitEvent } from "react";
 
-import { post, type Reply, type SessionState } from "../api";
+import { loggedOut, logout, post, type Reply, type SessionState } from "../api";
 import { content } from "../content";
 import { aboutCode, Field, Message, refusal } from "../forms";
 import { passkeySupported, round } from "../passkey";
@@ -15,10 +15,21 @@ export function SecondFactor({ onNext }: Props) {
   const [busy, setBusy] = useState(false);
   const [offerPasskey, setOfferPasskey] = useState(passkeySupported);
   const codeRef = useRef<HTMLInputElement>(null);
-  /** The passkey round in flight; leaving the screen aborts it so a late answer does nothing. */
+  /** The passkey round in flight; leaving aborts it, so a round not yet at confirm does nothing. */
   const flight = useRef<AbortController | null>(null);
+  /** True once that round's confirm has gone out: leaving then waits for it (AUTH-13). */
+  const sent = useRef(false);
+  /** How the screen was left: by "Use a different account", or gone (unmounted). */
+  const exit = useRef<"back" | "gone" | null>(null);
+  const [leaving, setLeaving] = useState(false);
 
-  useEffect(() => () => { flight.current?.abort(); }, []);
+  useEffect(() => {
+    exit.current = null;
+    return () => {
+      exit.current ??= "gone";
+      flight.current?.abort();
+    };
+  }, []);
 
   function say(field: string | null, general: string | null) {
     setCodeError(field);
@@ -52,10 +63,16 @@ export function SecondFactor({ onNext }: Props) {
     flight.current?.abort();
     const controller = new AbortController();
     flight.current = controller;
+    sent.current = false;
     setBusy(true);
     say(null, null);
-    const done = await round("/api/auth/second-factor/passkey", "/api/auth/second-factor/passkey/confirm", controller.signal);
+    const done = await round("/api/auth/second-factor/passkey", "/api/auth/second-factor/passkey/confirm", controller.signal, {}, () => { sent.current = true; });
     if (done === null) return;
+    sent.current = false;
+    if (controller.signal.aborted) {
+      await reconcile(done.answer);
+      return;
+    }
     const { answer, outcome: result } = done;
     setBusy(false);
     if (moved(answer)) return;
@@ -69,8 +86,27 @@ export function SecondFactor({ onNext }: Props) {
     say(null, result === "failed" || answer.status === 400 ? failed : refusal(answer.status, failed));
   }
 
+  /**
+   * Left after confirm went out: a sign-in the server made is signed out before the sign-in screen
+   * shows, so it never stands over a live session. If that logout fails the page shows the
+   * signed-in state, with its sign-out button. Once gone, it signs out and touches no state.
+   */
+  async function reconcile({ status, body }: Reply) {
+    if (status === 200 && body["next"] === "signed_in") {
+      const out = await logout();
+      if (exit.current === "back") onNext(loggedOut(out.status) ? "signed_out" : "signed_in");
+    } else if (exit.current === "back") onNext("signed_out");
+  }
+
   function back() {
+    if (exit.current === "back") return;
     flight.current?.abort();
+    if (flight.current !== null && sent.current) {
+      exit.current = "back";
+      setLeaving(true);
+      return;
+    }
+    exit.current = "back";
     onNext("signed_out");
   }
 
@@ -94,7 +130,7 @@ export function SecondFactor({ onNext }: Props) {
       </form>
       <p>
         <button type="button" className="link" onClick={back}>
-          {content.secondFactor.back}
+          {leaving ? content.signOutBusy : content.secondFactor.back}
         </button>
       </p>
     </>

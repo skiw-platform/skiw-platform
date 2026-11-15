@@ -28,7 +28,7 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
   const [busy, setBusy] = useState(false);
   const [offerPasskey, setOfferPasskey] = useState(passkeySupported);
   const codeRef = useRef<HTMLInputElement>(null);
-  /** The passkey round in flight; closing the dialog aborts it so a late answer does nothing. */
+  /** The passkey round in flight; closing the dialog aborts it, and a late answer calls nothing. */
   const flight = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -77,7 +77,8 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
     setBusy(true);
     say(null, null);
     const done = await round("/api/auth/stepup/passkey", "/api/auth/stepup/passkey/confirm", controller.signal, { purpose });
-    if (done === null) return;
+    // A sent confirm runs to its answer (the token stays coherent); after Cancel it calls nothing.
+    if (done === null || controller.signal.aborted) return;
     const { answer, outcome: result } = done;
     setBusy(false);
     if (settled(answer)) return;

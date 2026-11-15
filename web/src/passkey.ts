@@ -71,20 +71,30 @@ async function assertion(options: Json, signal: AbortSignal): Promise<Ceremony> 
  * when nothing reached confirm; `outcome` is null when the begin gave no options. */
 type Round = { answer: Reply; outcome: Ceremony | null };
 
-/**
- * Null once `signal` is aborted: the screen was left, so a late answer must not prompt, confirm or
- * move the page. The signal also reaches fetch and the browser prompt, which stop early.
- */
 /** Read through a call: TypeScript would otherwise keep the first check's narrowing across the awaits. */
 const left = (signal: AbortSignal): boolean => signal.aborted;
 
-export async function round(begin: string, confirm: string, signal: AbortSignal, extra: Json = {}): Promise<Round | null> {
+/**
+ * Null when `signal` was aborted before confirm went out: nothing reached confirm, so the caller
+ * just leaves; the signal also reaches the begin fetch and the browser prompt, which stop early.
+ * A sent confirm is a commit boundary (AUTH-13): it carries no signal and always runs to its
+ * answer, so `api.keepToken` sees any new CSRF token, and a caller whose signal is aborted by then
+ * reconciles with the server (the code screen signs the new session out). `onSent` runs as it goes.
+ */
+export async function round(
+  begin: string,
+  confirm: string,
+  signal: AbortSignal,
+  extra: Json = {},
+  onSent: () => void = () => undefined,
+): Promise<Round | null> {
   const begun = await post(begin, {}, signal);
   if (left(signal)) return null;
   const options = begun.body["options"];
   const usable = begun.status === 200 && typeof options === "object" && options !== null;
   const outcome = usable ? await assertion(options as Json, signal) : null;
   if (left(signal)) return null;
-  const answer = outcome !== null && typeof outcome === "object" ? await post(confirm, { ...extra, ...outcome }, signal) : begun;
-  return left(signal) ? null : { answer, outcome };
+  if (outcome === null || typeof outcome !== "object") return { answer: begun, outcome };
+  onSent();
+  return { answer: await post(confirm, { ...extra, ...outcome }), outcome };
 }

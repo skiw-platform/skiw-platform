@@ -8,7 +8,7 @@ import { content } from "./content";
 import { round } from "./passkey";
 import { SecondFactor } from "./screens/SecondFactor";
 import { StepUp } from "./screens/StepUp";
-import { sent, server, state, user, type Answer, type Call } from "./testkit";
+import { sent, server, state, user, type Answer, type Call, type Held } from "./testkit";
 
 const buffer = (...values: number[]) => new Uint8Array(values).buffer;
 
@@ -135,10 +135,25 @@ describe("the browser passkey helper", () => {
     expect(await done).toBeNull();
     expect(calls).toHaveLength(1);
   });
+
+  it("sends confirm without the signal and runs it to its answer even when aborted meanwhile", async () => {
+    authenticator();
+    const body = later<Record<string, unknown>>();
+    const calls = server(OPTIONS, { status: 200, body: body.promise });
+    const controller = new AbortController();
+    let wentOut = 0;
+    const done = round("/begin", "/confirm", controller.signal, {}, () => { wentOut += 1; });
+    await vi.waitFor(() => { expect(calls).toHaveLength(2); });
+    expect(wentOut).toBe(1);
+    expect(calls[1]?.init.signal).toBeNull();
+    controller.abort();
+    body.resolve({ next: "signed_in", csrf: "t3" });
+    expect((await done)?.answer).toEqual({ status: 200, body: { next: "signed_in", csrf: "t3" } });
+  });
 });
 
 describe("the code screen's passkey", () => {
-  async function codeScreen(...answers: (Answer | Promise<Answer>)[]) {
+  async function codeScreen(...answers: (Answer | Held | Promise<Answer>)[]) {
     const calls = server(state("second_factor"), ...answers);
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: content.secondFactor.title });
@@ -228,15 +243,14 @@ describe("the code screen's passkey", () => {
     announced(text, content.secondFactor.label);
   });
 
-  it.each(["begin", "prompt", "confirm"] as const)("going back while the %s is pending makes its late answer do nothing", async (stage) => {
+  it.each(["begin", "prompt"] as const)("going back while the %s is pending sends no confirm and moves nothing later", async (stage) => {
     const get = authenticator();
     const begin = later<Answer>();
     const prompt = later<unknown>();
-    const confirm = later<Answer>();
     if (stage === "prompt") get.mockReturnValueOnce(prompt.promise);
-    const calls = await codeScreen(stage === "begin" ? begin.promise : OPTIONS, stage === "confirm" ? confirm.promise : SIGNED_IN);
+    const calls = await codeScreen(stage === "begin" ? begin.promise : OPTIONS, SIGNED_IN);
     await user.click(screen.getByRole("button", { name: content.secondFactor.passkey }));
-    await vi.waitFor(() => { expect(calls).toHaveLength(stage === "confirm" ? 3 : 2); });
+    await vi.waitFor(() => { expect(calls).toHaveLength(2); });
     if (stage === "prompt") await vi.waitFor(() => { expect(get).toHaveBeenCalled(); });
     const back = screen.getByRole<HTMLButtonElement>("button", { name: content.secondFactor.back });
     expect(back.disabled).toBe(false);
@@ -244,27 +258,100 @@ describe("the code screen's passkey", () => {
     await screen.findByRole("heading", { level: 1, name: content.signIn.title });
     begin.resolve(OPTIONS);
     prompt.resolve(new FakeCredential());
-    confirm.resolve(SIGNED_IN);
     await settle();
     expect(get).toHaveBeenCalledTimes(stage === "begin" ? 0 : 1);
-    expect(calls).toHaveLength(stage === "confirm" ? 3 : 2);
+    expect(calls).toHaveLength(2);
     expect(screen.getByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 1, name: content.pageTitle })).toBeNull();
   });
 
-  it.each(["back", "unmount"] as const)("on its own, %s alone stops a pending confirm from moving the page", async (exit) => {
+  /** The code screen with its passkey confirm sent and its body held: the server has signed in. */
+  async function confirmSent(...after: (Answer | Promise<Answer>)[]) {
     authenticator();
-    const confirm = later<Answer>();
-    const calls = server(OPTIONS, confirm.promise);
+    const body = later<Record<string, unknown>>();
+    const held: Held = { status: 200, body: body.promise };
+    const calls = await codeScreen(OPTIONS, held, ...after);
+    await user.click(screen.getByRole("button", { name: content.secondFactor.passkey }));
+    await vi.waitFor(() => { expect(calls).toHaveLength(3); });
+    expect(calls[2]?.init.signal).toBeNull();
+    return { calls, body };
+  }
+  const titled = (name: string) => screen.queryByRole("heading", { level: 1, name });
+
+  it("going back after confirm went out signs that sign-in out, then shows sign-in with a usable token", async () => {
+    const logout = later<Answer>();
+    const { calls, body } = await confirmSent(logout.promise);
+    const back = screen.getByRole<HTMLButtonElement>("button", { name: content.secondFactor.back });
+    await user.click(back);
+    expect(back.disabled).toBe(false);
+    expect(back.textContent).toBe(content.signOutBusy);
+    expect(titled(content.signIn.title)).toBeNull();
+    body.resolve({ next: "signed_in", csrf: "t3" });
+    await vi.waitFor(() => { expect(calls).toHaveLength(4); });
+    expect(calls[3]?.path).toBe("/api/auth/logout");
+    expect(calls[3]?.init.headers).toMatchObject({ "X-CSRFToken": "t3" });
+    await settle();
+    expect(titled(content.signIn.title)).toBeNull();
+    expect(titled(content.pageTitle)).toBeNull();
+    logout.resolve({ status: 200, body: { next: "signed_out", csrf: "t9" } });
+    expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+    expect(titled(content.pageTitle)).toBeNull();
+    await user.type(screen.getByLabelText(content.signIn.email), "a@example.com");
+    await user.type(screen.getByLabelText(content.signIn.password), "pw");
+    await user.click(screen.getByRole("button", { name: content.signIn.submit }));
+    await vi.waitFor(() => { expect(calls).toHaveLength(5); });
+    expect(calls[4]?.path).toBe("/api/auth/login");
+    expect(calls[4]?.init.headers).toMatchObject({ "X-CSRFToken": "t9" });
+  });
+
+  it.each([
+    ["cannot reach the server", []],
+    ["fails", [{ status: 500, body: {} }]],
+  ] as const)("if that logout %s, shows the signed-in state, not sign-in over a live session", async (_, answers) => {
+    const { calls, body } = await confirmSent(...answers);
+    await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
+    body.resolve({ next: "signed_in", csrf: "t3" });
+    expect(await screen.findByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
+    expect(screen.getByRole("button", { name: content.signOut })).toBeTruthy();
+    expect(titled(content.signIn.title)).toBeNull();
+    expect(paths(calls).at(-1)).toBe("/api/auth/logout");
+  });
+
+  it("going back after a confirm that signed nothing in shows sign-in without a logout", async () => {
+    const { calls, body } = await confirmSent();
+    await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
+    body.resolve({ error: "passkey-wrong" });
+    expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+    expect(calls).toHaveLength(3);
+  });
+
+  it("unmounted after confirm went out, it still signs that sign-in out and moves nothing", async () => {
+    authenticator();
+    const body = later<Record<string, unknown>>();
+    const calls = server(OPTIONS, { status: 200, body: body.promise }, { status: 200, body: { next: "signed_out", csrf: "t9" } });
     const onNext = vi.fn();
     const { unmount } = render(<SecondFactor onNext={onNext} />);
     await user.click(screen.getByRole("button", { name: content.secondFactor.passkey }));
     await vi.waitFor(() => { expect(calls).toHaveLength(2); });
-    if (exit === "back") await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
-    else unmount();
-    confirm.resolve(SIGNED_IN);
+    unmount();
+    body.resolve({ next: "signed_in", csrf: "t3" });
+    await vi.waitFor(() => { expect(calls).toHaveLength(3); });
+    expect(calls[2]?.path).toBe("/api/auth/logout");
+    expect(calls[2]?.init.headers).toMatchObject({ "X-CSRFToken": "t3" });
     await settle();
-    expect(onNext.mock.calls).toEqual(exit === "back" ? [["signed_out"]] : []);
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it("a passkey refused before going back leaves nothing to wait for", async () => {
+    authenticator();
+    const calls = server(OPTIONS, { status: 401, body: { error: "passkey-wrong" } });
+    const onNext = vi.fn();
+    render(<SecondFactor onNext={onNext} />);
+    await user.click(screen.getByRole("button", { name: content.secondFactor.passkey }));
+    await screen.findByText(content.secondFactor.passkeyFailed);
+    await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
+    expect(onNext.mock.calls).toEqual([["signed_out"]]);
+    expect(calls).toHaveLength(2);
   });
 });
 
@@ -357,6 +444,7 @@ describe("the step-up dialog's passkey", () => {
       await settle();
       expect(get).toHaveBeenCalledTimes(stage === "begin" ? 0 : 1);
       expect(calls).toHaveLength(stage === "confirm" ? 2 : 1);
+      if (stage === "confirm") expect(calls[1]?.init.signal).toBeNull();
       expect(handlers.onVerified).not.toHaveBeenCalled();
       expect(handlers.onSignedOut).not.toHaveBeenCalled();
       expect(handlers.onCancel).toHaveBeenCalledTimes(exit === "unmount" ? 0 : 1);

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { post, sessionState, type SessionState } from "./api";
+import { loggedOut, logout, sessionState, type SessionState } from "./api";
 import { content } from "./content";
 import { discardInvitation, leaveEnrol, onEnrolPath, takeToken } from "./enrolLink";
 import { EnrolMissing, EnrolPassword, EnrolSetup, type Setup } from "./screens/Enrol";
@@ -50,9 +50,9 @@ export function App() {
   async function signOut() {
     setSignOutError(null);
     setSigningOut(true);
-    const { status } = await post("/api/auth/logout", {});
+    const { status } = await logout();
     setSigningOut(false);
-    if (status === 200 || status === 401) go("signed_out");
+    if (loggedOut(status)) go("signed_out");
     else setSignOutError(status === 0 ? content.errors.network : content.errors.generic);
   }
 
