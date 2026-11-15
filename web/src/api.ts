@@ -26,11 +26,13 @@ async function run(path: string, init: RequestInit): Promise<Reply> {
   }
 }
 
-export function post(path: string, body: Record<string, unknown>): Promise<Reply> {
+/** `signal` lets a caller abandon the request; an aborted fetch reads as NETWORK, so the caller checks it. */
+export function post(path: string, body: Record<string, unknown>, signal: AbortSignal | null = null): Promise<Reply> {
   return run(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-CSRFToken": token },
     body: JSON.stringify(body),
+    signal,
   });
 }
 

@@ -46,10 +46,8 @@ describe("step-up dialog", () => {
 
   it.each([
     [401, { error: "code-wrong" }, content.errors.codeWrong],
-    [429, { error: "limited" }, content.errors.limited],
     [400, { error: "invalid" }, content.errors.invalid],
-    [500, {}, content.errors.generic],
-  ])("on %i says so, clears the code and keeps focus there", async (status, body, text) => {
+  ])("on %i marks the code as refused, clears it and keeps focus there", async (status, body, text) => {
     server({ status, body });
     const { onVerified } = open();
     await enter("123456");
@@ -57,8 +55,24 @@ describe("step-up dialog", () => {
     const field = screen.getByLabelText(content.stepUp.label);
     expect((field as HTMLInputElement).value).toBe("");
     expect(document.activeElement).toBe(field);
+    expect(field.getAttribute("aria-invalid")).toBe("true");
     expect(field.getAttribute("aria-describedby")).toContain("stepup-error");
     expect(onVerified).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [429, { error: "limited" }, content.errors.limited],
+    [500, {}, content.errors.generic],
+  ])("on %i says so as a status, without marking the code", async (status, body, text) => {
+    server({ status, body });
+    open();
+    await enter("123456");
+    const message = await screen.findByText(text);
+    expect(message.getAttribute("aria-live")).toBe("polite");
+    const field = screen.getByLabelText(content.stepUp.label);
+    expect(document.activeElement).toBe(field);
+    expect(field.getAttribute("aria-invalid")).toBeNull();
+    expect(field.getAttribute("aria-describedby")).toBeNull();
   });
 
   it("says so when the server cannot be reached", async () => {
@@ -66,6 +80,7 @@ describe("step-up dialog", () => {
     open();
     await enter("123456");
     expect(await screen.findByText(content.errors.network)).toBeTruthy();
+    expect(screen.getByLabelText(content.stepUp.label).getAttribute("aria-invalid")).toBeNull();
   });
 
   it("hands over to sign-in when the user is no longer active", async () => {

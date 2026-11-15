@@ -4,8 +4,9 @@ import { vi } from "vitest";
 export type Answer = { status: number; body: Record<string, unknown> };
 export type Call = { path: string; init: RequestInit };
 
-/** Answers fetch() from a queue, in order, and records what the page sent. */
-export function server(...answers: Answer[]) {
+/** Answers fetch() from a queue, in order, and records what the page sent. A promised answer
+ * arrives when the test resolves it; the fake ignores the abort signal, as a slow network would. */
+export function server(...answers: (Answer | Promise<Answer>)[]) {
   const calls: Call[] = [];
   const queue = [...answers];
   vi.stubGlobal(
@@ -14,7 +15,7 @@ export function server(...answers: Answer[]) {
       calls.push({ path, init });
       const next = queue.shift();
       if (next === undefined) return Promise.reject(new TypeError("offline"));
-      return Promise.resolve(new Response(JSON.stringify(next.body), { status: next.status }));
+      return Promise.resolve(next).then((answer) => new Response(JSON.stringify(answer.body), { status: answer.status }));
     }),
   );
   return calls;

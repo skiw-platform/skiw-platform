@@ -56,6 +56,11 @@ export function refusal(status: number, wrong: string): string {
   return status === 0 ? content.errors.network : content.errors.generic;
 }
 
+/** A 401 (wrong code) or a 400 (not a code) is about the code itself; only those mark the field (A11Y-03). */
+export function aboutCode(status: number): boolean {
+  return status === 401 || status === 400;
+}
+
 /** The polite live region stays in the page so a screen reader hears the message when it appears. */
 export function Message({ id, text }: { id: string; text: string | null }) {
   return (

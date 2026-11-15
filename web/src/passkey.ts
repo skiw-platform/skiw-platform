@@ -52,7 +52,7 @@ function encode(credential: PublicKeyCredential): Json {
 /** `navigator.credentials.get()` with the server's request options. A cancel, a timeout, a refusing
  * authenticator and malformed options all read as "failed". The cast: the server JSON is the shape
  * WebAuthn expects once its binary fields are bytes, and the browser checks the rest. */
-async function assertion(options: Json): Promise<Ceremony> {
+async function assertion(options: Json, signal: AbortSignal): Promise<Ceremony> {
   if (!passkeySupported()) return "unsupported";
   try {
     const publicKey = {
@@ -60,7 +60,7 @@ async function assertion(options: Json): Promise<Ceremony> {
       challenge: bytes(options["challenge"]),
       allowCredentials: ids(options["allowCredentials"]),
     } as unknown as PublicKeyCredentialRequestOptions;
-    const credential = await navigator.credentials.get({ publicKey });
+    const credential = await navigator.credentials.get({ publicKey, signal });
     return credential instanceof window.PublicKeyCredential ? { credential: encode(credential) } : "failed";
   } catch (error) {
     return error instanceof DOMException && error.name === "NotSupportedError" ? "unsupported" : "failed";
@@ -71,11 +71,20 @@ async function assertion(options: Json): Promise<Ceremony> {
  * when nothing reached confirm; `outcome` is null when the begin gave no options. */
 type Round = { answer: Reply; outcome: Ceremony | null };
 
-export async function round(begin: string, confirm: string, extra: Json = {}): Promise<Round> {
-  const begun = await post(begin, {});
+/**
+ * Null once `signal` is aborted: the screen was left, so a late answer must not prompt, confirm or
+ * move the page. The signal also reaches fetch and the browser prompt, which stop early.
+ */
+/** Read through a call: TypeScript would otherwise keep the first check's narrowing across the awaits. */
+const left = (signal: AbortSignal): boolean => signal.aborted;
+
+export async function round(begin: string, confirm: string, signal: AbortSignal, extra: Json = {}): Promise<Round | null> {
+  const begun = await post(begin, {}, signal);
+  if (left(signal)) return null;
   const options = begun.body["options"];
   const usable = begun.status === 200 && typeof options === "object" && options !== null;
-  const outcome = usable ? await assertion(options as Json) : null;
-  const answer = outcome !== null && typeof outcome === "object" ? await post(confirm, { ...extra, ...outcome }) : begun;
-  return { answer, outcome };
+  const outcome = usable ? await assertion(options as Json, signal) : null;
+  if (left(signal)) return null;
+  const answer = outcome !== null && typeof outcome === "object" ? await post(confirm, { ...extra, ...outcome }, signal) : begun;
+  return left(signal) ? null : { answer, outcome };
 }

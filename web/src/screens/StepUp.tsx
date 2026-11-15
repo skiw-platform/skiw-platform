@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type SubmitEvent } fro
 
 import { post, type Reply } from "../api";
 import { content } from "../content";
-import { Field, Message, refusal } from "../forms";
+import { aboutCode, Field, Message, refusal } from "../forms";
 import { passkeySupported, round } from "../passkey";
 
 type Props = {
@@ -22,14 +22,30 @@ type Props = {
  */
 export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
   const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  /** Only a refused code marks the field; every other message is a status (A11Y-03). */
+  const [codeError, setCodeError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [offerPasskey, setOfferPasskey] = useState(passkeySupported);
   const codeRef = useRef<HTMLInputElement>(null);
+  /** The passkey round in flight; closing the dialog aborts it so a late answer does nothing. */
+  const flight = useRef<AbortController | null>(null);
 
   useEffect(() => {
     codeRef.current?.focus();
+    return () => { flight.current?.abort(); };
   }, []);
+
+  function say(field: string | null, general: string | null) {
+    setCodeError(field);
+    setStatus(general);
+  }
+
+  /** Cancel stays available during a passkey round, and stops it. */
+  function cancel() {
+    flight.current?.abort();
+    onCancel();
+  }
 
   /** The answers both routes share; false when the dialog stays open. */
   function settled({ status, body }: Reply): boolean {
@@ -42,34 +58,41 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
   async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
-    setError(null);
+    say(null, null);
     const answer = await post("/api/auth/stepup", { purpose, code });
     setBusy(false);
     if (settled(answer)) return;
     setCode("");
-    setError(refusal(answer.status, content.errors.codeWrong));
+    const words = refusal(answer.status, content.errors.codeWrong);
+    if (aboutCode(answer.status)) say(words, null);
+    else say(null, words);
     codeRef.current?.focus();
   }
 
   /** As at sign-in, a cancelled and a refused passkey get the same words. */
   async function passkey() {
+    flight.current?.abort();
+    const controller = new AbortController();
+    flight.current = controller;
     setBusy(true);
-    setError(null);
-    const { answer, outcome: result } = await round("/api/auth/stepup/passkey", "/api/auth/stepup/passkey/confirm", { purpose });
+    say(null, null);
+    const done = await round("/api/auth/stepup/passkey", "/api/auth/stepup/passkey/confirm", controller.signal, { purpose });
+    if (done === null) return;
+    const { answer, outcome: result } = done;
     setBusy(false);
     if (settled(answer)) return;
     if (answer.status === 409 || result === "unsupported") {
       setOfferPasskey(false);
-      setError(result === "unsupported" ? content.passkeys.unsupported : content.stepUp.noPasskey);
+      say(null, result === "unsupported" ? content.passkeys.unsupported : content.stepUp.noPasskey);
       codeRef.current?.focus();
       return;
     }
     const failed = content.stepUp.passkeyFailed;
-    setError(result === "failed" || answer.status === 400 ? failed : refusal(answer.status, failed));
+    say(null, result === "failed" || answer.status === 400 ? failed : refusal(answer.status, failed));
   }
 
   function keys(event: KeyboardEvent<HTMLElement>) {
-    if (event.key === "Escape") onCancel();
+    if (event.key === "Escape") cancel();
   }
 
   return (
@@ -83,8 +106,9 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
       <h2 id="stepup-title">{content.stepUp.title}</h2>
       <p>{content.stepUp.intro}</p>
       <form onSubmit={(event) => void submit(event)} className="form">
-        <Field id="stepup-code" label={content.stepUp.label} type="text" value={code} onChange={setCode} autoComplete="one-time-code" inputMode="numeric" errorId={error ? "stepup-error" : undefined} inputRef={codeRef} />
-        <Message id="stepup-error" text={error} />
+        <Field id="stepup-code" label={content.stepUp.label} type="text" value={code} onChange={setCode} autoComplete="one-time-code" inputMode="numeric" errorId={codeError ? "stepup-error" : undefined} inputRef={codeRef} />
+        <Message id="stepup-error" text={codeError} />
+        <Message id="stepup-status" text={status} />
         <div className="actions">
           <button type="submit" disabled={busy}>
             {busy ? content.stepUp.busy : content.stepUp.submit}
@@ -94,7 +118,7 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
               {content.stepUp.passkey}
             </button>
           ) : null}
-          <button type="button" className="link" onClick={onCancel}>
+          <button type="button" className="link" onClick={cancel}>
             {content.stepUp.cancel}
           </button>
         </div>

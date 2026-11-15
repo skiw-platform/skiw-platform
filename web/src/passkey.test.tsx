@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { content } from "./content";
 import { round } from "./passkey";
+import { SecondFactor } from "./screens/SecondFactor";
 import { StepUp } from "./screens/StepUp";
 import { sent, server, state, user, type Answer, type Call } from "./testkit";
 
@@ -38,7 +39,27 @@ const CREDENTIAL = {
   response: { clientDataJSON: "AQ", authenticatorData: "Ag", signature: "Aw" },
 };
 const UNTIL = "2026-11-15T10:05:00+00:00";
+const SIGNED_IN = { status: 200, body: { next: "signed_in", csrf: "t3" } };
+const VERIFIED = { status: 200, body: { next: "verified", until: UNTIL } };
 const paths = (calls: Call[]) => calls.map((call) => call.path);
+const live = () => new AbortController().signal;
+const settle = async () => { for (let i = 0; i < 5; i += 1) await new Promise((done) => setTimeout(done, 0)); };
+
+/** A promise the test resolves when it chooses: a slow network or a person slow at the prompt. */
+function later<T>() {
+  let give: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((done) => { give = done; });
+  return { promise, resolve: (value: T) => { give(value); } };
+}
+
+/** A status is announced politely and never marks the code field (A11Y-03). */
+function announced(text: string, label: string) {
+  const message = screen.getByText(text);
+  expect(message.getAttribute("aria-live")).toBe("polite");
+  const field = screen.getByLabelText(label);
+  expect(field.getAttribute("aria-invalid")).toBeNull();
+  expect(field.getAttribute("aria-describedby") ?? "").not.toMatch(/error|status/);
+}
 
 function untouched() {
   expect(localStorage.length + sessionStorage.length).toBe(0);
@@ -62,7 +83,7 @@ describe("the browser passkey helper", () => {
   it("turns base64url options into bytes and sends the credential back as base64url JSON", async () => {
     const get = authenticator();
     const calls = server(OPTIONS, { status: 200, body: {} });
-    const { outcome } = await round("/begin", "/confirm", { purpose: "p" });
+    const { outcome } = await round("/begin", "/confirm", live(), { purpose: "p" }) ?? {};
     expect(outcome).toEqual({ credential: CREDENTIAL });
     const publicKey = get.mock.calls[0]?.[0].publicKey;
     expect([...new Uint8Array(publicKey?.challenge as ArrayBuffer)]).toEqual([0, 1, 2]);
@@ -77,7 +98,7 @@ describe("the browser passkey helper", () => {
   ] as const)("maps %s to a plain outcome and confirms nothing", async (_, name, outcome) => {
     authenticator(name);
     const calls = server(OPTIONS);
-    expect((await round("/begin", "/confirm")).outcome).toBe(outcome);
+    expect((await round("/begin", "/confirm", live()))?.outcome).toBe(outcome);
     expect(calls).toHaveLength(1);
   });
 
@@ -85,23 +106,39 @@ describe("the browser passkey helper", () => {
     const get = authenticator();
     get.mockResolvedValueOnce(null);
     const calls = server(OPTIONS);
-    expect((await round("/begin", "/confirm")).outcome).toBe("failed");
+    expect((await round("/begin", "/confirm", live()))?.outcome).toBe("failed");
     expect(calls).toHaveLength(1);
   });
 
   it("says unsupported without WebAuthn and failed for malformed options; no options, no ceremony", async () => {
     server(OPTIONS, { status: 200, body: { options: { challenge: 7 } } }, { status: 409, body: { error: "no-passkey" } });
-    expect((await round("/b", "/c")).outcome).toBe("unsupported");
+    expect((await round("/b", "/c", live()))?.outcome).toBe("unsupported");
     const get = authenticator();
-    expect((await round("/b", "/c")).outcome).toBe("failed");
-    const { answer, outcome } = await round("/b", "/c");
-    expect([answer.status, outcome]).toEqual([409, null]);
+    expect((await round("/b", "/c", live()))?.outcome).toBe("failed");
+    const done = await round("/b", "/c", live());
+    expect([done?.answer.status, done?.outcome]).toEqual([409, null]);
     expect(get).not.toHaveBeenCalled();
+  });
+
+  it("hands its signal to fetch and to the prompt, and answers null once it is aborted", async () => {
+    const get = authenticator();
+    const calls = server(OPTIONS, { status: 200, body: {} });
+    const controller = new AbortController();
+    const prompt = later<unknown>();
+    get.mockReturnValueOnce(prompt.promise);
+    const done = round("/begin", "/confirm", controller.signal);
+    await vi.waitFor(() => { expect(get).toHaveBeenCalled(); });
+    expect(calls[0]?.init.signal).toBe(controller.signal);
+    expect(get.mock.calls[0]?.[0].signal).toBe(controller.signal);
+    controller.abort();
+    prompt.resolve(new FakeCredential());
+    expect(await done).toBeNull();
+    expect(calls).toHaveLength(1);
   });
 });
 
 describe("the code screen's passkey", () => {
-  async function codeScreen(...answers: Answer[]) {
+  async function codeScreen(...answers: (Answer | Promise<Answer>)[]) {
     const calls = server(state("second_factor"), ...answers);
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: content.secondFactor.title });
@@ -160,7 +197,7 @@ describe("the code screen's passkey", () => {
     expect(screen.queryByRole("button", { name: content.secondFactor.passkey })).toBeNull();
     const field = screen.getByLabelText(content.secondFactor.label);
     expect(document.activeElement).toBe(field);
-    expect(field.getAttribute("aria-describedby")).toContain("code-error");
+    announced(content.secondFactor.noPasskey, content.secondFactor.label);
     expect(get).not.toHaveBeenCalled();
     await user.type(field, "123456");
     await user.click(screen.getByRole("button", { name: content.secondFactor.submit }));
@@ -174,6 +211,60 @@ describe("the code screen's passkey", () => {
     await user.click(screen.getByRole("button", { name: content.secondFactor.passkey }));
     expect(await screen.findByText(content.passkeys.unsupported)).toBeTruthy();
     expect(screen.queryByRole("button", { name: content.secondFactor.passkey })).toBeNull();
+  });
+
+  it.each([
+    ["a cancel", "NotAllowedError", [OPTIONS], content.secondFactor.passkeyFailed],
+    ["a refusal", undefined, [OPTIONS, { status: 401, body: { error: "passkey-wrong" } }], content.secondFactor.passkeyFailed],
+    ["no passkey", undefined, [{ status: 409, body: { error: "no-passkey" } }], content.secondFactor.noPasskey],
+    ["no support", "NotSupportedError", [OPTIONS], content.passkeys.unsupported],
+    ["the limit", undefined, [OPTIONS, { status: 429, body: { error: "limited" } }], content.errors.limited],
+    ["no network", undefined, [], content.errors.network],
+  ] as const)("announces %s as a status that leaves the code field unmarked", async (_, failure, answers, text) => {
+    authenticator(failure);
+    await codeScreen(...answers);
+    await user.click(screen.getByRole("button", { name: content.secondFactor.passkey }));
+    await screen.findByText(text);
+    announced(text, content.secondFactor.label);
+  });
+
+  it.each(["begin", "prompt", "confirm"] as const)("going back while the %s is pending makes its late answer do nothing", async (stage) => {
+    const get = authenticator();
+    const begin = later<Answer>();
+    const prompt = later<unknown>();
+    const confirm = later<Answer>();
+    if (stage === "prompt") get.mockReturnValueOnce(prompt.promise);
+    const calls = await codeScreen(stage === "begin" ? begin.promise : OPTIONS, stage === "confirm" ? confirm.promise : SIGNED_IN);
+    await user.click(screen.getByRole("button", { name: content.secondFactor.passkey }));
+    await vi.waitFor(() => { expect(calls).toHaveLength(stage === "confirm" ? 3 : 2); });
+    if (stage === "prompt") await vi.waitFor(() => { expect(get).toHaveBeenCalled(); });
+    const back = screen.getByRole<HTMLButtonElement>("button", { name: content.secondFactor.back });
+    expect(back.disabled).toBe(false);
+    await user.click(back);
+    await screen.findByRole("heading", { level: 1, name: content.signIn.title });
+    begin.resolve(OPTIONS);
+    prompt.resolve(new FakeCredential());
+    confirm.resolve(SIGNED_IN);
+    await settle();
+    expect(get).toHaveBeenCalledTimes(stage === "begin" ? 0 : 1);
+    expect(calls).toHaveLength(stage === "confirm" ? 3 : 2);
+    expect(screen.getByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 1, name: content.pageTitle })).toBeNull();
+  });
+
+  it.each(["back", "unmount"] as const)("on its own, %s alone stops a pending confirm from moving the page", async (exit) => {
+    authenticator();
+    const confirm = later<Answer>();
+    const calls = server(OPTIONS, confirm.promise);
+    const onNext = vi.fn();
+    const { unmount } = render(<SecondFactor onNext={onNext} />);
+    await user.click(screen.getByRole("button", { name: content.secondFactor.passkey }));
+    await vi.waitFor(() => { expect(calls).toHaveLength(2); });
+    if (exit === "back") await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
+    else unmount();
+    confirm.resolve(SIGNED_IN);
+    await settle();
+    expect(onNext.mock.calls).toEqual(exit === "back" ? [["signed_out"]] : []);
   });
 });
 
@@ -222,6 +313,55 @@ describe("the step-up dialog's passkey", () => {
     await user.click(screen.getByRole("button", { name: content.stepUp.passkey }));
     await vi.waitFor(() => { expect(onSignedOut).toHaveBeenCalled(); });
   });
+
+  it.each([
+    ["a cancel", "NotAllowedError", [OPTIONS], content.stepUp.passkeyFailed],
+    ["a refusal", undefined, [OPTIONS, { status: 401, body: { error: "passkey-wrong" } }], content.stepUp.passkeyFailed],
+    ["no passkey", undefined, [{ status: 409, body: { error: "no-passkey" } }], content.stepUp.noPasskey],
+    ["no support", "NotSupportedError", [OPTIONS], content.passkeys.unsupported],
+    ["the limit", undefined, [OPTIONS, { status: 429, body: { error: "limited" } }], content.errors.limited],
+    ["no network", undefined, [], content.errors.network],
+  ] as const)("announces %s as a status that leaves the code field unmarked", async (_, failure, answers, text) => {
+    authenticator(failure);
+    server(...answers);
+    dialog();
+    await user.click(screen.getByRole("button", { name: content.stepUp.passkey }));
+    await screen.findByText(text);
+    announced(text, content.stepUp.label);
+  });
+
+  const STAGES = ["begin", "prompt", "confirm"] as const;
+  const EXITS = ["Cancel", "Escape", "unmount"] as const;
+  it.each(STAGES.flatMap((stage) => EXITS.map((exit) => [stage, exit] as const)))(
+    "with the %s pending, %s makes its late answer do nothing",
+    async (stage, exit) => {
+      const get = authenticator();
+      const begin = later<Answer>();
+      const prompt = later<unknown>();
+      const confirm = later<Answer>();
+      if (stage === "prompt") get.mockReturnValueOnce(prompt.promise);
+      const calls = server(stage === "begin" ? begin.promise : OPTIONS, stage === "confirm" ? confirm.promise : VERIFIED);
+      const handlers = { onVerified: vi.fn(), onCancel: vi.fn(), onSignedOut: vi.fn() };
+      const { unmount } = render(<StepUp purpose="factor.change" {...handlers} />);
+      await user.click(screen.getByRole("button", { name: content.stepUp.passkey }));
+      await vi.waitFor(() => { expect(calls).toHaveLength(stage === "confirm" ? 2 : 1); });
+      if (stage === "prompt") await vi.waitFor(() => { expect(get).toHaveBeenCalled(); });
+      const cancel = screen.getByRole<HTMLButtonElement>("button", { name: content.stepUp.cancel });
+      expect(cancel.disabled).toBe(false);
+      if (exit === "Cancel") await user.click(cancel);
+      else if (exit === "Escape") fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+      else unmount();
+      begin.resolve(OPTIONS);
+      prompt.resolve(new FakeCredential());
+      confirm.resolve(VERIFIED);
+      await settle();
+      expect(get).toHaveBeenCalledTimes(stage === "begin" ? 0 : 1);
+      expect(calls).toHaveLength(stage === "confirm" ? 2 : 1);
+      expect(handlers.onVerified).not.toHaveBeenCalled();
+      expect(handlers.onSignedOut).not.toHaveBeenCalled();
+      expect(handlers.onCancel).toHaveBeenCalledTimes(exit === "unmount" ? 0 : 1);
+    },
+  );
 });
 
 it("adds no animation, so there is no motion to reduce", () => {
