@@ -41,10 +41,6 @@ export function logout(): Promise<Reply> {
   return post("/api/auth/logout", {});
 }
 
-/** A logout answer after which the server holds no session for this browser: 200, or the 401 of
- * a session it already refused. */
-export const loggedOut = (status: number): boolean => status === 200 || status === 401;
-
 export function get(path: string): Promise<Reply> {
   return run(path, { method: "GET" });
 }
@@ -67,14 +63,15 @@ export async function sessionState(): Promise<SessionState> {
 }
 
 /**
- * Signs out and proves it (AUTH-13). A logout whose answer carried the rotated token is proof; any
- * other answer (lost, truncated, refused) is checked against the server's own session state, which
+ * Signs out and proves it (AUTH-13). A logout whose answer is exactly the signed-out shape (status
+ * 200, `next: "signed_out"`, a rotated token) is proof; any other answer (lost, truncated, malformed,
+ * refused) is checked against the server's own session state, which
  * also brings the token up to date. Anything else means signed-out is unproven: callers keep the
  * signed-in screen and its sign-out button as the retry.
  */
 export async function signOut(): Promise<"signed_out" | "offline" | "failed"> {
   const { status, body } = await logout();
-  if (status === 200 && typeof body["csrf"] === "string") return "signed_out";
+  if (status === 200 && body["next"] === "signed_out" && typeof body["csrf"] === "string" && body["csrf"] !== "") return "signed_out";
   if ((await readSession()) === "signed_out") return "signed_out";
   return status === 0 ? "offline" : "failed";
 }

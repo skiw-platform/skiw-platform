@@ -268,9 +268,12 @@ describe("the code screen's passkey", () => {
 
   /** The code screen with its passkey confirm sent and its body held: the server has signed in. */
   async function confirmSent(...after: (Answer | Promise<Answer>)[]) {
+    return confirmSentAs(200, ...after);
+  }
+  async function confirmSentAs(status: number, ...after: (Answer | Promise<Answer>)[]) {
     authenticator();
     const body = later<Record<string, unknown>>();
-    const held: Held = { status: 200, body: body.promise };
+    const held: Held = { status, body: body.promise };
     const calls = await codeScreen(OPTIONS, held, ...after);
     await user.click(screen.getByRole("button", { name: content.secondFactor.passkey }));
     await vi.waitFor(() => { expect(calls).toHaveLength(3); });
@@ -340,8 +343,44 @@ describe("the code screen's passkey", () => {
     expect(calls[5]?.init.headers).toMatchObject({ "X-CSRFToken": "t7" });
   });
 
+  it.each(["second_factor", "enrol_factor"] as const)("a confirm that never arrived, with the server at %s, goes to sign-in and never shows Today", async (name) => {
+    const { calls, body } = await confirmSent({ status: 200, body: { state: name, csrf: "t5" } });
+    await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
+    body.reject(new TypeError("cut"));
+    expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+    expect(titled(content.pageTitle)).toBeNull();
+    expect(paths(calls).slice(-1)).toEqual(["/api/auth/session"]);
+  });
+
+  it("a confirm that never arrived and a session that cannot be read tries the logout, and keeps Today if that fails", async () => {
+    const { calls, body } = await confirmSent({ status: 500, body: {} }, { status: 500, body: {} }, { status: 500, body: {} });
+    await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
+    body.reject(new TypeError("cut"));
+    expect(await screen.findByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
+    expect(titled(content.signIn.title)).toBeNull();
+    expect(paths(calls).slice(-3)).toEqual(["/api/auth/session", "/api/auth/logout", "/api/auth/session"]);
+  });
+
+  it("a status-200 confirm without next is not trusted: the session is read, then logged out, before sign-in", async () => {
+    const { calls, body } = await confirmSent({ status: 200, body: { state: "signed_in", csrf: "t4" } }, { status: 200, body: { next: "signed_out", csrf: "t9" } });
+    await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
+    body.resolve({ csrf: "t3" });
+    expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+    expect(paths(calls).slice(-2)).toEqual(["/api/auth/session", "/api/auth/logout"]);
+    expect(calls[4]?.init.headers).toMatchObject({ "X-CSRFToken": "t4" });
+  });
+
+  it("a status-200 logout without next is re-checked against the server before sign-in", async () => {
+    const { calls, body } = await confirmSent({ status: 200, body: { csrf: "t8" } }, { status: 200, body: { state: "signed_in", csrf: "t8" } });
+    await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
+    body.resolve({ next: "signed_in", csrf: "t3" });
+    expect(await screen.findByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
+    expect(titled(content.signIn.title)).toBeNull();
+    expect(paths(calls).slice(-2)).toEqual(["/api/auth/logout", "/api/auth/session"]);
+  });
+
   it("going back after a confirm that signed nothing in shows sign-in without a logout", async () => {
-    const { calls, body } = await confirmSent();
+    const { calls, body } = await confirmSentAs(401);
     await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
     body.resolve({ error: "passkey-wrong" });
     expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();

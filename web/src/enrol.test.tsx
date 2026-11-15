@@ -169,7 +169,7 @@ describe("enrolment", () => {
 
   it("does not show someone else's invitation after a signed-in person signs out", async () => {
     open("/enrol#tok-999");
-    server(state("signed_in"), { status: 200, body: { csrf: "t3" } });
+    server(state("signed_in"), { status: 200, body: { next: "signed_out", csrf: "t3" } });
     render(<App />);
     await user.click(await screen.findByRole("button", { name: content.signOut }));
     expect(await screen.findByLabelText(content.signIn.email)).toBeTruthy();

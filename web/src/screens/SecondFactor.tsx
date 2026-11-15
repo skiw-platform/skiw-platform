@@ -88,16 +88,24 @@ export function SecondFactor({ onNext }: Props) {
 
   /**
    * Left after confirm went out: a sign-in the server made is signed out before the sign-in screen
-   * shows, so it never stands over a live session. A confirm answer with no readable body (lost,
-   * truncated, 5xx) proves nothing, so the session is read from the server first. If signed-out
+   * shows, so it never stands over a live session. Only a confirm answer of exactly the success shape (200, `next: signed_in`, a token) or the
+   * refusal shape (4xx with an `error`) is trusted; any other answer (lost, truncated, 5xx, malformed)
+   * proves nothing, so the session is read from the server: signed in is signed out first, signed out,
+   * second factor or enrol factor go to sign-in, an unreadable answer tries the logout. If signed-out
    * can't be proven the page shows the signed-in state, with its sign-out button. Once gone, it
    * signs out and touches no state.
    */
   async function reconcile({ status, body }: Reply) {
-    const readable = status >= 200 && status < 500 && Object.keys(body).length > 0;
     let clear: boolean;
-    if (readable) clear = body["next"] === "signed_in" ? (await signOut()) === "signed_out" : true;
-    else clear = (await readSession()) === "signed_out" || (await signOut()) === "signed_out";
+    if (status === 200 && body["next"] === "signed_in" && typeof body["csrf"] === "string") {
+      clear = (await signOut()) === "signed_out";
+    } else if (status >= 400 && status < 500 && typeof body["error"] === "string") {
+      clear = true;
+    } else {
+      // Lost, truncated, 5xx or not the shape the server sends: only the server's own state says.
+      const state = await readSession();
+      clear = state === null ? (await signOut()) === "signed_out" : state === "signed_in" ? (await signOut()) === "signed_out" : true;
+    }
     if (exit.current === "back") onNext(clear ? "signed_out" : "signed_in");
   }
 
