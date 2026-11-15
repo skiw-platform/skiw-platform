@@ -42,6 +42,18 @@ describe("App", () => {
     expect(screen.getByRole("main").getAttribute("id")).toBe("main");
   });
 
+  it("never replaces its CSRF token with an empty one", async () => {
+    const calls = server(state("signed_out"), { status: 200, body: { next: "second_factor", csrf: "" } }, { status: 401, body: { error: "wrong" } });
+    render(<App />);
+    await user.type(await screen.findByLabelText(content.signIn.email), "a@example.com");
+    await user.type(screen.getByLabelText(content.signIn.password), "pw");
+    await user.click(screen.getByRole("button", { name: content.signIn.submit }));
+    await user.type(await screen.findByLabelText(content.secondFactor.label), "123456");
+    await user.click(screen.getByRole("button", { name: content.secondFactor.submit }));
+    await vi.waitFor(() => { expect(calls).toHaveLength(3); });
+    expect(calls[2]?.init.headers).toMatchObject({ "X-CSRFToken": "t1" });
+  });
+
   it("goes to the code step after a right password and sends the CSRF token it was given", async () => {
     const calls = server(state("signed_out"), { status: 200, body: { next: "second_factor", csrf: "t2" } });
     render(<App />);
@@ -174,6 +186,26 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: content.signOut }));
     expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
     expect(screen.queryByText(content.errors.generic)).toBeNull();
+  });
+
+  it.each(["second_factor", "enrol_factor"] as const)("shows sign-in, not Today, when a refused sign-out finds the server at %s", async (name) => {
+    const calls = server(state("signed_in"), { status: 403, body: {} }, { status: 200, body: { state: name, csrf: "t2" } });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: content.signOut }));
+    expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(calls.map((call) => call.path)).toEqual(["/api/auth/session", "/api/auth/logout", "/api/auth/session"]);
+  });
+
+  it.each([
+    ["signed in", state("signed_in")],
+    ["unreadable", { status: 500, body: {} }],
+  ] as const)("keeps Today with an error when a refused sign-out finds the server %s", async (_, after) => {
+    server(state("signed_in"), { status: 403, body: {} }, after);
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: content.signOut }));
+    expect(await screen.findByText(content.errors.generic)).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
   });
 
   it("disables the sign-out button and says so while the request runs", async () => {

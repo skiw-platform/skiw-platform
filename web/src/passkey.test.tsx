@@ -352,35 +352,43 @@ describe("the code screen's passkey", () => {
     expect(paths(calls).slice(-1)).toEqual(["/api/auth/session"]);
   });
 
-  it("a confirm that never arrived and a session that cannot be read tries the logout, and keeps Today if that fails", async () => {
-    const { calls, body } = await confirmSent({ status: 500, body: {} }, { status: 500, body: {} }, { status: 500, body: {} });
+  it("a confirm that never arrived and a session that cannot be read sends no logout and keeps Today", async () => {
+    const { calls, body } = await confirmSent({ status: 500, body: {} });
     await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
     body.reject(new TypeError("cut"));
     expect(await screen.findByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
     expect(titled(content.signIn.title)).toBeNull();
-    expect(paths(calls).slice(-3)).toEqual(["/api/auth/session", "/api/auth/logout", "/api/auth/session"]);
+    expect(paths(calls).slice(3)).toEqual(["/api/auth/session"]);
   });
 
   it.each([
     ["no token", { state: "signed_out" }],
     ["an empty token", { state: "signed_out", csrf: "" }],
-  ] as const)("a session answer with %s is not proof: Today stays, and no later POST uses a stale token", async (_, answer) => {
-    const { calls, body } = await confirmSent({ status: 200, body: answer }, { status: 500, body: {} }, { status: 200, body: answer });
+  ] as const)("a session answer with %s is not proof: Today stays and no logout is sent with a stale token", async (_, answer) => {
+    const { calls, body } = await confirmSent({ status: 200, body: answer });
     await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
     body.reject(new TypeError("cut"));
     expect(await screen.findByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
     expect(titled(content.signIn.title)).toBeNull();
-    expect(paths(calls).slice(-3)).toEqual(["/api/auth/session", "/api/auth/logout", "/api/auth/session"]);
-    expect((calls[4]?.init.headers as Record<string, string>)["X-CSRFToken"]).not.toBe("");
+    expect(paths(calls).slice(3)).toEqual(["/api/auth/session"]);
   });
 
-  it.each(["second_factor", "enrol_factor"] as const)("an unreadable first read, a refused logout, then %s on the follow-up read goes to sign-in", async (name) => {
-    const { calls, body } = await confirmSent({ status: 500, body: {} }, { status: 500, body: {} }, { status: 200, body: { state: name, csrf: "t6" } });
+  it("a confirm success with an empty token is ambiguous: the session is read, not logged out with a stale token", async () => {
+    const { calls, body } = await confirmSent({ status: 200, body: { state: "signed_out", csrf: "t7" } });
+    await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
+    body.resolve({ next: "signed_in", csrf: "" });
+    expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+    expect(paths(calls).slice(3)).toEqual(["/api/auth/session"]);
+  });
+
+  it.each(["second_factor", "enrol_factor"] as const)("a signed-in read, a refused logout, then %s on the follow-up read goes to sign-in", async (name) => {
+    const { calls, body } = await confirmSent({ status: 200, body: { state: "signed_in", csrf: "t4" } }, { status: 403, body: {} }, { status: 200, body: { state: name, csrf: "t6" } });
     await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
     body.reject(new TypeError("cut"));
     expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
     expect(titled(content.pageTitle)).toBeNull();
     expect(paths(calls).slice(-3)).toEqual(["/api/auth/session", "/api/auth/logout", "/api/auth/session"]);
+    expect(calls[4]?.init.headers).toMatchObject({ "X-CSRFToken": "t4" });
   });
 
   it("a status-200 confirm without next is not trusted: the session is read, then logged out, before sign-in", async () => {

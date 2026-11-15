@@ -79,10 +79,5 @@ export async function endSession(): Promise<{ out: "signed_out" | "offline" | "f
   return { out: status === 0 ? "offline" : "failed", state };
 }
 
-/** `endSession` for callers that need only whether signed-out is proven. */
-export async function signOut(): Promise<"signed_out" | "offline" | "failed"> {
-  return (await endSession()).out;
-}
-
 /** True when the server says nothing is authenticated: the sign-in flow is the right screen. */
 export const unauthenticated = (state: SessionState | null): boolean => state !== null && state !== "signed_in";

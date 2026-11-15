@@ -77,9 +77,9 @@ const left = (signal: AbortSignal): boolean => signal.aborted;
 /**
  * Null when `signal` was aborted before confirm went out: nothing reached confirm, so the caller
  * just leaves; the signal also reaches the begin fetch and the browser prompt, which stop early.
- * A sent confirm is a commit boundary (AUTH-13): it carries no signal and always runs to its
- * answer, so `api.keepToken` sees any new CSRF token, and a caller whose signal is aborted by then
- * reconciles with the server (the code screen signs the new session out). `onSent` runs as it goes.
+ * A sent confirm is a commit boundary (AUTH-13): it carries no signal, but its answer can still be
+ * lost, cut or malformed, so a caller whose signal is aborted by then reconciles with the server
+ * (the code screen reads the session and signs a live one out, only with a token it saw). `onSent` runs as it goes.
  */
 export async function round(
   begin: string,

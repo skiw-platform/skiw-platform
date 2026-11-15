@@ -88,10 +88,10 @@ export function SecondFactor({ onNext }: Props) {
 
   /**
    * Left after confirm went out: a sign-in the server made is signed out before the sign-in screen
-   * shows, so it never stands over a live session. Only a confirm answer of exactly the success shape (200, `next: signed_in`, a token) or the
+   * shows, so it never stands over a live session. Only a confirm answer of exactly the success shape (200, `next: signed_in`, a non-empty token) or the
    * refusal shape (4xx with an `error`) is trusted; any other answer (lost, truncated, 5xx, malformed)
    * proves nothing, so the session is read from the server: signed in is signed out first, signed out,
-   * second factor or enrol factor go to sign-in, an unreadable answer tries the logout. If signed-out
+   * second factor or enrol factor go to sign-in, an unreadable read sends no logout (no current token was seen) and keeps the signed-in retry screen. If signed-out
    * can't be proven the page shows the signed-in state, with its sign-out button. Once gone, it
    * signs out and touches no state.
    */
@@ -101,14 +101,15 @@ export function SecondFactor({ onNext }: Props) {
       return out === "signed_out" || unauthenticated(state);
     };
     let clear: boolean;
-    if (status === 200 && body["next"] === "signed_in" && typeof body["csrf"] === "string") {
+    if (status === 200 && body["next"] === "signed_in" && typeof body["csrf"] === "string" && body["csrf"] !== "") {
       clear = await ended();
     } else if (status >= 400 && status < 500 && typeof body["error"] === "string") {
       clear = true;
     } else {
       // Lost, truncated, 5xx or not the shape the server sends: only the server's own state says.
       const state = await readSession();
-      clear = unauthenticated(state) || (await ended());
+      // No logout without a token this page saw: an unreadable read leaves the signed-in retry screen.
+      clear = state !== null && (unauthenticated(state) || (await ended()));
     }
     if (exit.current === "back") onNext(clear ? "signed_out" : "signed_in");
   }
