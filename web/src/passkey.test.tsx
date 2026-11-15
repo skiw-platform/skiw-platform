@@ -48,8 +48,9 @@ const settle = async () => { for (let i = 0; i < 5; i += 1) await new Promise((d
 /** A promise the test resolves when it chooses: a slow network or a person slow at the prompt. */
 function later<T>() {
   let give: (value: T) => void = () => undefined;
-  const promise = new Promise<T>((done) => { give = done; });
-  return { promise, resolve: (value: T) => { give(value); } };
+  let fail: (reason: unknown) => void = () => undefined;
+  const promise = new Promise<T>((done, bad) => { give = done; fail = bad; });
+  return { promise, resolve: (value: T) => { give(value); }, reject: (reason: unknown) => { fail(reason); } };
 }
 
 /** A status is announced politely and never marks the code field (A11Y-03). */
@@ -314,7 +315,29 @@ describe("the code screen's passkey", () => {
     expect(await screen.findByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
     expect(screen.getByRole("button", { name: content.signOut })).toBeTruthy();
     expect(titled(content.signIn.title)).toBeNull();
-    expect(paths(calls).at(-1)).toBe("/api/auth/logout");
+    expect(paths(calls).slice(-2)).toEqual(["/api/auth/logout", "/api/auth/session"]);
+  });
+
+  it("a confirm whose body never arrives is checked against the server before sign-in shows", async () => {
+    const { calls, body } = await confirmSent({ status: 200, body: { state: "signed_in", csrf: "t4" } }, { status: 200, body: { next: "signed_out", csrf: "t9" } });
+    await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
+    body.reject(new TypeError("cut"));
+    expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+    expect(paths(calls).slice(-2)).toEqual(["/api/auth/session", "/api/auth/logout"]);
+    expect(calls[4]?.init.headers).toMatchObject({ "X-CSRFToken": "t4" });
+  });
+
+  it("a logout whose body is lost is checked against the server, and the next login carries its token", async () => {
+    const { calls, body } = await confirmSent({ status: 200, body: {} }, { status: 200, body: { state: "signed_out", csrf: "t7" } });
+    await user.click(screen.getByRole("button", { name: content.secondFactor.back }));
+    body.resolve({ next: "signed_in", csrf: "t3" });
+    expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+    expect(paths(calls).slice(-2)).toEqual(["/api/auth/logout", "/api/auth/session"]);
+    await user.type(screen.getByLabelText(content.signIn.email), "a@example.com");
+    await user.type(screen.getByLabelText(content.signIn.password), "pw");
+    await user.click(screen.getByRole("button", { name: content.signIn.submit }));
+    await vi.waitFor(() => { expect(calls).toHaveLength(6); });
+    expect(calls[5]?.init.headers).toMatchObject({ "X-CSRFToken": "t7" });
   });
 
   it("going back after a confirm that signed nothing in shows sign-in without a logout", async () => {

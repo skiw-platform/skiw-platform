@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type SubmitEvent } from "react";
 
-import { loggedOut, logout, post, type Reply, type SessionState } from "../api";
+import { post, readSession, signOut, type Reply, type SessionState } from "../api";
 import { content } from "../content";
 import { aboutCode, Field, Message, refusal } from "../forms";
 import { passkeySupported, round } from "../passkey";
@@ -88,14 +88,17 @@ export function SecondFactor({ onNext }: Props) {
 
   /**
    * Left after confirm went out: a sign-in the server made is signed out before the sign-in screen
-   * shows, so it never stands over a live session. If that logout fails the page shows the
-   * signed-in state, with its sign-out button. Once gone, it signs out and touches no state.
+   * shows, so it never stands over a live session. A confirm answer with no readable body (lost,
+   * truncated, 5xx) proves nothing, so the session is read from the server first. If signed-out
+   * can't be proven the page shows the signed-in state, with its sign-out button. Once gone, it
+   * signs out and touches no state.
    */
   async function reconcile({ status, body }: Reply) {
-    if (status === 200 && body["next"] === "signed_in") {
-      const out = await logout();
-      if (exit.current === "back") onNext(loggedOut(out.status) ? "signed_out" : "signed_in");
-    } else if (exit.current === "back") onNext("signed_out");
+    const readable = status >= 200 && status < 500 && Object.keys(body).length > 0;
+    let clear: boolean;
+    if (readable) clear = body["next"] === "signed_in" ? (await signOut()) === "signed_out" : true;
+    else clear = (await readSession()) === "signed_out" || (await signOut()) === "signed_out";
+    if (exit.current === "back") onNext(clear ? "signed_out" : "signed_in");
   }
 
   function back() {

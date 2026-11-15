@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { loggedOut, logout, sessionState, type SessionState } from "./api";
+import { sessionState, signOut as proveSignedOut, type SessionState } from "./api";
 import { content } from "./content";
 import { discardInvitation, leaveEnrol, onEnrolPath, takeToken } from "./enrolLink";
 import { EnrolMissing, EnrolPassword, EnrolSetup, type Setup } from "./screens/Enrol";
@@ -50,10 +50,10 @@ export function App() {
   async function signOut() {
     setSignOutError(null);
     setSigningOut(true);
-    const { status } = await logout();
+    const done = await proveSignedOut();
     setSigningOut(false);
-    if (loggedOut(status)) go("signed_out");
-    else setSignOutError(status === 0 ? content.errors.network : content.errors.generic);
+    if (done === "signed_out") go("signed_out");
+    else setSignOutError(done === "offline" ? content.errors.network : content.errors.generic);
   }
 
   const [signingOut, setSigningOut] = useState(false);

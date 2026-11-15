@@ -53,11 +53,28 @@ export type SessionState = "signed_out" | "signed_in" | "second_factor" | "enrol
 
 const STATES: readonly string[] = ["signed_out", "signed_in", "second_factor", "enrol_factor"];
 
-/** What the server says this browser is. Anything unexpected reads as signed out. */
-export async function sessionState(): Promise<SessionState> {
+/** What the server says this browser is, or null when the answer was unreadable. A read also
+ * takes the current CSRF token from its body, so it re-synchronises the page with the server. */
+export async function readSession(): Promise<SessionState | null> {
   const { status, body } = await get("/api/auth/session");
   const state = body["state"];
-  return status === 200 && typeof state === "string" && STATES.includes(state)
-    ? (state as SessionState)
-    : "signed_out";
+  return status === 200 && typeof state === "string" && STATES.includes(state) ? (state as SessionState) : null;
+}
+
+/** What the server says this browser is. Anything unexpected reads as signed out. */
+export async function sessionState(): Promise<SessionState> {
+  return (await readSession()) ?? "signed_out";
+}
+
+/**
+ * Signs out and proves it (AUTH-13). A logout whose answer carried the rotated token is proof; any
+ * other answer (lost, truncated, refused) is checked against the server's own session state, which
+ * also brings the token up to date. Anything else means signed-out is unproven: callers keep the
+ * signed-in screen and its sign-out button as the retry.
+ */
+export async function signOut(): Promise<"signed_out" | "offline" | "failed"> {
+  const { status, body } = await logout();
+  if (status === 200 && typeof body["csrf"] === "string") return "signed_out";
+  if ((await readSession()) === "signed_out") return "signed_out";
+  return status === 0 ? "offline" : "failed";
 }

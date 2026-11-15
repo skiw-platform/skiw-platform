@@ -169,7 +169,7 @@ describe("App", () => {
   });
 
   it("shows sign-in, not an error, when sign-out finds the session already gone (idle)", async () => {
-    server(state("signed_in"), { status: 401, body: { error: "idle" } });
+    server(state("signed_in"), { status: 401, body: { error: "idle" } }, state("signed_out"));
     render(<App />);
     await user.click(await screen.findByRole("button", { name: content.signOut }));
     expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
