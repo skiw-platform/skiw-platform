@@ -5,7 +5,7 @@ M3f, DECISIONS M3f-3b-1). No route yet: M3f-3b-2 calls these from the two enrolm
 enrolment's marked `_skiw_pending_enrol`), refusing one that is malformed, past its deadline, or
 older than a user-wide revocation marker: a credential change (password, factor; AUTH-07) at or
 after the password step ends a login still waiting for its second factor (PR 141 R1 P2, DECISIONS
-M3h-5). The pending start is the app clock, the marker the database's transaction start; a tie
+M3h-5). The pending start is the app clock, the marker its insert's statement time; a tie
 counts as revoked.
 Only an enrolment's pending state may add a first factor, and only for a user still `invited`.
 
@@ -15,11 +15,11 @@ holds no readable secret (C3); it returns the secret and the `otpauth://` URI to
 `confirm_totp` takes the user's first code, and in ONE with_agency() transaction: locks the user,
 stores the factor (the same sealed bytes, `sign_count` = the accepted step, so that code cannot
 sign the user in again), sets the user `active`, replaces the recovery codes and writes the
-user-wide revocation marker (AUTH-07), then runs the caller's `then(user, factor)` last: the
-enrolment route signs the user in there (login(), a new session key) and records a `factor.change`
-step-up for that key (DECISIONS M3g-2s-1). Any failure rolls all of it back, so no user is
-`active` without a factor and recovery codes. The pending keys are cleared after the commit
-(login() keeps them).
+user-wide revocation marker (AUTH-07; before `then`, so the new login is later than its statement
+time), then runs the caller's `then(user, factor)` last: the enrolment route signs the user in
+there (login(), a new session key) and records a `factor.change` step-up for that key (DECISIONS
+M3g-2s-1). Any failure rolls all of it back, so no user is `active` without a factor and recovery
+codes. The pending keys are cleared after the commit (login() keeps them).
 
 Wrong codes are counted per user (throttle.factor_reserve: the attempt is counted before the code
 is checked, and given back unless the code was wrong). The user row is locked while `invited`, so

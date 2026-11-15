@@ -10,7 +10,7 @@ Every answer is one of a few fixed bodies; a failure never says why (AUTH-05).""
 import json
 import uuid
 from collections.abc import Mapping
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypeGuard
 
 from django.conf import settings
@@ -369,14 +369,19 @@ def password(request: HttpRequest, signed: Signed, data: tuple[str, str]) -> Htt
     return _answer({"next": "changed", "csrf": get_token(request)}, 200)
 
 
+def _utc(at: datetime | None) -> str | None:
+    return None if at is None else at.astimezone(UTC).isoformat(timespec="microseconds")
+
+
 @authorized_action(schema=nothing, permission="auth.factors")
 def factor_list(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
     """GET /api/auth/factors: the signed-in user's own TOTP and passkey factor ids in use (M3i
-    names the one to retire) and how many recovery codes are left; no secret, key or credential
-    id, no step-up [A] (DECISIONS M3h-5, M3g-1c)."""
+    names the one to retire), each passkey with its `created_at` (ISO 8601 UTC, or null for one
+    added before it was recorded), oldest first, and how many recovery codes are left; no secret,
+    key or credential id, no step-up [A] (DECISIONS M3h-5, M3g-1c, M3g-2s-2)."""
     own = factor_change.listing(signed)
     totp = [{"id": str(factor)} for factor in own.totp]
-    passkeys = [{"id": str(factor)} for factor in own.passkey]
+    passkeys = [{"id": str(key.id), "created_at": _utc(key.created_at)} for key in own.passkey]
     return _answer({"totp": totp, "passkey": passkeys, "recovery_left": own.recovery_left}, 200)
 
 

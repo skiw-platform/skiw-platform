@@ -72,9 +72,9 @@ def login(request: HttpRequest, user: AppUser, *, factor: str) -> None:
 def reissue(request: HttpRequest, signed: "Signed") -> None:
     """Inside the caller's with_agency(), after `revoke.hold` and the user-wide marker: this key is
     retired with its own marker (a saved row put back by SQL stays refused) and replaced; the new
-    login time is the app's clock, after the marker's time (the transaction start time,
-    `CURRENT_TIMESTAMP`), so the session outlives the marker. The factor stays, and so does the
-    deadline: a credential change is not a new login."""
+    login time is the app's clock, after the marker's time (its insert's statement time,
+    `statement_timestamp()`; so the marker must come first), so the session outlives the marker.
+    The factor stays, and so does the deadline: a credential change is not a new login."""
     session = request.session
     if not isinstance(session, SessionStore):
         raise TypeError("reissue() needs the accounts session store")

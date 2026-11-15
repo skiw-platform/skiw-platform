@@ -154,6 +154,24 @@ def test_each_known_factor_kind_is_accepted(cursor: CursorWrapper, kind: str) ->
     add_factor(cursor, add_user(cursor), kind=kind, secret_ct=secret)
 
 
+@pytest.mark.parametrize("kind", ["passkey", "totp", "recovery"])
+def test_a_factor_is_stamped_with_its_insert_statement_time(
+    cursor: CursorWrapper, kind: str
+) -> None:
+    """`created_at` (accounts.0016) is the insert's own statement time, as `revoked_at`: after a
+    sleep in the same transaction it is later than now(), and earlier than the next statement."""
+    user = add_user(cursor)
+    cursor.execute("SELECT pg_sleep(0.01)")
+    secret = b"\0" * SECRET_CT[kind] if kind in SECRET_CT else None
+    add_factor(cursor, user, kind=kind, secret_ct=secret)
+    cursor.execute(
+        "SELECT created_at > now(), created_at < statement_timestamp() FROM user_factor"
+        " WHERE user_id = %s",
+        [user],
+    )
+    assert cursor.fetchall() == [(True, True)]
+
+
 @pytest.mark.parametrize(
     ("kind", "secret"),
     [

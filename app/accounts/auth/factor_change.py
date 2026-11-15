@@ -27,6 +27,10 @@ registered (to anyone, in use or retired: the global unique key) are one refusal
 nothing logged; nothing is counted, since the challenge is spent either way and a registration
 guesses nothing. A passkey is optional: it never replaces a TOTP or changes what sign-in asks.
 
+The list gives each passkey in use its id and `created_at` (M3g-2s-2), oldest first: by
+`created_at`, a passkey added before accounts.0016 (NULL, time unknown) before every dated one,
+then by id, so the order is stable and an added passkey goes last.
+
 Removing a TOTP or a passkey retires it: the row stays, so step-up evidence naming it still
 verifies (the FK is NO ACTION, DECISIONS M3h-1), with `retired_at` set and the secret, public key
 and lookup blob cleared; every lookup skips a retired row. A retired passkey keeps its credential
@@ -37,10 +41,11 @@ with_agency() in the same order as every credential change. No secret or code is
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal
 
 from django.db import IntegrityError, transaction
-from django.db.models import QuerySet
+from django.db.models import F, QuerySet
 from django.db.models.functions import Now
 from django.http import HttpRequest
 
@@ -62,9 +67,15 @@ CREDENTIAL_KEY = "user_factor_credential_id_key"  # spec §4.1 uq(credential_id)
 
 
 @dataclass(frozen=True)
+class Passkey:
+    id: uuid.UUID
+    created_at: datetime | None  # None: added before accounts.0016
+
+
+@dataclass(frozen=True)
 class Listing:
     totp: list[uuid.UUID]
-    passkey: list[uuid.UUID]
+    passkey: list[Passkey]
     recovery_left: int
 
 
@@ -85,8 +96,10 @@ def _totps(signed: Signed) -> list[uuid.UUID]:
     return list(_in_use(signed, "totp").order_by("id").values_list("id", flat=True))
 
 
-def _passkeys(signed: Signed) -> list[uuid.UUID]:
-    return list(_in_use(signed, "passkey").order_by("id").values_list("id", flat=True))
+def _passkeys(signed: Signed) -> list[Passkey]:
+    oldest = (F("created_at").asc(nulls_first=True), "id")
+    rows = _in_use(signed, "passkey").order_by(*oldest).values_list("id", "created_at")
+    return [Passkey(factor, created) for factor, created in rows]
 
 
 def _changing(request: HttpRequest, signed: Signed) -> Unchanged | None:
@@ -112,7 +125,7 @@ def remove(
     if refused is not None:
         return refused
     totps = _totps(signed)  # after the lock: a parallel remove has committed or waits
-    if factor not in (totps if kind == "totp" else _passkeys(signed)):
+    if factor not in (totps if kind == "totp" else [own.id for own in _passkeys(signed)]):
         return "not-found"
     if not set(totps) - {factor}:  # TOTP is required (spec D7); a passkey never stands in for it
         return "last-factor"

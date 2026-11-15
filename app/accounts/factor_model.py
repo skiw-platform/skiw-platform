@@ -20,12 +20,16 @@ WebAuthn 32-bit `signCount`; in use it has its public key and sealed lookup blob
 only the credential id, so the global unique key still refuses that id at registration (M3g-1c).
 `last_challenge_at` is the issue time of the challenge the last accepted assertion answered
 (M3g-1d compares it in the same conditional update as `sign_count`). No other kind holds a
-passkey column."""
+passkey column.
+
+`created_at` (M3g-2s-2, accounts.0016) is set by the database at insert for every kind
+(`db_default=Now()`, the insert's `statement_timestamp()`); it is NULL only on a row made before
+0016, whose time is unknown. The passkey list shows it and is ordered by it."""
 
 import uuid
 
 from django.db import models
-from django.db.models.functions import Length
+from django.db.models.functions import Length, Now
 from django.db.models.lookups import Exact, GreaterThanOrEqual, LessThanOrEqual
 
 from accounts.auth.blob import CREDENTIAL_SIZE, FACTOR_SECRET_SIZE, OVERHEAD
@@ -69,6 +73,7 @@ class UserFactor(TenantModel):
     lookup_blob_ct = models.BinaryField(null=True)
     retired_at = models.DateTimeField(null=True)  # set once, by factor_change.remove (M3h-6)
     last_challenge_at = models.DateTimeField(null=True)  # passkeys only (M3g-1d)
+    created_at = models.DateTimeField(null=True, db_default=Now())  # NULL: made before 0016
 
     class Meta(TenantModel.Meta):
         db_table = "user_factor"

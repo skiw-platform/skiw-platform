@@ -17,7 +17,9 @@ from django.utils import timezone
 
 from accounts import views
 from accounts.auth import stepup, totp
+from accounts.auth.login import login as real_login
 from accounts.factor_model import UserFactor
+from accounts.revocation_model import SessionRevocation
 from accounts.session import SessionStore, stored_key
 from accounts.stepup_model import AuthStepup
 from accounts.user_model import AppUser
@@ -85,6 +87,25 @@ def test_right_after_enrolment_a_passkey_is_added_without_a_code(
     assert evidence.session_key_hash == stored_key(cookie)  # the new key, not the pending one
     assert evidence.purpose == stepup.FACTOR_CHANGE
     assert added(cookie) == 200 and len(change.passkeys(user)) == 1
+
+
+def test_the_user_wide_marker_is_written_before_the_new_login(
+    browser: tuple[Client, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The marker's time is its insert's statement time (DECISIONS M3g-2s-2), so `factors._commit`
+    writes it before `then` signs the user in; the other order leaves the new session at or before
+    the marker, revoked. Checked by order, not by clock: locally the host and database clocks can
+    differ by a millisecond."""
+    marked: list[bool] = []
+
+    def login(request: HttpRequest, user: AppUser, *, factor: str) -> None:
+        own = SessionRevocation.objects.filter(user_id=user.id, session_key_hash__isnull=True)
+        marked.append(own.exists())  # inside the enrolment's with_agency() transaction
+        real_login(request, user, factor=factor)
+
+    monkeypatch.setattr(views, "login", login)
+    enrolled_in(browser)
+    assert marked == [True]
 
 
 def test_the_evidence_mac_names_the_new_totp(browser: tuple[Client, str]) -> None:
