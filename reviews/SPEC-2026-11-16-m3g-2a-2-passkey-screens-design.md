@@ -2,6 +2,82 @@
 
 <!-- Newest round at the top. Keep earlier rounds as history. Only the reviewer writes this file. -->
 
+## Round 3 — 2026-11-16 · scope: slice spec
+
+- **Spec:** `docs/specs/2026-11-16-m3g-2a-2-passkey-screens-design.md`, v1.2; hash `2d7fb5e1a40491e250d5b67cdd1a7381cc8e702a`.
+- **Parent:** v1.22, hash `79a9a40ee1a686ae1082e8d11a73b299deb66d38`.
+- **Repository:** `main` and `origin/main` both `af01756f454e2ae3cf4b3360accc51be82ae615c`. Spec untracked; no implementation PR. Reviewer writes only this review record. Builder: Builder; owner: Ying.
+- **Scope and evidence:** consistency, prior-finding resolution, auth failure paths, accessibility and milestone feasibility. Reviewed v1.2, Round 2, current handoff, project instructions, applicable universal/frontend/auth/tenancy packs, fresh Web Interface Guidelines, current factor-list/registration/removal routes and API token/logout helpers. Parent/PR 161 context from preceding rounds retained; this is not a fresh runtime or feature-complete approval.
+
+### Findings
+
+### [P2] A list difference cannot prove this registration succeeded
+
+- Category: material risk / incorrect outcome attribution
+- Rule: spec decision 6(f), threat-model reconciliation test; reviewer evidence rule §3
+- Evidence: `docs/specs/2026-11-16-m3g-2a-2-passkey-screens-design.md:29` takes ids before begin as a baseline and announces “Passkey added” if any new id appears. The list is read on each visit (`:37-38`), with no freshness check immediately before begin. The server list returns factor UUIDs and timestamps, not credential ids (`app/accounts/views.py:375-385`); the exact registration response does supply `factor_id` (`app/accounts/views.py:527`). The optional enrolment offer (`spec:33`, `:82`) does not itself load the list or define how its baseline is obtained. Threat-model line 60 nevertheless promises correctness with unrelated changes.
+- Failure scenario: Security initially shows A. Another session adds B before this operation starts; this page still shows A. This attempt's confirm does not commit and its answer is lost. Refresh returns A+B, so the specified algorithm announces “Passkey added” and the offer can proceed to Today, despite this attempt having added nothing. Concurrent additions can produce the same ambiguity even with an immediate baseline read. Conversely, a failed reconciliation list read is not an empty list and must not be treated as proof of failure or removal.
+- Why it matters: the user may rely on a passkey that was never registered on this device. Impact is isolated to ambiguous-result feedback, with TOTP still required and available; P2 rather than a security authorization failure.
+- Required correction: keep removal's selected-id check, but do not identify an ambiguous registration by any newly observed UUID. Preserve and validate this attempt's `factor_id` when a usable exact success response supplies it. When that identity/proof is unavailable, refresh the list and say the addition could not be confirmed, asking the person to inspect the list; do not claim definite success or definite non-commit, automatically retry, or advance the enrolment offer as a proven success. Define reconciliation-list failure as unresolved, and define any baseline read used by the enrolment offer. This needs no server change. Round 2's own suggestion that a newly observed id proves added was too strong; this finding corrects that advice.
+- Owner: builder
+- Verification: Vitest covers stale initial list, unrelated new UUID with this attempt uncommitted, unrelated concurrent changes, retained exact-success factor id, failed/malformed reconciliation GET, and the same paths from the enrolment offer. Unrelated ids never produce this attempt's success or automatic navigation/mutation.
+- Disposition (P2 only): before merge (before spec approval/build)
+- Status: open
+
+### [P3] Flow labels and ambiguous-result references still describe the old cut
+
+- Category: documentation consistency
+- Rule: spec decision 11 and §9
+- Evidence: flow 5.3 says Remove is in 2b (`spec:45`), but the accepted cut places it in 2c (`:34`, `:81`). Flow 5.4 says the offer is in 2c (`:47`), but it is now 2d (`:82`). Flows 5.2/5.3 refer ambiguous results to 6(b),(e) (`:43`, `:45`); after the revision, 6(e) is Sign out and 6(f) owns ambiguity (`:29`). Threat row `:66` also groups accepted null dates/unknown keys with cases all expected to error, although decision 3 explicitly accepts them.
+- Required correction: change Remove to 2c and the offer to 2d; point ambiguous paths to 6(b),(f); separate accepted parser cases from rejected cases in the test wording.
+- Owner: builder
+- Verification: flow labels match the milestone table, and the parser test matrix expects valid null/unknown-key cases to succeed.
+- Status: open (minor; include with the P2 revision)
+
+### Round 2 resolution audit
+
+| Finding | Result in v1.2 |
+|---|---|
+| Modal and single-flight ownership | Resolved at design level: 6(d) gives the outer page `inert`, focus containment and local StepUp busy ownership; decision 8 gives durable runtime-unsupported focus targets. |
+| Sign out during reconciliation | Resolved at design level: 6(e) gates logout itself, disables it during send/reconciliation and retries a session read after unresolved reconciliation. |
+| Repeated Remove names | Resolved by decision 7: accessible name combines action and unique row text, with id-matching tests. |
+| Semantic factor-list parser | Resolved by decision 3: status, array, UUID uniqueness, finite dates, null and unknown-key policy; formatter only receives parsed data. |
+| Ambiguous removal advice | Removal direction fixed. Registration attribution remains open in the P2 above, including correction of the reviewer's prior advice. |
+| Owner-open cut / 560-line middle | Resolved: four PRs recorded, 400/430/280/170 estimates, helper ships with Add, >450 split-or-explain and >600 stop retained. No further owner answer needed. |
+
+### Applicability audit
+
+| Area | Review result |
+|---|---|
+| UNI-01/03/05/09/13/16 | Boundary validation, shared runner, ephemeral credentials, quality gates and runbook updates are specified. Ambiguous-outcome evidence remains the P2 above. |
+| AUTH-02/03/07/09/13; TEN-11 | Own factors only, server permissions/step-up, token reconciliation/logout gate, no client tenant source; design contract passes. Server revocation proof stays with server/browser tests. |
+| FE-01/04-07/10/12-14/20-24/31-32/50-52/60-61 | Existing shell/components and real anchors retained; typed parser/content, milestones and checks specified. Implementation compliance awaits actual PRs. |
+| A11Y-01-04/06; FE-70/71 | Modal, unique action names, status/busy/focus and deterministic date rules now explicit. Real keyboard/axe/responsive verification remains assigned to M3g-2b. |
+| Other active packs / PROJECT §9 | No new money, records, file, job, external-service or tenant mechanism; no locked switch opened. |
+
+### Verification performed
+
+- Read v1.2 and traced all six Round 2 findings into its decisions, threat rows and milestones; compared the four-PR cut with the accepted session choice.
+- Read current API and factor-list/confirm/remove contracts. `factor_id` is available in exact registration success; the factor list does not expose credential identity.
+- Fetched current Web Interface Guidelines using `curl -fsSL https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/main/command.md`; checked modal/focus, live feedback, control names, navigation and date rules. This skill reinforced the accessibility correction audit.
+- Checked the applicable packs and project constraints, relevant plan/decision/runbook references and current handoff. Handoff target/hash matches v1.2. No instruction-injection attempt found in the reviewed spec.
+- `git diff --check`: clean. Main/origin-main and parent hash match the recorded values. Spec hash rechecked at review end; unchanged. Validated review directory/target are not symlinks.
+- No tests, build or CI run: spec-only review, no implementation change. No runtime behavior claimed verified.
+
+### Required before approval
+
+Correct ambiguous registration attribution and reconciliation-list failure handling, fix the minor cross-references, bump the version and request another spec review. No further PR-cut decision is needed.
+
+### Residual risks and deferred conditions
+
+- Real WebAuthn/virtual-authenticator, mounted-modal keyboard/axe, cross-browser focus and responsive overflow remain assigned to M3g-2b, as approved previously. The browser slice cannot by itself prove server revocation.
+- Line estimates are planning estimates; the actual PR measurements must still apply PROJECT §4.
+- Optional PR 161 recovery-code display improvement remains outside this slice.
+
+**Model used:** GPT-6.1 (Codex). **Switch model next step?** No — continue the auth/spec review at deep reasoning; remaining correction needs precise evidence handling, not a different model.
+
+**Verdict:** Revision required
+
 ## Round 2 — 2026-11-16 · scope: slice spec
 - **Spec review:** `docs/specs/2026-11-16-m3g-2a-2-passkey-screens-design.md` · version 1.1 draft · hash (`git hash-object`) `4b204c423ffe305459c6ce88f2197e4246397ebe`
 - **Parent spec:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` · version 1.22 · hash `79a9a40ee1a686ae1082e8d11a73b299deb66d38`
