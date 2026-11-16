@@ -1,9 +1,9 @@
-// The browser half of a passkey assertion (plan M3 §3 M3g; registration joins in M3g-2a-2). The
+// The browser half of a passkey assertion and registration (plan M3 §3 M3g). The
 // server's options arrive as py_webauthn JSON, binary fields in base64url; the credential goes back
 // in the same form. Options, challenge and credential live only in the caller's call: nothing
 // here stores, logs or keeps them.
 
-import { post, type Reply } from "./api";
+import { hold, post, readSession, rotated, type Reply } from "./api";
 import { content } from "./content";
 
 /** What a ceremony gives: the credential as JSON, or a plain reason the screen can say. */
@@ -33,9 +33,10 @@ type Response = AuthenticatorResponse & {
   userHandle?: ArrayBuffer | null;
 };
 
-function encode(credential: PublicKeyCredential): Json {
+/** `extra` carries a registration's own fields; an attestation response has none of the assertion's. */
+function encode(credential: PublicKeyCredential, extra: Json = {}): Json {
   const answer = credential.response as Response;
-  const response: Json = { clientDataJSON: text(answer.clientDataJSON) };
+  const response: Json = { clientDataJSON: text(answer.clientDataJSON), ...extra };
   for (const key of ["authenticatorData", "signature", "userHandle"] as const) {
     const value = answer[key];
     if (value) response[key] = text(value);
@@ -64,11 +65,39 @@ async function assertion(options: Json, signal: AbortSignal): Promise<Ceremony> 
     const credential = await navigator.credentials.get({ publicKey, signal });
     return credential instanceof window.PublicKeyCredential ? { credential: encode(credential) } : "failed";
   } catch (error) {
-    return error instanceof DOMException && error.name === "NotSupportedError" ? "unsupported" : "failed";
+    return reason(error);
   }
 }
 
-/** One click's round: begin, the assertion, confirm. `answer` is the confirm's, or the begin's
+const reason = (error: unknown): Ceremony => (error instanceof DOMException && error.name === "NotSupportedError" ? "unsupported" : "failed");
+
+type Attested = AuthenticatorResponse & { attestationObject?: unknown; getTransports?: () => string[] };
+
+/** `navigator.credentials.create()` with the server's creation options (spec M3g-2a-2 decision 5):
+ * only `challenge`, `user.id` and each `excludeCredentials[].id` become bytes; the cast as above. */
+async function registration(options: Json, signal: AbortSignal): Promise<Ceremony> {
+  if (!passkeySupported()) return "unsupported";
+  try {
+    const user = options["user"] as Json;
+    const publicKey = {
+      ...options,
+      challenge: bytes(options["challenge"]),
+      user: { ...user, id: bytes(user["id"]) },
+      excludeCredentials: ids(options["excludeCredentials"]),
+    } as unknown as PublicKeyCredentialCreationOptions;
+    const credential = await navigator.credentials.create({ publicKey, signal });
+    if (!(credential instanceof window.PublicKeyCredential)) return "failed";
+    const answer = credential.response as Attested;
+    if (!(answer.attestationObject instanceof ArrayBuffer)) return "failed";
+    const extra: Json = { attestationObject: text(answer.attestationObject) };
+    if (typeof answer.getTransports === "function") extra["transports"] = answer.getTransports();
+    return { credential: encode(credential, extra) };
+  } catch (error) {
+    return reason(error);
+  }
+}
+
+/** One click's round: begin, the ceremony (an assertion unless `make` says otherwise), confirm. `answer` is the confirm's, or the begin's
  * when nothing reached confirm; `outcome` is null when the begin gave no options. */
 type Round = { answer: Reply; outcome: Ceremony | null };
 
@@ -88,12 +117,13 @@ export async function round(
   signal: AbortSignal,
   extra: Json = {},
   onSent: () => void = () => undefined,
+  make: (options: Json, signal: AbortSignal) => Promise<Ceremony> = assertion,
 ): Promise<Round | null> {
   const begun = await post(begin, {}, signal);
   if (left(signal)) return null;
   const options = begun.body["options"];
   const usable = begun.status === 200 && typeof options === "object" && options !== null;
-  const outcome = usable ? await assertion(options as Json, signal) : null;
+  const outcome = usable ? await make(options as Json, signal) : null;
   if (left(signal)) return null;
   if (outcome === null || typeof outcome !== "object") return { answer: begun, outcome };
   onSent();
@@ -150,4 +180,88 @@ export function passkeyRows(entries: PasskeyEntry[]): PasskeyRow[] {
     count.set(text, number);
     return { id: entry.id, text: (total.get(text) ?? 1) > 1 ? `${text} (${String(number)})` : text };
   });
+}
+
+/**
+ * The one factor operation (spec M3g-2a-2 decision 6), kept here so that it outlives the screen
+ * that started it: a ceremony (nothing sent yet), a sent change waiting for its answer, or a change
+ * whose answer and session read both failed, so the token may be stale until a read succeeds.
+ */
+type Phase = "idle" | "ceremony" | "sent" | "unresolved";
+let phase: Phase = "idle";
+const watchers = new Set<() => void>();
+
+function enter(next: Phase, unsure = next === "sent" || next === "unresolved") {
+  phase = next;
+  hold(unsure);
+  for (const watch of watchers) watch();
+}
+
+export const operation = {
+  subscribe: (watch: () => void) => {
+    watchers.add(watch);
+    return () => { watchers.delete(watch); };
+  },
+  phase: (): Phase => phase,
+};
+
+/** While true every factor control is off and a repeated activation does nothing (decision 6(d)). */
+const operating = (): boolean => phase === "ceremony" || phase === "sent";
+
+/** For Sign out: false while a sent change is unreconciled, or while its session cannot be read (6(e)). */
+export async function trusted(): Promise<boolean> {
+  if (phase === "sent") return false;
+  if (phase !== "unresolved") return true;
+  if ((await readSession()) === null) return false;
+  if (operation.phase() === "unresolved") enter("idle");
+  return true;
+}
+
+/** What an add tells its screen; null when the screen left before anything was sent, or another operation runs. */
+export type Added = "added" | "unconfirmed" | "stepup" | "failed" | "unsupported" | "signed-out" | "offline" | "error" | "unsure";
+
+function begun({ status, body }: Reply): Added {
+  if (status === 403 && body["error"] === "stepup-required") return "stepup";
+  if (status === 401 && body["error"] === "signed-out") return "signed-out";
+  return status === 0 ? "offline" : "error";
+}
+
+/** A sent confirm's answer: what may be claimed, and whether the token is trusted again (6(b), 6(f)).
+ * Only the exact success shape with this attempt's factor id is "added"; a refusal is definite; anything
+ * else is "unconfirmed" whatever the list later shows, and the session read decides the token. */
+async function settle(answer: Reply): Promise<[Added, boolean]> {
+  const { status, body } = answer;
+  if (status >= 400 && status < 500 && typeof body["error"] === "string") return [status === 401 && body["error"] === "signed-out" ? "signed-out" : "failed", true];
+  const id = body["factor_id"];
+  const exact = typeof id === "string" && UUID.test(id) && typeof body["csrf"] === "string" && body["csrf"] !== "";
+  if (exact && (await rotated(answer, "added", "signed_in"))) return ["added", true];
+  return ["unconfirmed", (await readSession()) !== null];
+}
+
+/** Begin, the creation ceremony and confirm with exactly `{credential}`. `signal` stops it only before
+ * confirm is sent; a sent confirm always runs to its answer and reconciles, even if the screen is gone. */
+export async function addPasskey(signal: AbortSignal): Promise<Added | null> {
+  if (operating()) return null;
+  const doubt = phase === "unresolved";
+  enter("ceremony", doubt);
+  if (doubt) {
+    if ((await readSession()) === null) {
+      enter("unresolved");
+      return "unsure";
+    }
+    enter("ceremony");
+  }
+  const done = await round("/api/auth/factors/passkey", "/api/auth/factors/passkey/confirm", signal, {}, () => { enter("sent"); }, registration);
+  if (done === null) {
+    enter("idle");
+    return null;
+  }
+  const { answer, outcome } = done;
+  if (outcome === null || typeof outcome !== "object") {
+    enter("idle");
+    return outcome ?? begun(answer);
+  }
+  const [result, reconciled] = await settle(answer);
+  enter(reconciled ? "idle" : "unresolved");
+  return result;
 }

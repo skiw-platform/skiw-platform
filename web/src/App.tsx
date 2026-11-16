@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { endSession, sessionState, unauthenticated, type SessionState } from "./api";
 import { content } from "./content";
 import { discardInvitation, leaveEnrol, onEnrolPath, takeToken } from "./enrolLink";
+import { operation, trusted } from "./passkey";
 import { EnrolMissing, EnrolPassword, EnrolSetup, type Setup } from "./screens/Enrol";
 import { Recovery } from "./screens/Recovery";
 import { SecondFactor } from "./screens/SecondFactor";
@@ -29,6 +30,7 @@ export function App() {
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const [page, setPage] = useState<Page>(() => pageOf(window.location.hash));
+  const phase = useSyncExternalStore(operation.subscribe, operation.phase, operation.phase);
 
   useEffect(() => {
     let live = true;
@@ -74,6 +76,12 @@ export function App() {
   async function signOut() {
     setSignOutError(null);
     setSigningOut(true);
+    // A factor change whose answer was lost may have rotated the token: no logout until it is known (6(e)).
+    if (!(await trusted())) {
+      setSigningOut(false);
+      setSignOutError(content.sessionUnsure);
+      return;
+    }
     const { out, state } = await endSession();
     setSigningOut(false);
     if (out === "signed_out" || unauthenticated(state)) go("signed_out");
@@ -90,7 +98,7 @@ export function App() {
       <header className="topbar">
         <p className="brand">{content.product}</p>
         {signedIn ? (
-          <button type="button" className="link" disabled={signingOut} onClick={() => void signOut()}>
+          <button type="button" className="link" disabled={signingOut || phase === "sent"} onClick={() => void signOut()}>
             {signingOut ? content.signOutBusy : content.signOut}
           </button>
         ) : null}
@@ -109,7 +117,7 @@ export function App() {
         </nav>
       ) : null}
       <main id="main" tabIndex={-1} ref={mainRef}>
-        <Screen view={view} page={page} go={go} expired={expired} signOutError={signOutError} />
+        <Screen view={view} page={page} go={go} expired={expired} signOutError={phase === "sent" ? content.finishing : signOutError} />
       </main>
     </div>
   );

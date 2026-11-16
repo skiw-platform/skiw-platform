@@ -8,7 +8,7 @@ import { content } from "./content";
 import { round } from "./passkey";
 import { SecondFactor } from "./screens/SecondFactor";
 import { StepUp } from "./screens/StepUp";
-import { sent, server, state, user, type Answer, type Call, type Held } from "./testkit";
+import { later, sent, server, state, user, type Answer, type Call, type Held } from "./testkit";
 
 const buffer = (...values: number[]) => new Uint8Array(values).buffer;
 
@@ -44,14 +44,6 @@ const VERIFIED = { status: 200, body: { next: "verified", until: UNTIL } };
 const paths = (calls: Call[]) => calls.map((call) => call.path);
 const live = () => new AbortController().signal;
 const settle = async () => { for (let i = 0; i < 5; i += 1) await new Promise((done) => setTimeout(done, 0)); };
-
-/** A promise the test resolves when it chooses: a slow network or a person slow at the prompt. */
-function later<T>() {
-  let give: (value: T) => void = () => undefined;
-  let fail: (reason: unknown) => void = () => undefined;
-  const promise = new Promise<T>((done, bad) => { give = done; fail = bad; });
-  return { promise, resolve: (value: T) => { give(value); }, reject: (reason: unknown) => { fail(reason); } };
-}
 
 /** A status is announced politely and never marks the code field (A11Y-03). */
 function announced(text: string, label: string) {

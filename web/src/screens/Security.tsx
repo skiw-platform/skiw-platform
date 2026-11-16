@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { get } from "../api";
 import { content } from "../content";
 import { Message } from "../forms";
-import { parseFactors, passkeyRows, type PasskeyRow } from "../passkey";
+import { addPasskey, operation, parseFactors, passkeyRows, passkeySupported, type Added, type PasskeyRow } from "../passkey";
 
 type Load = { kind: "loading" } | { kind: "error" } | { kind: "ready"; rows: PasskeyRow[] };
 
@@ -12,32 +12,61 @@ type Props = {
   onSignedOut: () => void;
 };
 
+/** The factor list: its rows, null when it cannot be trusted (decision 3), or the session is gone. */
+async function readList(): Promise<PasskeyRow[] | null | "signed-out"> {
+  const reply = await get("/api/auth/factors");
+  if (reply.status === 401) return "signed-out";
+  const entries = parseFactors(reply);
+  return entries === null ? null : passkeyRows(entries);
+}
+
+const count = (total: number) => (total === 0 ? content.security.empty : total === 1 ? content.security.one : content.security.many(total));
+
+/** The words for an add that added nothing; one text for every failed ceremony or refusal (AUTH-05). */
+const FAILED: Partial<Record<Added, string>> = {
+  failed: content.security.notAdded,
+  stepup: content.security.stepUpNeeded,
+  offline: content.errors.network,
+  unsure: content.sessionUnsure,
+};
+
 /**
- * The person's own passkeys, read from the server on every visit and kept in this component only
- * (spec M3g-2a-2, decisions 3 and 8). Add and Remove come in the next PRs.
+ * The person's own passkeys, read from the server on every visit and kept in this component only,
+ * and Add (spec M3g-2a-2, decisions 3 to 8). The add itself runs in `passkey.ts`, so a sent one
+ * finishes after this screen is gone; this screen then shows nothing of it.
  */
 export function Security({ onSignedOut }: Props) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [status, setStatus] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [canAdd, setCanAdd] = useState(passkeySupported);
+  /** Where focus goes once the render it waits for is in the page (decision 8). */
+  const [focus, setFocus] = useState<{ to: "heading" | "add" } | null>(null);
   const retryRef = useRef<HTMLButtonElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const addRef = useRef<HTMLButtonElement>(null);
+  /** This screen's add; leaving aborts it, which stops it only before confirm is sent. */
+  const flight = useRef<AbortController | null>(null);
+  const phase = useSyncExternalStore(operation.subscribe, operation.phase, operation.phase);
+  const busy = phase === "ceremony" || phase === "sent";
+
+  useEffect(() => () => { flight.current?.abort(); }, []);
+
+  useEffect(() => {
+    if (focus !== null) (focus.to === "heading" ? headingRef : addRef).current?.focus();
+  }, [focus]);
+
+  function show(rows: PasskeyRow[] | null, words: string) {
+    setLoad(rows === null ? { kind: "error" } : { kind: "ready", rows });
+    setStatus(words);
+  }
 
   useEffect(() => {
     let live = true;
-    void get("/api/auth/factors").then((reply) => {
+    void readList().then((rows) => {
       if (!live) return;
-      if (reply.status === 401) {
-        onSignedOut();
-        return;
-      }
-      const entries = parseFactors(reply);
-      if (entries === null) {
-        setLoad({ kind: "error" });
-        setStatus(content.security.loadError);
-        return;
-      }
-      setLoad({ kind: "ready", rows: passkeyRows(entries) });
-      setStatus(entries.length === 0 ? content.security.empty : entries.length === 1 ? content.security.one : content.security.many(entries.length));
+      if (rows === "signed-out") onSignedOut();
+      else show(rows, rows === null ? content.security.loadError : count(rows.length));
     });
     return () => {
       live = false;
@@ -52,12 +81,45 @@ export function Security({ onSignedOut }: Props) {
   function retry() {
     setLoad({ kind: "loading" });
     setStatus(null);
-    setAttempt((count) => count + 1);
+    setAttempt((total) => total + 1);
+  }
+
+  function say(words: string, to: "heading" | "add") {
+    setStatus(words);
+    setFocus({ to });
+  }
+
+  async function add() {
+    const controller = new AbortController();
+    flight.current = controller;
+    const gone = () => controller.signal.aborted;
+    setStatus(null);
+    const result = await addPasskey(controller.signal);
+    if (result === null || gone()) return;
+    if (result === "signed-out") {
+      onSignedOut();
+    } else if (result === "unsupported") {
+      setCanAdd(false);
+      say(content.passkeys.unsupported, "heading");
+    } else if (result === "added" || result === "unconfirmed") {
+      const rows = await readList();
+      if (gone()) return;
+      if (rows === "signed-out") onSignedOut();
+      else if (rows === null) show(null, content.security.listUnsure);
+      else {
+        show(rows, result === "added" ? content.security.addedNotice : content.security.unconfirmed);
+        setFocus({ to: result === "added" ? "heading" : "add" });
+      }
+    } else {
+      say(FAILED[result] ?? content.errors.generic, "add");
+    }
   }
 
   return (
     <>
-      <h1>{content.security.title}</h1>
+      <h1 tabIndex={-1} ref={headingRef}>
+        {content.security.title}
+      </h1>
       <section className="card" aria-labelledby="passkeys-title" aria-busy={load.kind === "loading"}>
         <h2 id="passkeys-title">{content.security.listTitle}</h2>
         <p>{content.security.intro}</p>
@@ -76,6 +138,13 @@ export function Security({ onSignedOut }: Props) {
               <li key={row.id}>{row.text}</li>
             ))}
           </ul>
+        ) : null}
+        {load.kind === "ready" && canAdd ? (
+          <div className="actions">
+            <button type="button" ref={addRef} disabled={busy} onClick={() => void add()}>
+              {busy ? content.security.addBusy : content.security.add}
+            </button>
+          </div>
         ) : null}
       </section>
       <Message id="security-status" text={status} />

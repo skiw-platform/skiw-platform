@@ -55,3 +55,11 @@ export const user = {
 };
 
 export const state = (name: string): Answer => ({ status: 200, body: { state: name, csrf: "t1" } });
+
+/** A promise the test resolves when it chooses: a slow network or a person slow at the prompt. */
+export function later<T>() {
+  let give: (value: T) => void = () => undefined;
+  let fail: (reason: unknown) => void = () => undefined;
+  const promise = new Promise<T>((done, bad) => { give = done; fail = bad; });
+  return { promise, resolve: (value: T) => { give(value); }, reject: (reason: unknown) => { fail(reason); } };
+}

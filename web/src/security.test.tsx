@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { content } from "./content";
 import { parseFactors, passkeyRows } from "./passkey";
-import { server, state, user, type Answer } from "./testkit";
+import { later, server, state, user, type Answer } from "./testkit";
 
 const A = "6f1c1c1e-0000-4000-8000-000000000001";
 const B = "6f1c1c1e-0000-4000-8000-000000000002";
@@ -69,12 +69,6 @@ describe("the row text", () => {
     ]);
   });
 });
-
-function later<T>() {
-  let give: (value: T) => void = () => undefined;
-  const promise = new Promise<T>((done) => { give = done; });
-  return { promise, resolve: (value: T) => { give(value); } };
-}
 
 describe("the Security page", () => {
   beforeEach(() => {

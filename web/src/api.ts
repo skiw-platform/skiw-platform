@@ -36,9 +36,17 @@ export function post(path: string, body: Record<string, unknown>, signal: AbortS
   });
 }
 
-/** POST /api/auth/logout with the current token (AUTH-13); its answer's `csrf` replaces the token. */
+/** True while a sent factor change is unreconciled: the token may be stale (spec M3g-2a-2 decision 6(e)). */
+let held = false;
+
+export function hold(on: boolean): void {
+  held = on;
+}
+
+/** POST /api/auth/logout with the current token (AUTH-13); its answer's `csrf` replaces the token.
+ * While `hold` is on it sends nothing and reads as a lost answer. */
 export function logout(): Promise<Reply> {
-  return post("/api/auth/logout", {});
+  return held ? Promise.resolve(NETWORK) : post("/api/auth/logout", {});
 }
 
 export function get(path: string): Promise<Reply> {
