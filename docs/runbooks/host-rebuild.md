@@ -502,7 +502,9 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   passkey. Check the list below." means the answer was lost: the list shows what the server has,
   and the user decides whether to add again. "We could not load your passkeys" or "We could not
   confirm your session": reload the page. Sign out waits ("Finishing your change…") while an add
-  is being confirmed.
+  is being confirmed; pressing it before then cancels the add, and nothing is sent. The page's own
+  links keep an add running. A reload or a closed tab ends it without its answer: the next load
+  shows what the server has.
 - **Sign in with a passkey** (M3g-1d-1): after the password, a user with a passkey in use can
   answer the second step with it (`POST /api/auth/second-factor/passkey` gives the options,
   `POST /api/auth/second-factor/passkey/confirm` checks the assertion) instead of a code; a user

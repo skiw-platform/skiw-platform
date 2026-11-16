@@ -3,7 +3,7 @@
 // in the same form. Options, challenge and credential live only in the caller's call: nothing
 // here stores, logs or keeps them.
 
-import { hold, post, readSession, rotated, type Reply } from "./api";
+import { get, hold, post, readSession, rotated, type Reply } from "./api";
 import { content } from "./content";
 
 /** What a ceremony gives: the credential as JSON, or a plain reason the screen can say. */
@@ -182,18 +182,32 @@ export function passkeyRows(entries: PasskeyEntry[]): PasskeyRow[] {
   });
 }
 
+/** The factor list as rows, null when it cannot be trusted (decision 3), or the session is gone. */
+export async function readPasskeys(): Promise<PasskeyRow[] | null | "signed-out"> {
+  const reply = await get("/api/auth/factors");
+  if (reply.status === 401) return "signed-out";
+  const entries = parseFactors(reply);
+  return entries === null ? null : passkeyRows(entries);
+}
+
 /**
  * The one factor operation (spec M3g-2a-2 decision 6), kept here so that it outlives the screen
- * that started it: a ceremony (nothing sent yet), a sent change waiting for its answer, or a change
- * whose answer and session read both failed, so the token may be stale until a read succeeds.
+ * that started it. `phase` is the token gate: a sent change waiting for its answer, or one whose
+ * answer and session read both failed, so the token may be stale until a read succeeds. `working`
+ * is the person's operation, from Add until its list read has answered; the gate opens before that.
  */
-type Phase = "idle" | "ceremony" | "sent" | "unresolved";
+type Phase = "idle" | "sent" | "unresolved";
 let phase: Phase = "idle";
+let working = false;
+/** The running add's own controller, so Sign out can stop it before anything is sent (6(a)). */
+let flight: AbortController | null = null;
+let leaving = false;
 const watchers = new Set<() => void>();
 
-function enter(next: Phase, unsure = next === "sent" || next === "unresolved") {
+function enter(next: Phase, busy = working) {
   phase = next;
-  hold(unsure);
+  working = busy;
+  hold(next !== "idle");
   for (const watch of watchers) watch();
 }
 
@@ -203,15 +217,24 @@ export const operation = {
     return () => { watchers.delete(watch); };
   },
   phase: (): Phase => phase,
+  /** While true every factor control is off and a repeated activation does nothing (decision 6(d)). */
+  busy: (): boolean => working,
 };
 
-/** While true every factor control is off and a repeated activation does nothing (decision 6(d)). */
-const operating = (): boolean => phase === "ceremony" || phase === "sent";
+/** Sign out has begun: no add starts, and a running one stops if its confirm is not yet sent, until `stay`. */
+export function leave(): void {
+  leaving = true;
+  flight?.abort();
+}
+
+export function stay(): void {
+  leaving = false;
+}
 
 /** For Sign out: false while a sent change is unreconciled, or while its session cannot be read (6(e)). */
 export async function trusted(): Promise<boolean> {
   if (phase === "sent") return false;
-  if (phase !== "unresolved") return true;
+  if (phase === "idle") return true;
   if ((await readSession()) === null) return false;
   if (operation.phase() === "unresolved") enter("idle");
   return true;
@@ -219,6 +242,8 @@ export async function trusted(): Promise<boolean> {
 
 /** What an add tells its screen; null when the screen left before anything was sent, or another operation runs. */
 export type Added = "added" | "unconfirmed" | "stepup" | "failed" | "unsupported" | "signed-out" | "offline" | "error" | "unsure";
+/** An add's result and, after a sent confirm, the list read it waited for. */
+export type Adding = { result: Added; rows?: Awaited<ReturnType<typeof readPasskeys>> };
 
 function begun({ status, body }: Reply): Added {
   if (status === 403 && body["error"] === "stepup-required") return "stepup";
@@ -238,30 +263,32 @@ async function settle(answer: Reply): Promise<[Added, boolean]> {
   return ["unconfirmed", (await readSession()) !== null];
 }
 
-/** Begin, the creation ceremony and confirm with exactly `{credential}`. `signal` stops it only before
- * confirm is sent; a sent confirm always runs to its answer and reconciles, even if the screen is gone. */
-export async function addPasskey(signal: AbortSignal): Promise<Added | null> {
-  if (operating()) return null;
-  const doubt = phase === "unresolved";
-  enter("ceremony", doubt);
-  if (doubt) {
-    if ((await readSession()) === null) {
-      enter("unresolved");
-      return "unsure";
-    }
-    enter("ceremony");
+/** Begin, the creation ceremony and confirm with exactly `{credential}`, then the list read. `signal`
+ * stops it only before confirm is sent; a sent confirm always runs to its answer and reconciles. */
+export async function addPasskey(signal: AbortSignal): Promise<Adding | null> {
+  if (working || leaving) return null;
+  const own = new AbortController();
+  signal.addEventListener("abort", () => { own.abort(); });
+  flight = own;
+  enter(phase, true);
+  try {
+    return await adding(own.signal);
+  } finally {
+    flight = null;
+    enter(operation.phase(), false);
+  }
+}
+
+async function adding(signal: AbortSignal): Promise<Adding | null> {
+  if (phase === "unresolved") {
+    if ((await readSession()) === null) return { result: "unsure" };
+    enter("idle");
   }
   const done = await round("/api/auth/factors/passkey", "/api/auth/factors/passkey/confirm", signal, {}, () => { enter("sent"); }, registration);
-  if (done === null) {
-    enter("idle");
-    return null;
-  }
+  if (done === null) return null;
   const { answer, outcome } = done;
-  if (outcome === null || typeof outcome !== "object") {
-    enter("idle");
-    return outcome ?? begun(answer);
-  }
+  if (outcome === null || typeof outcome !== "object") return { result: outcome ?? begun(answer) };
   const [result, reconciled] = await settle(answer);
   enter(reconciled ? "idle" : "unresolved");
-  return result;
+  return result === "added" || result === "unconfirmed" ? { result, rows: await readPasskeys() } : { result };
 }

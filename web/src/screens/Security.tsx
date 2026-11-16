@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 
-import { get } from "../api";
 import { content } from "../content";
 import { Message } from "../forms";
-import { addPasskey, operation, parseFactors, passkeyRows, passkeySupported, type Added, type PasskeyRow } from "../passkey";
+import { addPasskey, operation, passkeySupported, readPasskeys, type Added, type PasskeyRow } from "../passkey";
 
 type Load = { kind: "loading" } | { kind: "error" } | { kind: "ready"; rows: PasskeyRow[] };
 
@@ -11,14 +10,6 @@ type Props = {
   /** The server no longer knows this person: the page goes to sign-in. */
   onSignedOut: () => void;
 };
-
-/** The factor list: its rows, null when it cannot be trusted (decision 3), or the session is gone. */
-async function readList(): Promise<PasskeyRow[] | null | "signed-out"> {
-  const reply = await get("/api/auth/factors");
-  if (reply.status === 401) return "signed-out";
-  const entries = parseFactors(reply);
-  return entries === null ? null : passkeyRows(entries);
-}
 
 const count = (total: number) => (total === 0 ? content.security.empty : total === 1 ? content.security.one : content.security.many(total));
 
@@ -47,12 +38,15 @@ export function Security({ onSignedOut }: Props) {
   const addRef = useRef<HTMLButtonElement>(null);
   /** This screen's add; leaving aborts it, which stops it only before confirm is sent. */
   const flight = useRef<AbortController | null>(null);
-  const phase = useSyncExternalStore(operation.subscribe, operation.phase, operation.phase);
-  const busy = phase === "ceremony" || phase === "sent";
+  const busy = useSyncExternalStore(operation.subscribe, operation.busy, operation.busy);
+  /** An add from an earlier visit is still running: the list is read once it has finished (6(d)). */
+  const [waiting, setWaiting] = useState(busy);
+  if (waiting && !busy) setWaiting(false);
 
   useEffect(() => () => { flight.current?.abort(); }, []);
 
-  useEffect(() => {
+  // In the commit that shows the words, so focus and status arrive together.
+  useLayoutEffect(() => {
     if (focus !== null) (focus.to === "heading" ? headingRef : addRef).current?.focus();
   }, [focus]);
 
@@ -62,8 +56,9 @@ export function Security({ onSignedOut }: Props) {
   }
 
   useEffect(() => {
+    if (waiting) return;
     let live = true;
-    void readList().then((rows) => {
+    void readPasskeys().then((rows) => {
       if (!live) return;
       if (rows === "signed-out") onSignedOut();
       else show(rows, rows === null ? content.security.loadError : count(rows.length));
@@ -71,10 +66,10 @@ export function Security({ onSignedOut }: Props) {
     return () => {
       live = false;
     };
-  }, [attempt, onSignedOut]);
+  }, [attempt, onSignedOut, waiting]);
 
   // The failed load leaves one way forward, so focus goes to it (spec 5.1).
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (load.kind === "error") retryRef.current?.focus();
   }, [load]);
 
@@ -94,16 +89,15 @@ export function Security({ onSignedOut }: Props) {
     flight.current = controller;
     const gone = () => controller.signal.aborted;
     setStatus(null);
-    const result = await addPasskey(controller.signal);
-    if (result === null || gone()) return;
+    const done = await addPasskey(controller.signal);
+    if (done === null || gone()) return;
+    const { result, rows } = done;
     if (result === "signed-out") {
       onSignedOut();
     } else if (result === "unsupported") {
       setCanAdd(false);
       say(content.passkeys.unsupported, "heading");
-    } else if (result === "added" || result === "unconfirmed") {
-      const rows = await readList();
-      if (gone()) return;
+    } else if (rows !== undefined) {
       if (rows === "signed-out") onSignedOut();
       else if (rows === null) show(null, content.security.listUnsure);
       else {

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 
 import { endSession, sessionState, unauthenticated, type SessionState } from "./api";
 import { content } from "./content";
 import { discardInvitation, leaveEnrol, onEnrolPath, takeToken } from "./enrolLink";
-import { operation, trusted } from "./passkey";
+import { leave, operation, stay, trusted } from "./passkey";
 import { EnrolMissing, EnrolPassword, EnrolSetup, type Setup } from "./screens/Enrol";
 import { Recovery } from "./screens/Recovery";
 import { SecondFactor } from "./screens/SecondFactor";
@@ -73,19 +73,32 @@ export function App() {
 
   const expired = useCallback(() => { go("signed_out", { notice: content.errors.expired }); }, [go]);
 
+  // A plain click keeps this document, and with it a factor change still in flight; the href stays
+  // real, so a new tab, a modified click, Back and Forward behave as for any link.
+  function follow(event: MouseEvent<HTMLAnchorElement>) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    window.history.pushState(null, "", event.currentTarget.href);
+    setPage(pageOf(window.location.hash));
+  }
+
   async function signOut() {
     setSignOutError(null);
     setSigningOut(true);
-    // A factor change whose answer was lost may have rotated the token: no logout until it is known (6(e)).
-    if (!(await trusted())) {
+    leave();
+    try {
+      // A factor change whose answer was lost may have rotated the token: no logout until it is known (6(e)).
+      if (!(await trusted())) {
+        setSignOutError(content.sessionUnsure);
+        return;
+      }
+      const { out, state } = await endSession();
+      if (out === "signed_out" || unauthenticated(state)) go("signed_out");
+      else setSignOutError(out === "offline" ? content.errors.network : content.errors.generic);
+    } finally {
       setSigningOut(false);
-      setSignOutError(content.sessionUnsure);
-      return;
+      stay();
     }
-    const { out, state } = await endSession();
-    setSigningOut(false);
-    if (out === "signed_out" || unauthenticated(state)) go("signed_out");
-    else setSignOutError(out === "offline" ? content.errors.network : content.errors.generic);
   }
 
   const [signingOut, setSigningOut] = useState(false);
@@ -108,7 +121,7 @@ export function App() {
           <ul>
             {content.nav.map((item) => (
               <li key={item.href}>
-                <a href={item.href} aria-current={item.page === page ? "page" : undefined}>
+                <a href={item.href} onClick={follow} aria-current={item.page === page ? "page" : undefined}>
                   {item.label}
                 </a>
               </li>

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logout } from "./api";
 import { App } from "./App";
 import { content } from "./content";
-import { addPasskey } from "./passkey";
+import { addPasskey, operation } from "./passkey";
 import { later, sent, server, state, user, type Answer, type Call } from "./testkit";
 
 const OLD = "6f1c1c1e-0000-4000-8000-000000000001";
@@ -54,6 +54,8 @@ const token = (call: Call | undefined) => (call?.init.headers as Record<string, 
 const settle = async () => { for (let i = 0; i < 5; i += 1) await new Promise((done) => setTimeout(done, 0)); };
 const addButton = () => screen.getByRole<HTMLButtonElement>("button", { name: content.security.add });
 const heading = () => screen.getByRole("heading", { level: 1, name: content.security.title });
+const signOutButton = () => screen.getByRole<HTMLButtonElement>("button", { name: content.signOut });
+const link = (name: string) => screen.getByRole("link", { name });
 const BEGIN = "/api/auth/factors/passkey";
 const CONFIRM = "/api/auth/factors/passkey/confirm";
 
@@ -188,7 +190,7 @@ it("the runner itself ignores a second add while one runs (decision 6(d))", asyn
   const calls = server(OPTIONS);
   const first = addPasskey(new AbortController().signal);
   expect(await addPasskey(new AbortController().signal)).toBeNull();
-  expect(await first).toBe("failed");
+  expect(await first).toEqual({ result: "failed" });
   expect(calls.map((call) => call.path)).toEqual([BEGIN]);
 });
 
@@ -228,7 +230,7 @@ describe("leaving and lost answers", () => {
   it("a sent confirm finishes after leaving; Sign out waits for it, then uses its token", async () => {
     authenticator();
     const confirm = later<Answer>();
-    const calls = await security(OPTIONS, confirm.promise, { status: 200, body: { next: "signed_out", csrf: "t9" } });
+    const calls = await security(OPTIONS, confirm.promise, list(OLD, NEW), { status: 200, body: { next: "signed_out", csrf: "t9" } });
     await user.click(addButton());
     await vi.waitFor(() => { expect(paths(calls)).toEqual([BEGIN, CONFIRM]); });
     window.location.hash = "";
@@ -244,8 +246,21 @@ describe("leaving and lost answers", () => {
     expect(screen.queryByText(content.security.addedNotice)).toBeNull();
     await user.click(signOut);
     await screen.findByRole("heading", { level: 1, name: content.signIn.title });
-    expect(paths(calls)).toEqual([BEGIN, CONFIRM, "/api/auth/logout"]);
-    expect(token(calls[4])).toBe("t5");
+    expect(paths(calls)).toEqual([BEGIN, CONFIRM, "/api/auth/factors", "/api/auth/logout"]);
+    expect(token(calls[5])).toBe("t5");
+  });
+
+  it("a departed screen ignores its add's result, even a signed-out confirm", async () => {
+    authenticator();
+    const confirm = later<Answer>();
+    const calls = await security(OPTIONS, confirm.promise);
+    await user.click(addButton());
+    await vi.waitFor(() => { expect(paths(calls)).toEqual([BEGIN, CONFIRM]); });
+    window.location.hash = "";
+    await screen.findByRole("heading", { level: 1, name: content.pageTitle });
+    confirm.resolve({ status: 401, body: { error: "signed-out" } });
+    await vi.waitFor(() => { expect(signOutButton().disabled).toBe(false); });
+    expect(screen.getByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
   });
 
   it.each<[string, Answer | "lost"]>([
@@ -284,6 +299,7 @@ describe("leaving and lost answers", () => {
     expect(screen.queryByText(content.security.addedNotice)).toBeNull();
     expect(screen.queryByText(content.security.unconfirmed)).toBeNull();
     expect(screen.queryByRole("list", { name: content.security.listTitle })).toBeNull();
+    expect(operation.busy()).toBe(false);
   });
 
   it("with the session unreadable too, sends no add and no logout until a session read works", async () => {
@@ -306,5 +322,104 @@ describe("leaving and lost answers", () => {
     await screen.findByRole("heading", { level: 1, name: content.signIn.title });
     expect(paths(calls)).toEqual([BEGIN, CONFIRM, "/api/auth/session", "/api/auth/factors", "/api/auth/session", "/api/auth/session", "/api/auth/session", "/api/auth/logout"]);
     expect(token(calls[9])).toBe("t7");
+  });
+
+  it.each(["begin", "prompt"] as const)("Sign out while the %s is pending aborts it before logout, and no confirm follows", async (stage) => {
+    const create = authenticator();
+    const begin = later<Answer>();
+    const prompt = later<unknown>();
+    const out = later<Answer>();
+    if (stage === "prompt") create.mockReturnValueOnce(prompt.promise);
+    const calls = await security(stage === "begin" ? begin.promise : OPTIONS, out.promise);
+    fireEvent.click(addButton());
+    if (stage === "prompt") await vi.waitFor(() => { expect(create).toHaveBeenCalled(); });
+    fireEvent.click(signOutButton());
+    expect(calls[2]?.init.signal?.aborted).toBe(true);
+    expect(paths(calls)).toEqual([BEGIN]);
+    await vi.waitFor(() => { expect(paths(calls)).toEqual([BEGIN, "/api/auth/logout"]); });
+    begin.resolve(OPTIONS);
+    prompt.resolve(new FakeCredential());
+    await settle();
+    out.resolve({ status: 200, body: { next: "signed_out", csrf: "t9" } });
+    await screen.findByRole("heading", { level: 1, name: content.signIn.title });
+    await settle();
+    expect(paths(calls)).toEqual([BEGIN, "/api/auth/logout"]);
+    expect(create).toHaveBeenCalledTimes(stage === "begin" ? 0 : 1);
+  });
+
+  it("while a logout is pending Add starts nothing, and once it fails Add works again", async () => {
+    authenticator();
+    const out = later<Answer>();
+    const calls = await security(out.promise, { status: 200, body: { state: "signed_in", csrf: "t2" } }, STEPUP);
+    fireEvent.click(signOutButton());
+    await vi.waitFor(() => { expect(paths(calls)).toEqual(["/api/auth/logout"]); });
+    await user.click(addButton());
+    await settle();
+    expect(paths(calls)).toEqual(["/api/auth/logout"]);
+    out.resolve({ status: 500, body: {} });
+    await shows(content.errors.generic);
+    await user.click(addButton());
+    await shows(content.security.stepUpNeeded);
+    expect(paths(calls)).toEqual(["/api/auth/logout", "/api/auth/session", BEGIN]);
+  });
+
+  it("the Today and Security links keep this document during a sent confirm, and the page waits for the add", async () => {
+    authenticator();
+    const confirm = later<Answer>();
+    const calls = await security(OPTIONS, confirm.promise, list(OLD), list(OLD, NEW));
+    await user.click(addButton());
+    await vi.waitFor(() => { expect(paths(calls)).toEqual([BEGIN, CONFIRM]); });
+    const push = vi.spyOn(window.history, "pushState");
+    expect(fireEvent.click(link("Today"))).toBe(false);
+    await screen.findByRole("heading", { level: 1, name: content.pageTitle });
+    expect(window.location.href).toBe(`${window.location.origin}/`);
+    expect(operation.phase()).toBe("sent");
+    expect(signOutButton().disabled).toBe(true);
+    await shows(content.finishing);
+    expect(fireEvent.click(link("Security"))).toBe(false);
+    await screen.findByText(content.security.loading);
+    expect(push).toHaveBeenCalledTimes(2);
+    window.history.back();
+    await screen.findByRole("heading", { level: 1, name: content.pageTitle });
+    window.history.forward();
+    await screen.findByText(content.security.loading);
+    expect(paths(calls)).toEqual([BEGIN, CONFIRM]);
+    confirm.resolve(ADDED);
+    await shows(content.security.many(2));
+    expect(paths(calls)).toEqual([BEGIN, CONFIRM, "/api/auth/factors", "/api/auth/factors"]);
+    expect(screen.queryByText(content.security.addedNotice)).toBeNull();
+    expect(document.activeElement).not.toBe(heading());
+    expect(signOutButton().disabled).toBe(false);
+    push.mockRestore();
+  });
+
+  it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }])("leaves a click with %o to the browser", async (init) => {
+    authenticator();
+    await security();
+    const push = vi.spyOn(window.history, "pushState");
+    expect(fireEvent.click(link("Security"), init)).toBe(true);
+    expect(push).not.toHaveBeenCalled();
+    push.mockRestore();
+  });
+
+  it.each<[string, Answer, Answer[], string]>([
+    ["added", ADDED, [], content.security.addedNotice],
+    ["unconfirmed", { status: 502, body: {} }, [state("signed_in")], content.security.unconfirmed],
+  ])("keeps Add busy until the list read after %s has answered, with the logout gate already open", async (_, answer, session, words) => {
+    authenticator();
+    const read = later<Answer>();
+    const calls = await security(OPTIONS, answer, ...session, read.promise);
+    const add = addButton();
+    fireEvent.click(add);
+    await vi.waitFor(() => { expect(paths(calls)).toHaveLength(3 + session.length); });
+    expect(add.disabled).toBe(true);
+    fireEvent.click(add);
+    expect(await addPasskey(new AbortController().signal)).toBeNull();
+    expect(operation.phase()).toBe("idle");
+    expect(signOutButton().disabled).toBe(false);
+    read.resolve(list(OLD, NEW));
+    await shows(words);
+    expect(add.disabled).toBe(false);
+    expect(paths(calls)).toHaveLength(3 + session.length);
   });
 });
