@@ -2,7 +2,12 @@ export const content = {
   product: "SKIW",
   skipLink: "Skip to content",
   navLabel: "Primary",
-  nav: [{ label: "Today", href: "/" }],
+  nav: [
+    { label: "Today", href: "/", page: "today" },
+    { label: "Security", href: "/#security", page: "security" },
+  ],
+  /** The agency's one time zone (parent spec §4.1): every time the page shows is read in it. */
+  timeZone: "Asia/Kuala_Lumpur",
   pageTitle: "Today",
   emptyTitle: "Nothing here yet",
   emptyBody: "Modules appear here as they are built.",
@@ -72,6 +77,19 @@ export const content = {
   },
   passkeys: {
     unsupported: "This browser cannot use passkeys.",
+  },
+  security: {
+    title: "Security",
+    intro: "A passkey is an optional way to confirm it is you. Your authenticator app always stays available.",
+    listTitle: "Passkeys",
+    loading: "Loading your passkeys…",
+    loadError: "The list could not be loaded.",
+    retry: "Try again",
+    empty: "No passkeys yet.",
+    one: "1 passkey.",
+    many: (count: number) => `${String(count)} passkeys.`,
+    added: "Passkey, added",
+    unknown: "Passkey, added time unknown",
   },
   signOut: "Sign out",
   signOutBusy: "Signing out",

@@ -198,6 +198,20 @@ describe("the code screen's passkey", () => {
     untouched();
   });
 
+  it.each<[string, "NotAllowedError" | undefined, Answer[]]>([
+    ["a cancel", "NotAllowedError", [OPTIONS]],
+    ["a refusal", undefined, [OPTIONS, { status: 401, body: { error: "passkey-wrong" } }]],
+    ["the limit", undefined, [OPTIONS, { status: 429, body: { error: "limited" } }]],
+    ["a lost answer", undefined, [OPTIONS]],
+  ])("after %s, focus goes back to the passkey button, enabled again", async (_, failure, answers) => {
+    authenticator(failure);
+    await codeScreen(...answers);
+    const button = screen.getByRole<HTMLButtonElement>("button", { name: content.secondFactor.passkey });
+    await user.click(button);
+    await vi.waitFor(() => { expect(document.activeElement).toBe(button); });
+    expect(button.disabled).toBe(false);
+  });
+
   it("goes back to sign-in when the pending login expired", async () => {
     authenticator();
     await codeScreen({ status: 401, body: { error: "login-expired" } });
@@ -483,6 +497,20 @@ describe("the step-up dialog's passkey", () => {
     dialog();
     await user.click(screen.getByRole("button", { name: content.stepUp.passkey }));
     expect(await screen.findByText(content.stepUp.passkeyFailed)).toBeTruthy();
+  });
+
+  it.each<[string, "NotAllowedError" | undefined, Answer[]]>([
+    ["a cancel", "NotAllowedError", [OPTIONS]],
+    ["a refusal", undefined, [OPTIONS, { status: 401, body: { error: "passkey-wrong" } }]],
+    ["the limit", undefined, [OPTIONS, { status: 429, body: { error: "limited" } }]],
+  ])("after %s, focus goes back to the passkey button, enabled again", async (_, failure, answers) => {
+    authenticator(failure);
+    server(...answers);
+    dialog();
+    const button = screen.getByRole<HTMLButtonElement>("button", { name: content.stepUp.passkey });
+    await user.click(button);
+    await vi.waitFor(() => { expect(document.activeElement).toBe(button); });
+    expect(button.disabled).toBe(false);
   });
 
   it("hands over to sign-in when the user is no longer active", async () => {
