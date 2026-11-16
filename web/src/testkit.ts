@@ -3,9 +3,27 @@ import { vi } from "vitest";
 
 export type Answer = { status: number; body: Record<string, unknown> };
 export type Call = { path: string; init: RequestInit };
+/** An answer whose status (and, in a browser, its Set-Cookie) arrives at once while its JSON body
+ * waits for `body`: the server has already acted, the page has not read it yet. */
+export type Held = { status: number; body: Promise<Record<string, unknown>> };
 
-/** Answers fetch() from a queue, in order, and records what the page sent. */
-export function server(...answers: Answer[]) {
+const encoder = new TextEncoder();
+function respond(answer: Answer | Held): Response {
+  const { status, body } = answer;
+  if (!(body instanceof Promise)) return new Response(JSON.stringify(body), { status });
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(encoder.encode(JSON.stringify(await body)));
+      controller.close();
+    },
+  });
+  return new Response(stream, { status });
+}
+
+/** Answers fetch() from a queue, in order, and records what the page sent. A promised answer
+ * arrives when the test resolves it, a held one sends its status first and its body later; the
+ * fake ignores the abort signal, so tests assert which requests carry one. */
+export function server(...answers: (Answer | Held | Promise<Answer>)[]) {
   const calls: Call[] = [];
   const queue = [...answers];
   vi.stubGlobal(
@@ -14,7 +32,7 @@ export function server(...answers: Answer[]) {
       calls.push({ path, init });
       const next = queue.shift();
       if (next === undefined) return Promise.reject(new TypeError("offline"));
-      return Promise.resolve(new Response(JSON.stringify(next.body), { status: next.status }));
+      return Promise.resolve(next).then(respond);
     }),
   );
   return calls;

@@ -1,6 +1,6 @@
 import { useRef, useState, type SubmitEvent } from "react";
 
-import { post, type SessionState } from "../api";
+import { post, rotated, type SessionState } from "../api";
 import { content } from "../content";
 import { Field, Message } from "../forms";
 
@@ -17,9 +17,11 @@ export function SignIn({ notice, onNext }: Props) {
     event.preventDefault();
     setBusy(true);
     setError(null);
-    const { status, body } = await post("/api/auth/login", { email, password });
+    const answer = await post("/api/auth/login", { email, password });
+    const { status } = answer;
+    const moved = await rotated(answer, "second_factor", "second_factor");
     setBusy(false);
-    if (status === 200 && body["next"] === "second_factor") {
+    if (moved) {
       onNext("second_factor");
       return;
     }

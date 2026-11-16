@@ -1,6 +1,6 @@
 import { useRef, useState, type SubmitEvent } from "react";
 
-import { post, type SessionState } from "../api";
+import { post, rotated, type SessionState } from "../api";
 import { content } from "../content";
 import { leaveEnrol } from "../enrolLink";
 import { Field, Message } from "../forms";
@@ -33,7 +33,7 @@ export function EnrolPassword({ token, go }: { token: string; go: Go }) {
     setBusy(true);
     setError(null);
     const first = await post("/api/auth/enrol", { token, password });
-    if (first.status === 200 && first.body["next"] === "enrol_factor") {
+    if (await rotated(first, "enrol_factor", "enrol_factor")) {
       const second = await post("/api/auth/enrol/totp", {});
       const setup = second.status === 200 ? setupFrom(second.body) : null;
       go("enrol_factor", setup ? { setup } : {});
@@ -99,10 +99,12 @@ export function EnrolSetup({ setup: first, go }: { setup: Setup | null; go: Go }
     event.preventDefault();
     setBusy(true);
     setError(null);
-    const { status, body } = await post("/api/auth/enrol/totp/confirm", { code });
-    setBusy(false);
+    const answer = await post("/api/auth/enrol/totp/confirm", { code });
+    const { status, body } = answer;
     const codes = body["recovery_codes"];
-    if (status === 200 && body["next"] === "signed_in" && Array.isArray(codes)) {
+    const done = Array.isArray(codes) && (await rotated(answer, "signed_in", "signed_in"));
+    setBusy(false);
+    if (done) {
       go("recovery", { codes: codes.map(String) });
       return;
     }

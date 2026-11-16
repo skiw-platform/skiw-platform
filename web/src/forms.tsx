@@ -1,5 +1,7 @@
 import type { ChangeEvent, Ref } from "react";
 
+import { content } from "./content";
+
 type FieldProps = {
   id: string;
   label: string;
@@ -44,6 +46,19 @@ export function Field({ id, label, type, value, onChange, autoComplete, help, er
       />
     </div>
   );
+}
+
+/** The message for a refused answer; `wrong` is the screen's own words for a 401. */
+export function refusal(status: number, wrong: string): string {
+  if (status === 401) return wrong;
+  if (status === 429) return content.errors.limited;
+  if (status === 400) return content.errors.invalid;
+  return status === 0 ? content.errors.network : content.errors.generic;
+}
+
+/** A 401 (wrong code) or a 400 (not a code) is about the code itself; only those mark the field (A11Y-03). */
+export function aboutCode(status: number): boolean {
+  return status === 401 || status === 400;
 }
 
 /** The polite live region stays in the page so a screen reader hears the message when it appears. */

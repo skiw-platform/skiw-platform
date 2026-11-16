@@ -56,6 +56,7 @@ its secret key source (`DJANGO_SECRET_KEY`, or `DJANGO_SECRET_KEY_FILE` on hosts
 ## Known local conflicts
 - The database is published on host port **5433** (`SKIW_DB_PORT`), because 5432 is often taken by another local Postgres.
 - The app is published on `127.0.0.1:8000`.
+- A second checkout (another worktree) uses its own `COMPOSE_PROJECT_NAME` and `SKIW_DB_PORT` in its `.env`. A passkey ceremony needs the origin the browser shows: if that checkout serves the app on another port (a local Compose override; `docker-compose.yml` publishes 8000), set `SKIW_WEBAUTHN_ORIGIN=http://localhost:<port>` and `E2E_BASE_URL=http://localhost:<port>` to match and keep `SKIW_WEBAUTHN_RP_ID=localhost`; with the default file only one checkout can run the app at a time.
 
 ## Background jobs
 - Enqueue only with `jobs.enqueue_in_tx(task, **ids)` inside `transaction.atomic()`. Direct `.defer()` / `.defer_async()` / `.batch_defer*()` anywhere else fails `make lint` (Semgrep rule `semgrep/jobs-no-direct-defer.yml`; `.semgrepignore` keeps tests in scope).

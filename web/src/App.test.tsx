@@ -42,6 +42,50 @@ describe("App", () => {
     expect(screen.getByRole("main").getAttribute("id")).toBe("main");
   });
 
+  const NO_TOKEN = [["missing", undefined], ["empty", ""]] as const;
+  const withToken = (body: Record<string, unknown>, csrf: string | undefined) => (csrf === undefined ? body : { ...body, csrf });
+  const signIn = async () => {
+    await user.type(await screen.findByLabelText(content.signIn.email), "a@example.com");
+    await user.type(screen.getByLabelText(content.signIn.password), "pw");
+    await user.click(screen.getByRole("button", { name: content.signIn.submit }));
+  };
+  const enterCode = async () => {
+    await user.type(await screen.findByLabelText(content.secondFactor.label), "123456");
+    await user.click(screen.getByRole("button", { name: content.secondFactor.submit }));
+  };
+
+  it.each(NO_TOKEN)("password success with a %s csrf is reconciled by a session read, and the next POST carries its token", async (_, csrf) => {
+    const calls = server(state("signed_out"), { status: 200, body: withToken({ next: "second_factor" }, csrf) }, { status: 200, body: { state: "second_factor", csrf: "t5" } }, { status: 401, body: { error: "wrong" } });
+    render(<App />);
+    await signIn();
+    await enterCode();
+    await vi.waitFor(() => { expect(calls).toHaveLength(4); });
+    expect(calls[2]?.path).toBe("/api/auth/session");
+    expect(calls[3]?.init.headers).toMatchObject({ "X-CSRFToken": "t5" });
+  });
+
+  it.each(NO_TOKEN)("password success with a %s csrf stays on sign-in, with no stale POST, when the session cannot be confirmed", async (_, csrf) => {
+    const calls = server(state("signed_out"), { status: 200, body: withToken({ next: "second_factor" }, csrf) }, { status: 200, body: { state: "second_factor" } });
+    render(<App />);
+    await signIn();
+    expect(await screen.findByText(content.errors.generic)).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 1, name: content.secondFactor.title })).toBeNull();
+    expect(calls.filter((call) => call.init.method === "POST")).toHaveLength(1);
+  });
+
+  it.each(NO_TOKEN)("code success with a %s csrf signs in only after the session read confirms it", async (_, csrf) => {
+    server(state("second_factor"), { status: 200, body: withToken({ next: "signed_in" }, csrf) }, { status: 200, body: { state: "signed_in", csrf: "t5" } });
+    render(<App />);
+    await enterCode();
+    expect(await screen.findByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
+    cleanup();
+    server(state("second_factor"), { status: 200, body: withToken({ next: "signed_in" }, csrf) }, { status: 200, body: { state: "second_factor", csrf: "t5" } });
+    render(<App />);
+    await enterCode();
+    expect(await screen.findByText(content.errors.generic)).toBeTruthy();
+    expect(screen.queryByRole("navigation")).toBeNull();
+  });
+
   it("goes to the code step after a right password and sends the CSRF token it was given", async () => {
     const calls = server(state("signed_out"), { status: 200, body: { next: "second_factor", csrf: "t2" } });
     render(<App />);
@@ -169,11 +213,31 @@ describe("App", () => {
   });
 
   it("shows sign-in, not an error, when sign-out finds the session already gone (idle)", async () => {
-    server(state("signed_in"), { status: 401, body: { error: "idle" } });
+    server(state("signed_in"), { status: 401, body: { error: "idle" } }, state("signed_out"));
     render(<App />);
     await user.click(await screen.findByRole("button", { name: content.signOut }));
     expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
     expect(screen.queryByText(content.errors.generic)).toBeNull();
+  });
+
+  it.each(["second_factor", "enrol_factor"] as const)("shows sign-in, not Today, when a refused sign-out finds the server at %s", async (name) => {
+    const calls = server(state("signed_in"), { status: 403, body: {} }, { status: 200, body: { state: name, csrf: "t2" } });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: content.signOut }));
+    expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(calls.map((call) => call.path)).toEqual(["/api/auth/session", "/api/auth/logout", "/api/auth/session"]);
+  });
+
+  it.each([
+    ["signed in", state("signed_in")],
+    ["unreadable", { status: 500, body: {} }],
+  ] as const)("keeps Today with an error when a refused sign-out finds the server %s", async (_, after) => {
+    server(state("signed_in"), { status: 403, body: {} }, after);
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: content.signOut }));
+    expect(await screen.findByText(content.errors.generic)).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
   });
 
   it("disables the sign-out button and says so while the request runs", async () => {

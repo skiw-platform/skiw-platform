@@ -169,7 +169,7 @@ describe("enrolment", () => {
 
   it("does not show someone else's invitation after a signed-in person signs out", async () => {
     open("/enrol#tok-999");
-    server(state("signed_in"), { status: 200, body: { csrf: "t3" } });
+    server(state("signed_in"), { status: 200, body: { next: "signed_out", csrf: "t3" } });
     render(<App />);
     await user.click(await screen.findByRole("button", { name: content.signOut }));
     expect(await screen.findByLabelText(content.signIn.email)).toBeTruthy();
@@ -202,5 +202,36 @@ describe("enrolment", () => {
     await user.type(screen.getByLabelText(content.setup.code), "111111");
     await user.click(screen.getByRole("button", { name: content.setup.submit }));
     expect(await screen.findByText(content.errors.generic)).toBeTruthy();
+  });
+
+  it.each([["missing", undefined], ["empty", ""]] as const)("enrol password success with a %s csrf reads the session first, so the TOTP begin carries its token", async (_, csrf) => {
+    open("/enrol#tok-123");
+    const calls = server(state("signed_out"), { status: 200, body: csrf === undefined ? { next: "enrol_factor" } : { next: "enrol_factor", csrf } }, { status: 200, body: { state: "enrol_factor", csrf: "t5" } }, SETUP);
+    render(<App />);
+    await enterPassword("a long enough password");
+    expect(await screen.findByRole("heading", { level: 1, name: content.setup.title })).toBeTruthy();
+    expect(calls[2]?.path).toBe("/api/auth/session");
+    expect(calls[3]?.init.headers).toMatchObject({ "X-CSRFToken": "t5" });
+  });
+
+  it("enrol password success without a usable token stays put and sends no TOTP begin", async () => {
+    open("/enrol#tok-123");
+    const calls = server(state("signed_out"), { status: 200, body: { next: "enrol_factor", csrf: "" } }, { status: 500, body: {} });
+    render(<App />);
+    await enterPassword("a long enough password");
+    expect(await screen.findByText(content.errors.generic)).toBeTruthy();
+    expect(calls.filter((call) => call.init.method === "POST")).toHaveLength(1);
+  });
+
+  it.each([["missing", undefined], ["empty", ""]] as const)("enrol confirm with a %s csrf keeps the recovery codes once the session read confirms", async (_, csrf) => {
+    open("/enrol#tok-123");
+    const done = { next: "signed_in", recovery_codes: ["AAAA-1"] };
+    server(state("signed_out"), ENROLLED, SETUP, { status: 200, body: csrf === undefined ? done : { ...done, csrf } }, { status: 200, body: { state: "signed_in", csrf: "t5" } });
+    render(<App />);
+    await enterPassword("a long enough password");
+    await user.type(await screen.findByLabelText(content.setup.code), "123456");
+    await user.click(screen.getByRole("button", { name: content.setup.submit }));
+    expect(await screen.findByRole("heading", { level: 1, name: content.recovery.title })).toBeTruthy();
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["AAAA-1"]);
   });
 });

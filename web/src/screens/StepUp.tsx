@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
 
-import { post } from "../api";
+import { post, type Reply } from "../api";
 import { content } from "../content";
-import { Field, Message } from "../forms";
+import { aboutCode, Field, Message, refusal } from "../forms";
+import { passkeySupported, round } from "../passkey";
 
 type Props = {
   /** One of the server's listed purposes, for example `factor.change`. */
@@ -15,51 +16,84 @@ type Props = {
 };
 
 /**
- * Asks a signed-in person for a fresh authenticator code before a sensitive action (spec D7,
- * AUTH-09). No screen uses it yet: the M3 actions it guards have no screens, and the later
- * modules that do import this one (DECISIONS "M3i-3"). The code lives in this component only.
+ * Asks a signed-in person for a fresh authenticator code, or a passkey, before a sensitive action
+ * (spec D7, AUTH-09). The passkey screens mount it for `factor.change` (DECISIONS "M3g-2a"). The
+ * code and the credential live in this component only.
  */
 export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
   const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  /** Only a refused code marks the field; every other message is a status (A11Y-03). */
+  const [codeError, setCodeError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [offerPasskey, setOfferPasskey] = useState(passkeySupported);
   const codeRef = useRef<HTMLInputElement>(null);
+  /** The passkey round in flight; closing the dialog aborts it, and a late answer calls nothing. */
+  const flight = useRef<AbortController | null>(null);
 
   useEffect(() => {
     codeRef.current?.focus();
+    return () => { flight.current?.abort(); };
   }, []);
+
+  function say(field: string | null, general: string | null) {
+    setCodeError(field);
+    setStatus(general);
+  }
+
+  /** Cancel stays available during a passkey round, and stops it. */
+  function cancel() {
+    flight.current?.abort();
+    onCancel();
+  }
+
+  /** The answers both routes share; false when the dialog stays open. */
+  function settled({ status, body }: Reply): boolean {
+    if (status === 200 && body["next"] === "verified" && typeof body["until"] === "string") onVerified(body["until"]);
+    else if (status === 401 && body["error"] === "signed-out") onSignedOut();
+    else return false;
+    return true;
+  }
 
   async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
-    setError(null);
-    const { status, body } = await post("/api/auth/stepup", { purpose, code });
+    say(null, null);
+    const answer = await post("/api/auth/stepup", { purpose, code });
     setBusy(false);
-    if (status === 200 && body["next"] === "verified" && typeof body["until"] === "string") {
-      onVerified(body["until"]);
-      return;
-    }
-    if (status === 401 && body["error"] === "signed-out") {
-      onSignedOut();
-      return;
-    }
+    if (settled(answer)) return;
     setCode("");
-    setError(
-      status === 401
-        ? content.errors.codeWrong
-        : status === 429
-          ? content.errors.limited
-          : status === 400
-            ? content.errors.invalid
-            : status === 0
-              ? content.errors.network
-              : content.errors.generic,
-    );
+    const words = refusal(answer.status, content.errors.codeWrong);
+    if (aboutCode(answer.status)) say(words, null);
+    else say(null, words);
     codeRef.current?.focus();
   }
 
+  /** As at sign-in, a cancelled and a refused passkey get the same words. */
+  async function passkey() {
+    flight.current?.abort();
+    const controller = new AbortController();
+    flight.current = controller;
+    setBusy(true);
+    say(null, null);
+    const done = await round("/api/auth/stepup/passkey", "/api/auth/stepup/passkey/confirm", controller.signal, { purpose });
+    // A sent confirm runs to its answer (the token stays coherent); after Cancel it calls nothing.
+    if (done === null || controller.signal.aborted) return;
+    const { answer, outcome: result } = done;
+    setBusy(false);
+    if (settled(answer)) return;
+    if (answer.status === 409 || result === "unsupported") {
+      setOfferPasskey(false);
+      say(null, result === "unsupported" ? content.passkeys.unsupported : content.stepUp.noPasskey);
+      codeRef.current?.focus();
+      return;
+    }
+    const failed = content.stepUp.passkeyFailed;
+    say(null, result === "failed" || answer.status === 400 ? failed : refusal(answer.status, failed));
+  }
+
   function keys(event: KeyboardEvent<HTMLElement>) {
-    if (event.key === "Escape") onCancel();
+    if (event.key === "Escape") cancel();
   }
 
   return (
@@ -73,13 +107,19 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
       <h2 id="stepup-title">{content.stepUp.title}</h2>
       <p>{content.stepUp.intro}</p>
       <form onSubmit={(event) => void submit(event)} className="form">
-        <Field id="stepup-code" label={content.stepUp.label} type="text" value={code} onChange={setCode} autoComplete="one-time-code" inputMode="numeric" errorId={error ? "stepup-error" : undefined} inputRef={codeRef} />
-        <Message id="stepup-error" text={error} />
+        <Field id="stepup-code" label={content.stepUp.label} type="text" value={code} onChange={setCode} autoComplete="one-time-code" inputMode="numeric" errorId={codeError ? "stepup-error" : undefined} inputRef={codeRef} />
+        <Message id="stepup-error" text={codeError} />
+        <Message id="stepup-status" text={status} />
         <div className="actions">
           <button type="submit" disabled={busy}>
             {busy ? content.stepUp.busy : content.stepUp.submit}
           </button>
-          <button type="button" className="link" onClick={onCancel}>
+          {offerPasskey ? (
+            <button type="button" className="secondary" disabled={busy} onClick={() => void passkey()}>
+              {content.stepUp.passkey}
+            </button>
+          ) : null}
+          <button type="button" className="link" onClick={cancel}>
             {content.stepUp.cancel}
           </button>
         </div>
