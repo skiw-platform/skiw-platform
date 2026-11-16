@@ -1545,4 +1545,4 @@
 - **Runbook (UNI-16):** none for this PR: no deployment, env var, domain or auth route changed; 2b and 2c add the add and remove sections.
 - **Scope / affects:** `web/src/{App.tsx, content.ts, passkey.ts, styles.css, screens/Security.tsx (new), screens/SecondFactor.tsx, screens/StepUp.tsx, security.test.tsx (new), passkey.test.tsx}`, `agents/PROJECT.md` §2, the slice spec, this file.
 - **Versions:** none new. **Exception to a rule?** no.
-- **Decided by:** owner (the decisions above); builder (deep tier) for the parser, the hash handling and the focus mechanism.
+- **Decided by:** owner (the decisions above); builder, drafted on the standard tier (Claude Sonnet 5.5) with no deep-tier sub-agent, although PROJECT.md §6 maps auth work to deep: disclosed to the owner in the PR body, who decides whether a deep-tier re-check is wanted; independent review by GPT-6.1 (Codex), which does not change who implemented it.
