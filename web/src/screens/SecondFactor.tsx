@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type SubmitEvent } from "react";
 
-import { endSession, post, readSession, unauthenticated, type Reply, type SessionState } from "../api";
+import { endSession, post, readSession, rotated, unauthenticated, type Reply, type SessionState } from "../api";
 import { content } from "../content";
 import { aboutCode, Field, Message, refusal } from "../forms";
 import { passkeySupported, round } from "../passkey";
@@ -37,8 +37,9 @@ export function SecondFactor({ onNext }: Props) {
   }
 
   /** The answers both routes share; false when the page stays on this step. */
-  function moved({ status, body }: Reply): boolean {
-    if (status === 200 && body["next"] === "signed_in") onNext("signed_in");
+  async function moved(answer: Reply): Promise<boolean> {
+    const { status, body } = answer;
+    if (await rotated(answer, "signed_in", "signed_in")) onNext("signed_in");
     else if (status === 401 && body["error"] === "login-expired") onNext("signed_out", { notice: content.errors.expired });
     else return false;
     return true;
@@ -50,7 +51,7 @@ export function SecondFactor({ onNext }: Props) {
     say(null, null);
     const answer = await post("/api/auth/second-factor", { code });
     setBusy(false);
-    if (moved(answer)) return;
+    if (await moved(answer)) return;
     setCode("");
     const words = refusal(answer.status, content.errors.codeWrong);
     if (aboutCode(answer.status)) say(words, null);
@@ -75,7 +76,7 @@ export function SecondFactor({ onNext }: Props) {
     }
     const { answer, outcome: result } = done;
     setBusy(false);
-    if (moved(answer)) return;
+    if (await moved(answer)) return;
     if (answer.status === 409 || result === "unsupported") {
       setOfferPasskey(false);
       say(null, result === "unsupported" ? content.passkeys.unsupported : content.secondFactor.noPasskey);

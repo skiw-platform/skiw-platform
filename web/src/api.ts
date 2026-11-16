@@ -65,6 +65,19 @@ export async function sessionState(): Promise<SessionState> {
 }
 
 /**
+ * The one rule for an auth answer that rotates the CSRF token (AUTH-13, UNI-03): it advances the
+ * page only with the expected `next` and a non-empty token. A success-shaped answer without a
+ * usable token is reconciled through the session read, which supplies the token and must report
+ * `state`; anything else is unresolved, and the caller stays where it is. The caller keeps the
+ * answer's body (enrolment's recovery codes), and no protected POST goes out on the old token.
+ */
+export async function rotated({ status, body }: Reply, next: string, state: SessionState): Promise<boolean> {
+  if (status !== 200 || body["next"] !== next) return false;
+  if (typeof body["csrf"] === "string" && body["csrf"] !== "") return true;
+  return (await readSession()) === state;
+}
+
+/**
  * Signs out and proves it (AUTH-13), and reports the session state it learned on the way. A logout whose answer is exactly the signed-out shape (status
  * 200, `next: "signed_out"`, a rotated token) is proof; any other answer (lost, truncated, malformed,
  * refused) is checked against the server's own session state, which

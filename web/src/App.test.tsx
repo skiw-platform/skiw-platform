@@ -42,16 +42,48 @@ describe("App", () => {
     expect(screen.getByRole("main").getAttribute("id")).toBe("main");
   });
 
-  it("never replaces its CSRF token with an empty one", async () => {
-    const calls = server(state("signed_out"), { status: 200, body: { next: "second_factor", csrf: "" } }, { status: 401, body: { error: "wrong" } });
-    render(<App />);
+  const NO_TOKEN = [["missing", undefined], ["empty", ""]] as const;
+  const withToken = (body: Record<string, unknown>, csrf: string | undefined) => (csrf === undefined ? body : { ...body, csrf });
+  const signIn = async () => {
     await user.type(await screen.findByLabelText(content.signIn.email), "a@example.com");
     await user.type(screen.getByLabelText(content.signIn.password), "pw");
     await user.click(screen.getByRole("button", { name: content.signIn.submit }));
+  };
+  const enterCode = async () => {
     await user.type(await screen.findByLabelText(content.secondFactor.label), "123456");
     await user.click(screen.getByRole("button", { name: content.secondFactor.submit }));
-    await vi.waitFor(() => { expect(calls).toHaveLength(3); });
-    expect(calls[2]?.init.headers).toMatchObject({ "X-CSRFToken": "t1" });
+  };
+
+  it.each(NO_TOKEN)("password success with a %s csrf is reconciled by a session read, and the next POST carries its token", async (_, csrf) => {
+    const calls = server(state("signed_out"), { status: 200, body: withToken({ next: "second_factor" }, csrf) }, { status: 200, body: { state: "second_factor", csrf: "t5" } }, { status: 401, body: { error: "wrong" } });
+    render(<App />);
+    await signIn();
+    await enterCode();
+    await vi.waitFor(() => { expect(calls).toHaveLength(4); });
+    expect(calls[2]?.path).toBe("/api/auth/session");
+    expect(calls[3]?.init.headers).toMatchObject({ "X-CSRFToken": "t5" });
+  });
+
+  it.each(NO_TOKEN)("password success with a %s csrf stays on sign-in, with no stale POST, when the session cannot be confirmed", async (_, csrf) => {
+    const calls = server(state("signed_out"), { status: 200, body: withToken({ next: "second_factor" }, csrf) }, { status: 200, body: { state: "second_factor" } });
+    render(<App />);
+    await signIn();
+    expect(await screen.findByText(content.errors.generic)).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 1, name: content.secondFactor.title })).toBeNull();
+    expect(calls.filter((call) => call.init.method === "POST")).toHaveLength(1);
+  });
+
+  it.each(NO_TOKEN)("code success with a %s csrf signs in only after the session read confirms it", async (_, csrf) => {
+    server(state("second_factor"), { status: 200, body: withToken({ next: "signed_in" }, csrf) }, { status: 200, body: { state: "signed_in", csrf: "t5" } });
+    render(<App />);
+    await enterCode();
+    expect(await screen.findByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
+    cleanup();
+    server(state("second_factor"), { status: 200, body: withToken({ next: "signed_in" }, csrf) }, { status: 200, body: { state: "second_factor", csrf: "t5" } });
+    render(<App />);
+    await enterCode();
+    expect(await screen.findByText(content.errors.generic)).toBeTruthy();
+    expect(screen.queryByRole("navigation")).toBeNull();
   });
 
   it("goes to the code step after a right password and sends the CSRF token it was given", async () => {
