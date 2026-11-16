@@ -15,6 +15,9 @@ export function SecondFactor({ onNext }: Props) {
   const [busy, setBusy] = useState(false);
   const [offerPasskey, setOfferPasskey] = useState(passkeySupported);
   const codeRef = useRef<HTMLInputElement>(null);
+  const passkeyRef = useRef<HTMLButtonElement>(null);
+  /** Counts the failed passkey rounds: each one hands focus back to the button once it is enabled again. */
+  const [retried, setRetried] = useState(0);
   /** The passkey round in flight; leaving aborts it, so a round not yet at confirm does nothing. */
   const flight = useRef<AbortController | null>(null);
   /** True once that round's confirm has gone out: leaving then waits for it (AUTH-13). */
@@ -30,6 +33,10 @@ export function SecondFactor({ onNext }: Props) {
       flight.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (retried > 0) passkeyRef.current?.focus();
+  }, [retried]);
 
   function say(field: string | null, general: string | null) {
     setCodeError(field);
@@ -85,6 +92,7 @@ export function SecondFactor({ onNext }: Props) {
     }
     const failed = content.secondFactor.passkeyFailed;
     say(null, result === "failed" || answer.status === 400 ? failed : refusal(answer.status, failed));
+    setRetried((count) => count + 1);
   }
 
   /**
@@ -139,7 +147,7 @@ export function SecondFactor({ onNext }: Props) {
             {busy ? content.secondFactor.busy : content.secondFactor.submit}
           </button>
           {offerPasskey ? (
-            <button type="button" className="secondary" disabled={busy} onClick={() => void passkey()}>
+            <button type="button" className="secondary" ref={passkeyRef} disabled={busy} onClick={() => void passkey()}>
               {busy ? content.secondFactor.passkeyBusy : content.secondFactor.passkey}
             </button>
           ) : null}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { endSession, sessionState, unauthenticated, type SessionState } from "./api";
 import { content } from "./content";
@@ -6,6 +6,7 @@ import { discardInvitation, leaveEnrol, onEnrolPath, takeToken } from "./enrolLi
 import { EnrolMissing, EnrolPassword, EnrolSetup, type Setup } from "./screens/Enrol";
 import { Recovery } from "./screens/Recovery";
 import { SecondFactor } from "./screens/SecondFactor";
+import { Security } from "./screens/Security";
 import { SignIn } from "./screens/SignIn";
 
 type Shown = {
@@ -18,11 +19,16 @@ type View = { kind: "loading" } | Shown;
 type Extra = { notice?: string; setup?: Setup; codes?: string[] };
 const NOTHING: Omit<Shown, "kind"> = { notice: null, setup: null, codes: [] };
 
+type Page = "today" | "security";
+/** Only the exact hash `#security` selects Security; any other hash reads as Today (spec decision 2). */
+const pageOf = (hash: string): Page => (hash === "#security" ? "security" : "today");
+
 export function App() {
   const [view, setView] = useState<View>({ kind: "loading" });
   const [moves, setMoves] = useState(0);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const mainRef = useRef<HTMLElement>(null);
+  const [page, setPage] = useState<Page>(() => pageOf(window.location.hash));
 
   useEffect(() => {
     let live = true;
@@ -37,15 +43,33 @@ export function App() {
     };
   }, []);
 
+  // The address decides the page, so click, Back, Forward, reload and a pasted link all agree.
+  useEffect(() => {
+    const read = () => { setPage(pageOf(window.location.hash)); };
+    window.addEventListener("hashchange", read);
+    window.addEventListener("popstate", read);
+    return () => {
+      window.removeEventListener("hashchange", read);
+      window.removeEventListener("popstate", read);
+    };
+  }, []);
+
   // After the person acts, the new screen takes focus; the first load leaves focus where it is.
   useEffect(() => {
     if (moves > 0) mainRef.current?.focus();
   }, [moves]);
 
-  function go(kind: SessionState | "recovery", extra: Extra = {}) {
+  const go = useCallback((kind: SessionState | "recovery", extra: Extra = {}) => {
+    // The next person to sign in starts on Today, not on this one's page.
+    if (kind === "signed_out" && window.location.hash === "#security") {
+      window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+      setPage("today");
+    }
     setView({ kind, ...NOTHING, ...extra });
     setMoves((count) => count + 1);
-  }
+  }, []);
+
+  const expired = useCallback(() => { go("signed_out", { notice: content.errors.expired }); }, [go]);
 
   async function signOut() {
     setSignOutError(null);
@@ -76,7 +100,7 @@ export function App() {
           <ul>
             {content.nav.map((item) => (
               <li key={item.href}>
-                <a href={item.href} aria-current="page">
+                <a href={item.href} aria-current={item.page === page ? "page" : undefined}>
                   {item.label}
                 </a>
               </li>
@@ -85,7 +109,7 @@ export function App() {
         </nav>
       ) : null}
       <main id="main" tabIndex={-1} ref={mainRef}>
-        <Screen view={view} go={go} signOutError={signOutError} />
+        <Screen view={view} page={page} go={go} expired={expired} signOutError={signOutError} />
       </main>
     </div>
   );
@@ -93,11 +117,13 @@ export function App() {
 
 type ScreenProps = {
   view: Shown | { kind: "loading" };
+  page: Page;
   go: (kind: SessionState | "recovery", extra?: Extra) => void;
+  expired: () => void;
   signOutError: string | null;
 };
 
-function Screen({ view, go, signOutError }: ScreenProps) {
+function Screen({ view, page, go, expired, signOutError }: ScreenProps) {
   switch (view.kind) {
     case "loading":
       return (
@@ -109,11 +135,17 @@ function Screen({ view, go, signOutError }: ScreenProps) {
     case "signed_in":
       return (
         <>
-          <h1>{content.pageTitle}</h1>
-          <section className="card" aria-labelledby="empty-title">
-            <h2 id="empty-title">{content.emptyTitle}</h2>
-            <p>{content.emptyBody}</p>
-          </section>
+          {page === "security" ? (
+            <Security onSignedOut={expired} />
+          ) : (
+            <>
+              <h1>{content.pageTitle}</h1>
+              <section className="card" aria-labelledby="empty-title">
+                <h2 id="empty-title">{content.emptyTitle}</h2>
+                <p>{content.emptyBody}</p>
+              </section>
+            </>
+          )}
           <div aria-live="polite" className="message">
             {signOutError}
           </div>

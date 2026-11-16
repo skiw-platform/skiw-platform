@@ -28,6 +28,9 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
   const [busy, setBusy] = useState(false);
   const [offerPasskey, setOfferPasskey] = useState(passkeySupported);
   const codeRef = useRef<HTMLInputElement>(null);
+  const passkeyRef = useRef<HTMLButtonElement>(null);
+  /** Counts the failed passkey rounds: each one hands focus back to the button once it is enabled again. */
+  const [retried, setRetried] = useState(0);
   /** The passkey round in flight; closing the dialog aborts it, and a late answer calls nothing. */
   const flight = useRef<AbortController | null>(null);
 
@@ -35,6 +38,10 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
     codeRef.current?.focus();
     return () => { flight.current?.abort(); };
   }, []);
+
+  useEffect(() => {
+    if (retried > 0) passkeyRef.current?.focus();
+  }, [retried]);
 
   function say(field: string | null, general: string | null) {
     setCodeError(field);
@@ -90,6 +97,7 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
     }
     const failed = content.stepUp.passkeyFailed;
     say(null, result === "failed" || answer.status === 400 ? failed : refusal(answer.status, failed));
+    setRetried((count) => count + 1);
   }
 
   function keys(event: KeyboardEvent<HTMLElement>) {
@@ -115,7 +123,7 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
             {busy ? content.stepUp.busy : content.stepUp.submit}
           </button>
           {offerPasskey ? (
-            <button type="button" className="secondary" disabled={busy} onClick={() => void passkey()}>
+            <button type="button" className="secondary" ref={passkeyRef} disabled={busy} onClick={() => void passkey()}>
               {content.stepUp.passkey}
             </button>
           ) : null}
