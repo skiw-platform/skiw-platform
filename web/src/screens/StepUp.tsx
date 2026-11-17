@@ -100,8 +100,14 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
     setRetried((count) => count + 1);
   }
 
+  /** Escape cancels; Tab and Shift-Tab wrap inside the dialog, since the page around it is inert (decision 6(d)). */
   function keys(event: KeyboardEvent<HTMLElement>) {
     if (event.key === "Escape") cancel();
+    if (event.key !== "Tab") return;
+    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("input, button:not(:disabled)"));
+    if (document.activeElement !== (event.shiftKey ? controls[0] : controls.at(-1))) return;
+    event.preventDefault();
+    (event.shiftKey ? controls.at(-1) : controls[0])?.focus();
   }
 
   return (

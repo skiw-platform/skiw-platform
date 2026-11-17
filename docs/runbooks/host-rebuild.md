@@ -495,10 +495,11 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   is kept as a retired row with its key erased, and its credential cannot be registered again (the
   device makes a new one). `GET /api/auth/factors` lists each passkey in use with the time it was
   added (`created_at`, UTC), oldest first; one added before M3g-2s-2 shows `null` and comes first.
-  **In the browser** (M3g-2a-2b-1): Security (`/#security`) → **Add a passkey** (shown only where
-  the browser has WebAuthn). It works only within a fresh `factor.change` step-up (in practice,
-  right after enrolment); otherwise the page says it cannot ask for that confirmation yet (the
-  dialog comes in M3g-2a-2b-2). "Passkey added" means the server confirmed it. "We could not confirm the new
+  **In the browser** (M3g-2a-2b): Security (`/#security`) → **Add a passkey** (shown only where
+  the browser has WebAuthn). Without a fresh `factor.change` step-up, the page asks for one in a
+  dialog (code or passkey); the rest of the page is out of reach until it is confirmed or
+  cancelled (Cancel or Escape). After it is confirmed the add goes on once; if the server still
+  asks, the page says something went wrong, and adding again starts over. "Passkey added" means the server confirmed it. "We could not confirm the new
   passkey. Check the list below." means the answer was lost: the list shows what the server has,
   and the user decides whether to add again. "We could not load your passkeys" or "We could not
   confirm your session": reload the page. Sign out waits ("Finishing your change…") while an add
