@@ -158,8 +158,9 @@ export function Security({ onSignedOut, onModal }: Props) {
           purpose="factor.change"
           onVerified={() => {
             setStepUp(false);
-            // A verification that answers after this screen has gone starts nothing.
-            if (flight.current?.signal.aborted === false) void add(true);
+            // Each open is its own StepUp, which calls nothing once cancelled or closed, so this is
+            // always the open dialog's answer.
+            void add(true);
           }}
           onCancel={() => {
             setStepUp(false);

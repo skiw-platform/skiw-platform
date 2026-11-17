@@ -199,8 +199,10 @@ describe("the step-up dialog", () => {
   const outside = () => [signOutButton(), link("Today"), heading(), addButton(), screen.getByRole("link", { name: content.skipLink })];
   const code = () => screen.getByLabelText(content.stepUp.label);
 
+  let create: ReturnType<typeof authenticator> | undefined;
+
   async function dialog(...after: (Answer | Promise<Answer>)[]) {
-    authenticator();
+    create = authenticator();
     const calls = await security(STEPUP, ...after);
     await user.click(addButton());
     await screen.findByRole("dialog", { name: content.stepUp.title });
@@ -254,6 +256,48 @@ describe("the step-up dialog", () => {
     expect(document.activeElement).toBe(addButton());
     expect(document.querySelector("[inert]")).toBeNull();
     expect(paths(calls)).toEqual([BEGIN]);
+  });
+
+  it.each([
+    ["Cancel", "verified", VERIFIED],
+    ["Cancel", "signed-out", { status: 401, body: { error: "signed-out" } }],
+    ["Cancel", "refused", { status: 400, body: { error: "code-wrong" } }],
+    ["Escape", "verified", VERIFIED],
+    ["Escape", "signed-out", { status: 401, body: { error: "signed-out" } }],
+    ["Escape", "refused", { status: 400, body: { error: "code-wrong" } }],
+  ] as [string, string, Answer][])("after %s, a late %s code answer does nothing", async (exit, _, late) => {
+    const answer = later<Answer>();
+    const calls = await dialog(answer.promise, OPTIONS, ADDED, list(OLD, NEW));
+    await verify();
+    await vi.waitFor(() => { expect(paths(calls)).toEqual([BEGIN, "/api/auth/stepup"]); });
+    if (exit === "Cancel") await user.click(screen.getByRole("button", { name: content.stepUp.cancel }));
+    else fireEvent.keyDown(code(), { key: "Escape" });
+    expect(calls[3]?.init.signal?.aborted).toBe(true);
+    answer.resolve(late);
+    await settle();
+    expect(paths(calls)).toEqual([BEGIN, "/api/auth/stepup"]);
+    expect(create?.mock.calls).toHaveLength(0);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(heading()).toBeTruthy();
+    expect(document.getElementById("security-status")?.textContent ?? "").toBe("");
+    expect(document.activeElement).toBe(addButton());
+    expect(addButton().disabled).toBe(false);
+  });
+
+  it("an old dialog's late answer does nothing to a reopened one", async () => {
+    const answer = later<Answer>();
+    const calls = await dialog(answer.promise, STEPUP);
+    await verify();
+    await vi.waitFor(() => { expect(paths(calls)).toEqual([BEGIN, "/api/auth/stepup"]); });
+    await user.click(screen.getByRole("button", { name: content.stepUp.cancel }));
+    await user.click(addButton());
+    await screen.findByRole("dialog", { name: content.stepUp.title });
+    answer.resolve(VERIFIED);
+    await settle();
+    expect(paths(calls)).toEqual([BEGIN, "/api/auth/stepup", BEGIN]);
+    expect(screen.getByRole("dialog", { name: content.stepUp.title })).toBeTruthy();
+    expect(document.activeElement).toBe(code());
+    await user.click(screen.getByRole("button", { name: content.stepUp.cancel }));
   });
 
   // In a browser the inert header cannot be clicked; the click stands for any sign-out while it is open.
