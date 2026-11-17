@@ -30,6 +30,8 @@ export function App() {
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const [page, setPage] = useState<Page>(() => pageOf(window.location.hash));
+  /** The step-up dialog is open: the page around it is inert (spec M3g-2a-2 decision 6(d)). */
+  const [modal, setModal] = useState(false);
   const phase = useSyncExternalStore(operation.subscribe, operation.phase, operation.phase);
 
   useEffect(() => {
@@ -105,10 +107,10 @@ export function App() {
   const signedIn = view.kind === "signed_in";
   return (
     <div className={signedIn ? "app" : "app app--solo"}>
-      <a className="skip-link" href="#main">
+      <a className="skip-link" href="#main" inert={modal}>
         {content.skipLink}
       </a>
-      <header className="topbar">
+      <header className="topbar" inert={modal}>
         <p className="brand">{content.product}</p>
         {signedIn ? (
           <button type="button" className="link" disabled={signingOut || phase === "sent"} onClick={() => void signOut()}>
@@ -117,7 +119,7 @@ export function App() {
         ) : null}
       </header>
       {signedIn ? (
-        <nav className="sidebar" aria-label={content.navLabel}>
+        <nav className="sidebar" aria-label={content.navLabel} inert={modal}>
           <ul>
             {content.nav.map((item) => (
               <li key={item.href}>
@@ -130,7 +132,7 @@ export function App() {
         </nav>
       ) : null}
       <main id="main" tabIndex={-1} ref={mainRef}>
-        <Screen view={view} page={page} go={go} expired={expired} signOutError={phase === "sent" ? content.finishing : signOutError} />
+        <Screen view={view} page={page} go={go} expired={expired} onModal={setModal} signOutError={phase === "sent" ? content.finishing : signOutError} />
       </main>
     </div>
   );
@@ -141,10 +143,11 @@ type ScreenProps = {
   page: Page;
   go: (kind: SessionState | "recovery", extra?: Extra) => void;
   expired: () => void;
+  onModal: (open: boolean) => void;
   signOutError: string | null;
 };
 
-function Screen({ view, page, go, expired, signOutError }: ScreenProps) {
+function Screen({ view, page, go, expired, onModal, signOutError }: ScreenProps) {
   switch (view.kind) {
     case "loading":
       return (
@@ -157,7 +160,7 @@ function Screen({ view, page, go, expired, signOutError }: ScreenProps) {
       return (
         <>
           {page === "security" ? (
-            <Security onSignedOut={expired} />
+            <Security onSignedOut={expired} onModal={onModal} />
           ) : (
             <>
               <h1>{content.pageTitle}</h1>

@@ -94,7 +94,6 @@ export const content = {
     addBusy: "Waiting for your passkey",
     addedNotice: "Passkey added",
     notAdded: "The passkey was not added. Try again.",
-    stepUpNeeded: "Adding a passkey needs a fresh confirmation that it is you, which this page cannot ask for yet.",
     unconfirmed: "We could not confirm the new passkey. Check the list below.",
     listUnsure: "We could not load your passkeys. Reload the page.",
   },

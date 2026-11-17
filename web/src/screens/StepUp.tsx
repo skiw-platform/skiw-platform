@@ -31,7 +31,8 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
   const passkeyRef = useRef<HTMLButtonElement>(null);
   /** Counts the failed passkey rounds: each one hands focus back to the button once it is enabled again. */
   const [retried, setRetried] = useState(0);
-  /** The passkey round in flight; closing the dialog aborts it, and a late answer calls nothing. */
+  /** This dialog's request in flight, code or passkey: Cancel, Escape and closing abort it at once, and
+   * a late answer then calls nothing, even one that had already arrived (decision 6(d)). */
   const flight = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -48,7 +49,7 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
     setStatus(general);
   }
 
-  /** Cancel stays available during a passkey round, and stops it. */
+  /** Cancel stays available while either request is in flight, and stops it. */
   function cancel() {
     flight.current?.abort();
     onCancel();
@@ -64,9 +65,12 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
 
   async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
+    const controller = new AbortController();
+    flight.current = controller;
     setBusy(true);
     say(null, null);
-    const answer = await post("/api/auth/stepup", { purpose, code });
+    const answer = await post("/api/auth/stepup", { purpose, code }, controller.signal);
+    if (controller.signal.aborted) return;
     setBusy(false);
     if (settled(answer)) return;
     setCode("");
@@ -100,8 +104,14 @@ export function StepUp({ purpose, onVerified, onCancel, onSignedOut }: Props) {
     setRetried((count) => count + 1);
   }
 
+  /** Escape cancels; Tab and Shift-Tab wrap inside the dialog, since the page around it is inert (decision 6(d)). */
   function keys(event: KeyboardEvent<HTMLElement>) {
     if (event.key === "Escape") cancel();
+    if (event.key !== "Tab") return;
+    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("input, button:not(:disabled)"));
+    if (document.activeElement !== (event.shiftKey ? controls[0] : controls.at(-1))) return;
+    event.preventDefault();
+    (event.shiftKey ? controls.at(-1) : controls[0])?.focus();
   }
 
   return (

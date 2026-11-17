@@ -194,15 +194,128 @@ it("the runner itself ignores a second add while one runs (decision 6(d))", asyn
   expect(calls.map((call) => call.path)).toEqual([BEGIN]);
 });
 
-it("on stepup-required says this page cannot ask for the confirmation yet, and asks the server nothing more", async () => {
-  authenticator();
-  const calls = await security(STEPUP);
-  await user.click(addButton());
-  await shows(content.security.stepUpNeeded);
-  await settle();
-  expect(paths(calls)).toEqual([BEGIN]);
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(document.activeElement).toBe(addButton());
+describe("the step-up dialog", () => {
+  const VERIFIED: Answer = { status: 200, body: { next: "verified", until: "2026-11-17T07:00:00+00:00" } };
+  const outside = () => [signOutButton(), link("Today"), heading(), addButton(), screen.getByRole("link", { name: content.skipLink })];
+  const code = () => screen.getByLabelText(content.stepUp.label);
+
+  let create: ReturnType<typeof authenticator> | undefined;
+
+  async function dialog(...after: (Answer | Promise<Answer>)[]) {
+    create = authenticator();
+    const calls = await security(STEPUP, ...after);
+    await user.click(addButton());
+    await screen.findByRole("dialog", { name: content.stepUp.title });
+    return calls;
+  }
+
+  async function verify() {
+    await user.type(code(), "123456");
+    await user.click(screen.getByRole("button", { name: content.stepUp.submit }));
+  }
+
+  it("opens on stepup-required with the page around it inert, then begins once more", async () => {
+    const calls = await dialog(VERIFIED, OPTIONS, ADDED, list(OLD, NEW));
+    expect(outside().filter((node) => node.closest("[inert]") === null)).toEqual([]);
+    expect(code().closest("[inert]")).toBeNull();
+    expect(document.activeElement).toBe(code());
+    await verify();
+    await shows(content.security.addedNotice);
+    expect(paths(calls)).toEqual([BEGIN, "/api/auth/stepup", BEGIN, CONFIRM, "/api/auth/factors"]);
+    expect(sent(calls[3])).toEqual({ purpose: "factor.change", code: "123456" });
+    expect(document.querySelector("[inert]")).toBeNull();
+  });
+
+  it("treats a second stepup-required as an error and asks no third time", async () => {
+    const calls = await dialog(VERIFIED, STEPUP);
+    await verify();
+    await shows(content.errors.generic);
+    await settle();
+    expect(paths(calls)).toEqual([BEGIN, "/api/auth/stepup", BEGIN]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(addButton());
+  });
+
+  it("keeps Tab and Shift-Tab inside the dialog", async () => {
+    await dialog();
+    const cancel = screen.getByRole("button", { name: content.stepUp.cancel });
+    cancel.focus();
+    expect(fireEvent.keyDown(cancel, { key: "Tab" })).toBe(false);
+    expect(document.activeElement).toBe(code());
+    expect(fireEvent.keyDown(code(), { key: "Tab", shiftKey: true })).toBe(false);
+    expect(document.activeElement).toBe(cancel);
+    await user.click(cancel);
+  });
+
+  it.each(["Cancel", "Escape"])("%s closes it, sends nothing more and hands focus back to Add", async (exit) => {
+    const calls = await dialog();
+    if (exit === "Cancel") await user.click(screen.getByRole("button", { name: content.stepUp.cancel }));
+    else fireEvent.keyDown(code(), { key: "Escape" });
+    await settle();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(addButton());
+    expect(document.querySelector("[inert]")).toBeNull();
+    expect(paths(calls)).toEqual([BEGIN]);
+  });
+
+  it.each([
+    ["Cancel", "verified", VERIFIED],
+    ["Cancel", "signed-out", { status: 401, body: { error: "signed-out" } }],
+    ["Cancel", "refused", { status: 400, body: { error: "code-wrong" } }],
+    ["Escape", "verified", VERIFIED],
+    ["Escape", "signed-out", { status: 401, body: { error: "signed-out" } }],
+    ["Escape", "refused", { status: 400, body: { error: "code-wrong" } }],
+  ] as [string, string, Answer][])("after %s, a late %s code answer does nothing", async (exit, _, late) => {
+    const answer = later<Answer>();
+    const calls = await dialog(answer.promise, OPTIONS, ADDED, list(OLD, NEW));
+    await verify();
+    await vi.waitFor(() => { expect(paths(calls)).toEqual([BEGIN, "/api/auth/stepup"]); });
+    if (exit === "Cancel") await user.click(screen.getByRole("button", { name: content.stepUp.cancel }));
+    else fireEvent.keyDown(code(), { key: "Escape" });
+    expect(calls[3]?.init.signal?.aborted).toBe(true);
+    answer.resolve(late);
+    await settle();
+    expect(paths(calls)).toEqual([BEGIN, "/api/auth/stepup"]);
+    expect(create?.mock.calls).toHaveLength(0);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(heading()).toBeTruthy();
+    expect(document.getElementById("security-status")?.textContent ?? "").toBe("");
+    expect(document.activeElement).toBe(addButton());
+    expect(addButton().disabled).toBe(false);
+  });
+
+  it("an old dialog's late answer does nothing to a reopened one", async () => {
+    const answer = later<Answer>();
+    const calls = await dialog(answer.promise, STEPUP);
+    await verify();
+    await vi.waitFor(() => { expect(paths(calls)).toEqual([BEGIN, "/api/auth/stepup"]); });
+    await user.click(screen.getByRole("button", { name: content.stepUp.cancel }));
+    await user.click(addButton());
+    await screen.findByRole("dialog", { name: content.stepUp.title });
+    answer.resolve(VERIFIED);
+    await settle();
+    expect(paths(calls)).toEqual([BEGIN, "/api/auth/stepup", BEGIN]);
+    expect(screen.getByRole("dialog", { name: content.stepUp.title })).toBeTruthy();
+    expect(document.activeElement).toBe(code());
+    await user.click(screen.getByRole("button", { name: content.stepUp.cancel }));
+  });
+
+  // In a browser the inert header cannot be clicked; the click stands for any sign-out while it is open.
+  it.each(["Sign out", "leaving"])("%s while the confirmation is pending closes the dialog, and a late verification begins nothing", async (way) => {
+    const answer = later<Answer>();
+    const out = way === "Sign out" ? ["/api/auth/logout"] : [];
+    const calls = await dialog(answer.promise, { status: 200, body: { next: "signed_out", csrf: "t9" } });
+    await verify();
+    await vi.waitFor(() => { expect(paths(calls)).toEqual([BEGIN, "/api/auth/stepup"]); });
+    if (way === "Sign out") fireEvent.click(signOutButton());
+    else window.location.hash = "";
+    await screen.findByRole("heading", { level: 1, name: way === "Sign out" ? content.signIn.title : content.pageTitle });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    answer.resolve(VERIFIED);
+    await settle();
+    expect(paths(calls)).toEqual([BEGIN, "/api/auth/stepup", ...out]);
+    expect(document.querySelector("[inert]")).toBeNull();
+  });
 });
 
 describe("leaving and lost answers", () => {
@@ -281,7 +394,7 @@ describe("leaving and lost answers", () => {
     expect(paths(calls)).toEqual([BEGIN, CONFIRM, "/api/auth/session", "/api/auth/factors"]);
     expect(document.activeElement).toBe(addButton());
     await user.click(addButton());
-    await shows(content.security.stepUpNeeded);
+    await screen.findByRole("dialog");
     expect(token(calls[6])).toBe("t6");
   });
 
@@ -359,7 +472,7 @@ describe("leaving and lost answers", () => {
     out.resolve({ status: 500, body: {} });
     await shows(content.errors.generic);
     await user.click(addButton());
-    await shows(content.security.stepUpNeeded);
+    await screen.findByRole("dialog");
     expect(paths(calls)).toEqual(["/api/auth/logout", "/api/auth/session", BEGIN]);
   });
 

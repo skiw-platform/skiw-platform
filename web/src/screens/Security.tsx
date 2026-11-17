@@ -3,12 +3,15 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { content } from "../content";
 import { Message } from "../forms";
 import { addPasskey, operation, passkeySupported, readPasskeys, type Added, type PasskeyRow } from "../passkey";
+import { StepUp } from "./StepUp";
 
 type Load = { kind: "loading" } | { kind: "error" } | { kind: "ready"; rows: PasskeyRow[] };
 
 type Props = {
   /** The server no longer knows this person: the page goes to sign-in. */
   onSignedOut: () => void;
+  /** The step-up dialog opened or closed: everything outside it is inert meanwhile (decision 6(d)). */
+  onModal: (open: boolean) => void;
 };
 
 const count = (total: number) => (total === 0 ? content.security.empty : total === 1 ? content.security.one : content.security.many(total));
@@ -16,7 +19,6 @@ const count = (total: number) => (total === 0 ? content.security.empty : total =
 /** The words for an add that added nothing; one text for every failed ceremony or refusal (AUTH-05). */
 const FAILED: Partial<Record<Added, string>> = {
   failed: content.security.notAdded,
-  stepup: content.security.stepUpNeeded,
   offline: content.errors.network,
   unsure: content.sessionUnsure,
 };
@@ -26,11 +28,12 @@ const FAILED: Partial<Record<Added, string>> = {
  * and Add (spec M3g-2a-2, decisions 3 to 8). The add itself runs in `passkey.ts`, so a sent one
  * finishes after this screen is gone; this screen then shows nothing of it.
  */
-export function Security({ onSignedOut }: Props) {
+export function Security({ onSignedOut, onModal }: Props) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [status, setStatus] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [canAdd, setCanAdd] = useState(passkeySupported);
+  const [stepUp, setStepUp] = useState(false);
   /** Where focus goes once the render it waits for is in the page (decision 8). */
   const [focus, setFocus] = useState<{ to: "heading" | "add" } | null>(null);
   const retryRef = useRef<HTMLButtonElement>(null);
@@ -44,6 +47,12 @@ export function Security({ onSignedOut }: Props) {
   if (waiting && !busy) setWaiting(false);
 
   useEffect(() => () => { flight.current?.abort(); }, []);
+
+  // Before paint, so the dialog never shows over a page that can still take focus.
+  useLayoutEffect(() => {
+    onModal(stepUp);
+    return () => { onModal(false); };
+  }, [stepUp, onModal]);
 
   // In the commit that shows the words, so focus and status arrive together.
   useLayoutEffect(() => {
@@ -84,7 +93,8 @@ export function Security({ onSignedOut }: Props) {
     setFocus({ to });
   }
 
-  async function add() {
+  /** `again` after a verified step-up: a second stepup-required is an error, never another dialog (decision 4). */
+  async function add(again: boolean) {
     const controller = new AbortController();
     flight.current = controller;
     const gone = () => controller.signal.aborted;
@@ -94,6 +104,8 @@ export function Security({ onSignedOut }: Props) {
     const { result, rows } = done;
     if (result === "signed-out") {
       onSignedOut();
+    } else if (result === "stepup" && !again) {
+      setStepUp(true);
     } else if (result === "unsupported") {
       setCanAdd(false);
       say(content.passkeys.unsupported, "heading");
@@ -111,10 +123,10 @@ export function Security({ onSignedOut }: Props) {
 
   return (
     <>
-      <h1 tabIndex={-1} ref={headingRef}>
+      <h1 tabIndex={-1} ref={headingRef} inert={stepUp}>
         {content.security.title}
       </h1>
-      <section className="card" aria-labelledby="passkeys-title" aria-busy={load.kind === "loading"}>
+      <section className="card" aria-labelledby="passkeys-title" aria-busy={load.kind === "loading"} inert={stepUp}>
         <h2 id="passkeys-title">{content.security.listTitle}</h2>
         <p>{content.security.intro}</p>
         {load.kind === "loading" ? <p role="status">{content.security.loading}</p> : null}
@@ -135,12 +147,28 @@ export function Security({ onSignedOut }: Props) {
         ) : null}
         {load.kind === "ready" && canAdd ? (
           <div className="actions">
-            <button type="button" ref={addRef} disabled={busy} onClick={() => void add()}>
+            <button type="button" ref={addRef} disabled={busy} onClick={() => void add(false)}>
               {busy ? content.security.addBusy : content.security.add}
             </button>
           </div>
         ) : null}
       </section>
+      {stepUp ? (
+        <StepUp
+          purpose="factor.change"
+          onVerified={() => {
+            setStepUp(false);
+            // Each open is its own StepUp, which calls nothing once cancelled or closed, so this is
+            // always the open dialog's answer.
+            void add(true);
+          }}
+          onCancel={() => {
+            setStepUp(false);
+            setFocus({ to: "add" });
+          }}
+          onSignedOut={onSignedOut}
+        />
+      ) : null}
       <Message id="security-status" text={status} />
     </>
   );
