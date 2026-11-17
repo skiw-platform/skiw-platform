@@ -95,16 +95,16 @@ describe("the Security page", () => {
     expect(current()).toEqual(["Security"]);
     slow.resolve(ok([{ id: A, created_at: "2026-11-16T06:05:00Z" }, { id: B, created_at: "2026-11-16T06:05:20Z" }, { id: C, created_at: null }]));
     const list = await screen.findByRole("list", { name: content.security.listTitle });
-    expect(Array.from(list.querySelectorAll("li")).map((item) => item.textContent)).toEqual([
-      "Passkey, added 16 Nov 2026, 14:05 (1)",
-      "Passkey, added 16 Nov 2026, 14:05 (2)",
-      "Passkey, added time unknown",
-    ]);
+    const texts = ["Passkey, added 16 Nov 2026, 14:05 (1)", "Passkey, added 16 Nov 2026, 14:05 (2)", "Passkey, added time unknown"];
+    expect(Array.from(list.querySelectorAll("li > span")).map((item) => item.textContent)).toEqual(texts);
     expect(screen.getByText("3 passkeys.").getAttribute("aria-live")).toBe("polite");
     expect(screen.queryByRole("status")).toBeNull();
     expect(calls[1]).toMatchObject({ path: "/api/auth/factors" });
     expect(calls[1]?.init.method ?? "GET").toBe("GET");
-    expect(screen.queryByRole("button", { name: /add|remove/i })).toBeNull();
+    // Each Remove is named by its row, so no two read the same (decision 7).
+    expect(screen.getAllByRole("button", { name: /^Remove / })).toHaveLength(3);
+    for (const text of texts) expect(screen.getAllByRole("button", { name: `Remove ${text}` })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: content.security.add })).toBeNull();
   });
 
   it("says when there are none, and counts one in the singular", async () => {
