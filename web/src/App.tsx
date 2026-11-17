@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 
 import { endSession, sessionState, unauthenticated, type SessionState } from "./api";
 import { content } from "./content";
 import { discardInvitation, leaveEnrol, onEnrolPath, takeToken } from "./enrolLink";
+import { leave, operation, stay, trusted } from "./passkey";
 import { EnrolMissing, EnrolPassword, EnrolSetup, type Setup } from "./screens/Enrol";
 import { Recovery } from "./screens/Recovery";
 import { SecondFactor } from "./screens/SecondFactor";
@@ -29,6 +30,7 @@ export function App() {
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const [page, setPage] = useState<Page>(() => pageOf(window.location.hash));
+  const phase = useSyncExternalStore(operation.subscribe, operation.phase, operation.phase);
 
   useEffect(() => {
     let live = true;
@@ -71,13 +73,32 @@ export function App() {
 
   const expired = useCallback(() => { go("signed_out", { notice: content.errors.expired }); }, [go]);
 
+  // A plain click keeps this document, and with it a factor change still in flight; the href stays
+  // real, so a new tab, a modified click, Back and Forward behave as for any link.
+  function follow(event: MouseEvent<HTMLAnchorElement>) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    window.history.pushState(null, "", event.currentTarget.href);
+    setPage(pageOf(window.location.hash));
+  }
+
   async function signOut() {
     setSignOutError(null);
     setSigningOut(true);
-    const { out, state } = await endSession();
-    setSigningOut(false);
-    if (out === "signed_out" || unauthenticated(state)) go("signed_out");
-    else setSignOutError(out === "offline" ? content.errors.network : content.errors.generic);
+    leave();
+    try {
+      // A factor change whose answer was lost may have rotated the token: no logout until it is known (6(e)).
+      if (!(await trusted())) {
+        setSignOutError(content.sessionUnsure);
+        return;
+      }
+      const { out, state } = await endSession();
+      if (out === "signed_out" || unauthenticated(state)) go("signed_out");
+      else setSignOutError(out === "offline" ? content.errors.network : content.errors.generic);
+    } finally {
+      setSigningOut(false);
+      stay();
+    }
   }
 
   const [signingOut, setSigningOut] = useState(false);
@@ -90,7 +111,7 @@ export function App() {
       <header className="topbar">
         <p className="brand">{content.product}</p>
         {signedIn ? (
-          <button type="button" className="link" disabled={signingOut} onClick={() => void signOut()}>
+          <button type="button" className="link" disabled={signingOut || phase === "sent"} onClick={() => void signOut()}>
             {signingOut ? content.signOutBusy : content.signOut}
           </button>
         ) : null}
@@ -100,7 +121,7 @@ export function App() {
           <ul>
             {content.nav.map((item) => (
               <li key={item.href}>
-                <a href={item.href} aria-current={item.page === page ? "page" : undefined}>
+                <a href={item.href} onClick={follow} aria-current={item.page === page ? "page" : undefined}>
                   {item.label}
                 </a>
               </li>
@@ -109,7 +130,7 @@ export function App() {
         </nav>
       ) : null}
       <main id="main" tabIndex={-1} ref={mainRef}>
-        <Screen view={view} page={page} go={go} expired={expired} signOutError={signOutError} />
+        <Screen view={view} page={page} go={go} expired={expired} signOutError={phase === "sent" ? content.finishing : signOutError} />
       </main>
     </div>
   );
