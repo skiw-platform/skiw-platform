@@ -281,8 +281,8 @@ async function operate<T>(signal: AbortSignal, run: (signal: AbortSignal) => Pro
 }
 
 /** After an unresolved change: false while its session still cannot be read, so no protected POST goes out (6(b)). */
-async function reread(): Promise<boolean> {
-  if ((await readSession()) === null) return false;
+async function reread(signal: AbortSignal): Promise<boolean> {
+  if ((await readSession(signal)) === null) return false;
   enter("idle");
   return true;
 }
@@ -291,7 +291,8 @@ async function reread(): Promise<boolean> {
 export const addPasskey = (signal: AbortSignal): Promise<Adding | null> => operate(signal, adding);
 
 async function adding(signal: AbortSignal): Promise<Adding | null> {
-  if (phase === "unresolved" && !(await reread())) return { result: "unsure" };
+  if (phase === "unresolved" && !(await reread(signal))) return { result: "unsure" };
+  if (signal.aborted) return null;
   const done = await round("/api/auth/factors/passkey", "/api/auth/factors/passkey/confirm", signal, {}, () => { enter("sent"); }, registration);
   if (done === null) return null;
   const { answer, outcome } = done;
@@ -325,7 +326,7 @@ async function removal(answer: Reply): Promise<[Removed, boolean]> {
 export const removePasskey = (id: string, signal: AbortSignal): Promise<Removing | null> => operate(signal, (own) => removing(id, own));
 
 async function removing(id: string, signal: AbortSignal): Promise<Removing | null> {
-  if (phase === "unresolved" && !(await reread())) return { result: "unsure" };
+  if (phase === "unresolved" && !(await reread(signal))) return { result: "unsure" };
   if (signal.aborted) return null;
   enter("sent");
   const [result, reconciled] = await removal(await post("/api/auth/factors/passkey/remove", { id }));

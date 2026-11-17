@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import { content } from "./content";
+import { post, readSession } from "./api";
 import { operation } from "./passkey";
 import { later, sent, server, state, user, type Answer, type Call } from "./testkit";
 
@@ -51,6 +52,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   window.history.replaceState(null, "", "/");
 });
 
@@ -203,17 +205,58 @@ describe("Sign out before the remove is sent", () => {
     await screen.findByRole("heading", { level: 1, name: content.signIn.title });
   });
 
-  it("during the session re-read after an unresolved change, stops the remove before it is sent", async () => {
-    const FAULT: Answer = { status: 500, body: {} };
+  // Review Round 1 (PR 165): the cancelled operation's own session read, older than the logout,
+  // neither replaces the logout's token nor sends anything, whether it was aborted or ignored that.
+  it.each([
+    ["Remove", "ignores the abort"],
+    ["Remove", "is aborted"],
+    ["Remove", "answers before the logout"],
+    ["Add", "ignores the abort"],
+    ["Add", "is aborted"],
+    ["Add", "answers before the logout"],
+  ])("Sign out during %s's session re-read: the older read that %s keeps the logout's token", async (control, ending) => {
+    const create = vi.fn(() => Promise.resolve(null));
+    vi.stubGlobal("PublicKeyCredential", vi.fn());
+    Object.defineProperty(navigator, "credentials", { value: { create }, configurable: true });
     const reread = later<Answer>();
-    const calls = await security(lost(), FAULT, list(A, B), reread.promise, state("signed_in"), { status: 200, body: { next: "signed_out", csrf: "t9" } });
+    const check = later<Answer>();
+    const calls = await security(lost(), { status: 500, body: {} }, list(A, B), reread.promise, check.promise, { status: 200, body: { next: "signed_out", csrf: "t9" } });
     await removing(A);
     await shows(content.security.notRemoved);
-    await removing(A);
+    if (control === "Remove") await removing(A);
+    else await user.click(screen.getByRole("button", { name: content.security.add }));
     fireEvent.click(signOut());
+    expect(calls[5]?.init.signal?.aborted).toBe(true);
+    if (ending === "answers before the logout") {
+      reread.resolve(state("signed_in"));
+      await settle();
+    }
+    check.resolve(state("signed_in"));
     await screen.findByRole("heading", { level: 1, name: content.signIn.title });
-    reread.resolve(state("signed_in"));
+    if (ending === "is aborted") reread.reject(new DOMException("aborted", "AbortError"));
+    else reread.resolve({ status: 200, body: { state: "signed_in", csrf: "t6" } });
     await settle();
     expect(paths(calls)).toEqual([REMOVE, "/api/auth/session", "/api/auth/factors", "/api/auth/session", "/api/auth/session", "/api/auth/logout"]);
+    expect(create).not.toHaveBeenCalled();
+    expect(operation.phase()).toBe("idle");
+    await post("/api/next", {});
+    expect(paths(calls).at(-1)).toBe("/api/next");
+    expect(token(calls.at(-1))).toBe("t9");
+  });
+});
+
+describe("a read older than a POST", () => {
+  it.each(["before it was sent", "while it was in flight"])("that started %s reads as lost and keeps no token", async (when) => {
+    const read = later<Answer>();
+    const out = later<Answer>();
+    const calls = server(...(when === "before it was sent" ? [read.promise, out.promise] : [out.promise, read.promise]));
+    const first = when === "before it was sent" ? readSession() : post("/api/auth/logout", {});
+    const second = when === "before it was sent" ? post("/api/auth/logout", {}) : readSession();
+    out.resolve({ status: 200, body: { next: "signed_out", csrf: "t9" } });
+    await (when === "before it was sent" ? second : first);
+    read.resolve({ status: 200, body: { state: "signed_in", csrf: "t6" } });
+    expect(await (when === "before it was sent" ? first : second)).toBeNull();
+    await post("/api/next", {});
+    expect(token(calls[2])).toBe("t9");
   });
 });
