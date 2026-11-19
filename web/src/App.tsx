@@ -33,6 +33,7 @@ export function App() {
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const [page, setPage] = useState<Page>(() => pageOf(window.location.hash));
+  const pageRef = useRef(page);
   /** The step-up dialog is open: the page around it is inert (spec M3g-2a-2 decision 6(d)). */
   const [modal, setModal] = useState(false);
   const phase = useSyncExternalStore(operation.subscribe, operation.phase, operation.phase);
@@ -50,8 +51,11 @@ export function App() {
     };
   }, []);
 
-  /** A notice on Today (the offer's "Passkey added") leaves with the page it was said on. */
+  /** A notice on Today (the offer's "Passkey added") leaves with the page it was said on; a hash
+   * that keeps the page (the skip link's `#main`) keeps it. */
   const turn = useCallback((next: Page) => {
+    if (next === pageRef.current) return;
+    pageRef.current = next;
     setPage(next);
     setView((shown) => (shown.kind === "signed_in" && shown.notice !== null ? { ...shown, notice: null } : shown));
   }, []);
@@ -76,6 +80,7 @@ export function App() {
     // The next person to sign in starts on Today, not on this one's page.
     if (kind === "signed_out" && window.location.hash === "#security") {
       window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+      pageRef.current = "today";
       setPage("today");
     }
     setView({ kind, ...NOTHING, ...extra });
@@ -141,7 +146,13 @@ export function App() {
         </nav>
       ) : null}
       <main id="main" tabIndex={-1} ref={mainRef}>
-        <Screen view={view} page={page} go={go} expired={expired} onModal={setModal} signOutError={phase === "sent" ? content.finishing : signOutError} />
+        <Screen view={view} page={page} go={go} expired={expired} onModal={setModal} />
+        {/* Mounted empty on the offer, so the notice it hands to Today is a change a screen reader announces. */}
+        {signedIn || view.kind === "offer" ? (
+          <div id="today-status" aria-live="polite" className="message">
+            {signedIn ? (phase === "sent" ? content.finishing : signOutError) ?? view.notice : null}
+          </div>
+        ) : null}
       </main>
     </div>
   );
@@ -153,10 +164,9 @@ type ScreenProps = {
   go: (kind: Step, extra?: Extra) => void;
   expired: () => void;
   onModal: (open: boolean) => void;
-  signOutError: string | null;
 };
 
-function Screen({ view, page, go, expired, onModal, signOutError }: ScreenProps) {
+function Screen({ view, page, go, expired, onModal }: ScreenProps) {
   switch (view.kind) {
     case "loading":
       return (
@@ -166,22 +176,15 @@ function Screen({ view, page, go, expired, onModal, signOutError }: ScreenProps)
         </>
       );
     case "signed_in":
-      return (
+      return page === "security" ? (
+        <Security onSignedOut={expired} onModal={onModal} />
+      ) : (
         <>
-          {page === "security" ? (
-            <Security onSignedOut={expired} onModal={onModal} />
-          ) : (
-            <>
-              <h1>{content.pageTitle}</h1>
-              <section className="card" aria-labelledby="empty-title">
-                <h2 id="empty-title">{content.emptyTitle}</h2>
-                <p>{content.emptyBody}</p>
-              </section>
-            </>
-          )}
-          <div aria-live="polite" className="message">
-            {signOutError ?? view.notice}
-          </div>
+          <h1>{content.pageTitle}</h1>
+          <section className="card" aria-labelledby="empty-title">
+            <h2 id="empty-title">{content.emptyTitle}</h2>
+            <p>{content.emptyBody}</p>
+          </section>
         </>
       );
     case "second_factor":

@@ -120,6 +120,33 @@ describe("the passkey offer after enrolment", () => {
     expect(screen.queryByText(content.security.addedNotice)).toBeNull();
   });
 
+  it("writes the notice into a polite region that was already there, empty, on the offer", async () => {
+    authenticator();
+    await offered(OPTIONS, ADDED, list(NEW));
+    const region = document.getElementById("today-status");
+    expect(region?.getAttribute("aria-live")).toBe("polite");
+    expect(region?.textContent).toBe("");
+    await user.click(addButton());
+    await today();
+    await shows(content.security.addedNotice);
+    expect(document.getElementById("today-status")).toBe(region);
+    expect(region?.textContent).toBe(content.security.addedNotice);
+  });
+
+  it("keeps the notice when the skip link moves focus, and drops it when the page changes", async () => {
+    authenticator();
+    await offered(OPTIONS, ADDED, list(NEW), list(NEW));
+    await user.click(addButton());
+    await today();
+    window.history.pushState(null, "", "/#main");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    await settle();
+    expect(screen.getByText(content.security.addedNotice)).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: "Security" }));
+    await screen.findByText(content.security.one);
+    expect(screen.queryByText(content.security.addedNotice)).toBeNull();
+  });
+
   it.each([["a cancel", "NotAllowedError"], ["a timeout", "AbortError"]])("after %s stays, says not added, and hands focus back to Add", async (_, failure) => {
     authenticator(failure);
     const calls = await offered(OPTIONS);
