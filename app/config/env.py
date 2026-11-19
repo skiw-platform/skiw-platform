@@ -49,8 +49,11 @@ def flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def bounded_int(name: str, low: int, high: int) -> int:
-    """A required whole number in [low, high]; the error names the variable, never the value."""
+def bounded_int(name: str, low: int, high: int, default: int | None = None) -> int:
+    """A whole number in [low, high], required unless a `default` is given for an unset variable;
+    the error names the variable, never the value."""
+    if default is not None and name not in os.environ:
+        return default
     raw = os.environ.get(name, "")
     if WHOLE_NUMBER.fullmatch(raw) is None or not low <= int(raw) <= high:
         raise ImproperlyConfigured(f"{name} must be a whole number from {low} to {high}")

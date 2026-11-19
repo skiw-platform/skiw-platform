@@ -126,6 +126,10 @@ ROOT_URLCONF = "config.urls"
 ASGI_APPLICATION = "config.asgi.application"
 
 DATABASES = {"default": env.database(require_tls=env.flag("DJANGO_REQUIRE_DB_TLS"))}
+# Most connections tenancy.async_binding's pool opens per web process for the bridge long-poll
+# (spec D26, §8.1 bridge.async_pool_max: 4 [A], tuned at the M14 load test; plan M4c-8). Optional;
+# the 1 to 8 bounds are builder values [A].
+SKIW_ASYNC_DB_POOL_MAX = env.bounded_int("SKIW_ASYNC_DB_POOL_MAX", 1, 8, default=4)
 
 # skiw_app has no DELETE on procrastinate_jobs (spec §4.1); "never" is also the library default.
 PROCRASTINATE_WORKER_DEFAULTS = {"delete_jobs": "never"}
