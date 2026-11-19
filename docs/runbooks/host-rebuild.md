@@ -505,7 +505,14 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   confirm your session": reload the page. Sign out waits ("Finishing your change…") while an add
   is being confirmed; pressing it before then cancels the add, and nothing is sent. The page's own
   links keep an add running. A reload or a closed tab ends it without its answer: the next load
-  shows what the server has.
+  shows what the server has. **Remove** (M3g-2a-2c): each row has its own Remove (screen readers
+  hear "Remove" and the row's text); it asks "Remove <row>?" first, and Cancel or Escape leaves
+  it. The same step-up dialog may come first. "Passkey removed" means the server confirmed it, or
+  after a lost answer that the list no longer has it; "The passkey was not removed. Try again."
+  means the list still has it; "That passkey is no longer there." means it was already gone.
+  After a lost answer, the next Add or Remove first re-checks the session. Pressing Sign out
+  then cancels that change: nothing more is sent, and a re-check that answers late is ignored,
+  so sign-out's new token stands.
 - **Sign in with a passkey** (M3g-1d-1): after the password, a user with a passkey in use can
   answer the second step with it (`POST /api/auth/second-factor/passkey` gives the options,
   `POST /api/auth/second-factor/passkey/confirm` checks the assertion) instead of a code; a user

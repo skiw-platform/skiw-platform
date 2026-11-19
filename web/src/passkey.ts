@@ -194,12 +194,13 @@ export async function readPasskeys(): Promise<PasskeyRow[] | null | "signed-out"
  * The one factor operation (spec M3g-2a-2 decision 6), kept here so that it outlives the screen
  * that started it. `phase` is the token gate: a sent change waiting for its answer, or one whose
  * answer and session read both failed, so the token may be stale until a read succeeds. `working`
- * is the person's operation, from Add until its list read has answered; the gate opens before that.
+ * is the person's operation, from Add or Remove until its list read has answered; the gate opens
+ * before that.
  */
 type Phase = "idle" | "sent" | "unresolved";
 let phase: Phase = "idle";
 let working = false;
-/** The running add's own controller, so Sign out can stop it before anything is sent (6(a)). */
+/** The running operation's own controller, so Sign out can stop it before anything is sent (6(a)). */
 let flight: AbortController | null = null;
 let leaving = false;
 const watchers = new Set<() => void>();
@@ -221,7 +222,7 @@ export const operation = {
   busy: (): boolean => working,
 };
 
-/** Sign out has begun: no add starts, and a running one stops if its confirm is not yet sent, until `stay`. */
+/** Sign out has begun: no operation starts, and a running one stops if nothing is sent yet, until `stay`. */
 export function leave(): void {
   leaving = true;
   flight?.abort();
@@ -263,27 +264,35 @@ async function settle(answer: Reply): Promise<[Added, boolean]> {
   return ["unconfirmed", (await readSession()) !== null];
 }
 
-/** Begin, the creation ceremony and confirm with exactly `{credential}`, then the list read. `signal`
- * stops it only before confirm is sent; a sent confirm always runs to its answer and reconciles. */
-export async function addPasskey(signal: AbortSignal): Promise<Adding | null> {
+/** Runs one operation at a time (6(d)): null when another runs or Sign out has begun. `signal` stops
+ * it only before its mutation is sent; a sent one always runs to its answer and reconciles. */
+async function operate<T>(signal: AbortSignal, run: (signal: AbortSignal) => Promise<T | null>): Promise<T | null> {
   if (working || leaving) return null;
   const own = new AbortController();
   signal.addEventListener("abort", () => { own.abort(); });
   flight = own;
   enter(phase, true);
   try {
-    return await adding(own.signal);
+    return await run(own.signal);
   } finally {
     flight = null;
     enter(operation.phase(), false);
   }
 }
 
+/** After an unresolved change: false while its session still cannot be read, so no protected POST goes out (6(b)). */
+async function reread(signal: AbortSignal): Promise<boolean> {
+  if ((await readSession(signal)) === null) return false;
+  enter("idle");
+  return true;
+}
+
+/** Begin, the creation ceremony and confirm with exactly `{credential}`, then the list read. */
+export const addPasskey = (signal: AbortSignal): Promise<Adding | null> => operate(signal, adding);
+
 async function adding(signal: AbortSignal): Promise<Adding | null> {
-  if (phase === "unresolved") {
-    if ((await readSession()) === null) return { result: "unsure" };
-    enter("idle");
-  }
+  if (phase === "unresolved" && !(await reread(signal))) return { result: "unsure" };
+  if (signal.aborted) return null;
   const done = await round("/api/auth/factors/passkey", "/api/auth/factors/passkey/confirm", signal, {}, () => { enter("sent"); }, registration);
   if (done === null) return null;
   const { answer, outcome } = done;
@@ -291,4 +300,39 @@ async function adding(signal: AbortSignal): Promise<Adding | null> {
   const [result, reconciled] = await settle(answer);
   enter(reconciled ? "idle" : "unresolved");
   return result === "added" || result === "unconfirmed" ? { result, rows: await readPasskeys() } : { result };
+}
+
+/** What a remove tells its screen (decision 7); "unconfirmed" only when its list read failed too. */
+export type Removed = "removed" | "not-removed" | "gone" | "unconfirmed" | "stepup" | "signed-out" | "error" | "unsure";
+export type Removing = { result: Removed; rows?: Awaited<ReturnType<typeof readPasskeys>> };
+
+/** A sent remove's answer (6(b), 6(f)): only the exact success shape is "removed"; a refusal is definite;
+ * anything else is "unconfirmed" until the list read, and the session read decides the token. */
+async function removal(answer: Reply): Promise<[Removed, boolean]> {
+  const { status, body } = answer;
+  const error = body["error"];
+  if (status >= 400 && status < 500 && typeof error === "string") {
+    if (status === 403 && error === "stepup-required") return ["stepup", true];
+    if (status === 401 && error === "signed-out") return ["signed-out", true];
+    return [(status === 404 && error === "not-found") || (status === 409 && error === "last-factor") ? "gone" : "error", true];
+  }
+  const exact = typeof body["csrf"] === "string" && body["csrf"] !== "";
+  if (exact && (await rotated(answer, "removed", "signed_in"))) return ["removed", true];
+  return ["unconfirmed", (await readSession()) !== null];
+}
+
+/** `POST /api/auth/factors/passkey/remove {id}`, then the list read. After an unconfirmed answer the
+ * selected id decides (6(f)): absent from a parsed list is removed, present is not removed. */
+export const removePasskey = (id: string, signal: AbortSignal): Promise<Removing | null> => operate(signal, (own) => removing(id, own));
+
+async function removing(id: string, signal: AbortSignal): Promise<Removing | null> {
+  if (phase === "unresolved" && !(await reread(signal))) return { result: "unsure" };
+  if (signal.aborted) return null;
+  enter("sent");
+  const [result, reconciled] = await removal(await post("/api/auth/factors/passkey/remove", { id }));
+  enter(reconciled ? "idle" : "unresolved");
+  if (result !== "removed" && result !== "gone" && result !== "unconfirmed") return { result };
+  const rows = await readPasskeys();
+  if (result !== "unconfirmed" || !Array.isArray(rows)) return { result, rows };
+  return { result: rows.some((row) => row.id === id) ? "not-removed" : "removed", rows };
 }

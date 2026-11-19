@@ -14,15 +14,24 @@ function keepToken(body: Record<string, unknown>): void {
   }
 }
 
+/** Moves on each time a POST ends, since it may have rotated the token: a read that started before
+ * is older than the token it would overwrite, so it reads as lost and keeps nothing (AUTH-13). */
+let epoch = 0;
+
 async function run(path: string, init: RequestInit): Promise<Reply> {
+  const write = init.method === "POST";
+  const start = epoch;
   try {
     const response = await fetch(path, { ...init, cache: "no-store", credentials: "same-origin" });
     const parsed: unknown = await response.json().catch(() => ({}));
+    if (!write && start !== epoch) return NETWORK;
     const body = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
     keepToken(body);
     return { status: response.status, body };
   } catch {
     return NETWORK;
+  } finally {
+    if (write) epoch += 1;
   }
 }
 
@@ -49,8 +58,8 @@ export function logout(): Promise<Reply> {
   return held ? Promise.resolve(NETWORK) : post("/api/auth/logout", {});
 }
 
-export function get(path: string): Promise<Reply> {
-  return run(path, { method: "GET" });
+export function get(path: string, signal: AbortSignal | null = null): Promise<Reply> {
+  return run(path, { method: "GET", signal });
 }
 
 export type SessionState = "signed_out" | "signed_in" | "second_factor" | "enrol_factor";
@@ -60,8 +69,8 @@ const STATES: readonly string[] = ["signed_out", "signed_in", "second_factor", "
 /** What the server says this browser is, or null when the answer was unreadable. An answer counts
  * only with a listed state and a non-empty CSRF token: the read re-synchronises the page's token
  * with the server's, so a state that came without one is unresolved, not proof. */
-export async function readSession(): Promise<SessionState | null> {
-  const { status, body } = await get("/api/auth/session");
+export async function readSession(signal: AbortSignal | null = null): Promise<SessionState | null> {
+  const { status, body } = await get("/api/auth/session", signal);
   const state = body["state"];
   const csrf = body["csrf"];
   return status === 200 && typeof state === "string" && STATES.includes(state) && typeof csrf === "string" && csrf !== "" ? (state as SessionState) : null;
