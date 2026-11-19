@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -198,12 +198,24 @@ describe("the Security page", () => {
 
   it("clears the hash on sign-out, so the next person starts on Today", async () => {
     open();
-    server(state("signed_in"), ok([]), { status: 200, body: { next: "signed_out", csrf: "t9" } }, state("signed_in"));
+    server(
+      state("signed_in"), ok([]), { status: 200, body: { next: "signed_out", csrf: "t9" } },
+      { status: 200, body: { next: "second_factor", csrf: "t2" } }, { status: 200, body: { next: "signed_in", csrf: "t3" } }, ok([]),
+    );
     render(<App />);
     await user.click(await screen.findByRole("button", { name: content.signOut }));
     expect(await screen.findByRole("heading", { level: 1, name: content.signIn.title })).toBeTruthy();
     expect(window.location.hash).toBe("");
     expect(window.location.pathname).toBe("/");
+    // The next person starts on Today, and the Security link still leads to Security.
+    await user.type(screen.getByLabelText(content.signIn.email), "b@example.com");
+    await user.type(screen.getByLabelText(content.signIn.password), "pw");
+    await user.click(screen.getByRole("button", { name: content.signIn.submit }));
+    await user.type(await screen.findByLabelText(content.secondFactor.label), "123456");
+    await user.click(screen.getByRole("button", { name: content.secondFactor.submit }));
+    expect(await screen.findByRole("heading", { level: 1, name: content.pageTitle })).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: "Security" }));
+    expect(await screen.findByRole("heading", { level: 1, name: content.security.title })).toBeTruthy();
   });
 
   it("shows a failed sign-out on the Security page too", async () => {

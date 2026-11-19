@@ -1,6 +1,10 @@
 import { createHmac } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
+import { expect, type Page } from "@playwright/test";
+
+export const PASSWORD = "a long enough password 1";
+
 /** An invitation for a new user, made the way the operator makes one (`accounts_invite`, run in
  * the app container of the compose stack `make e2e` starts). Returns the token from the link. */
 export function invite(email: string, name: string): string {
@@ -36,4 +40,17 @@ export function totp(secret: string, steps = 0, now = Date.now()): string {
   const offset = (digest[digest.length - 1] ?? 0) & 0x0f;
   const value = digest.readUInt32BE(offset) & 0x7fffffff;
   return String(value % 1_000_000).padStart(6, "0");
+}
+
+/** A new invitation taken to the recovery codes: the password, then the authenticator's current
+ * code. Returns the authenticator secret. */
+export async function enrolToCodes(page: Page, email: string, name: string): Promise<string> {
+  await page.goto(`/enrol#${invite(email, name)}`);
+  await page.getByLabel("New password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Continue" }).click();
+  const secret = ((await page.locator(".secret").textContent()) ?? "").replace(/\s/g, "");
+  await page.getByLabel("Code from the app").fill(totp(secret));
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Save your recovery codes" })).toBeVisible();
+  return secret;
 }

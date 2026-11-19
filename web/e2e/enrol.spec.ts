@@ -1,10 +1,9 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { invite, totp } from "./seed";
+import { enrolToCodes, invite, PASSWORD, totp } from "./seed";
 
 const AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
-const PASSWORD = "a long enough password 1";
 
 async function clean(page: Page) {
   const results = await new AxeBuilder({ page }).withTags(AA).analyze();
@@ -137,14 +136,7 @@ test("an invitation link works once", async ({ page }, info) => {
 });
 
 test("the done button on the recovery codes leaves the invitation for Today", async ({ page }, info) => {
-  const email = `e2e-done-${info.project.name}-${Date.now().toString(36)}@example.test`;
-  await page.goto(`/enrol#${invite(email, "E2E Done")}`);
-  await page.getByLabel("New password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Continue" }).click();
-  const secret = ((await page.locator(".secret").textContent()) ?? "").replace(/\s/g, "");
-  await page.getByLabel("Code from the app").fill(totp(secret));
-  await page.getByRole("button", { name: "Confirm" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Save your recovery codes" })).toBeVisible();
+  await enrolToCodes(page, `e2e-done-${info.project.name}-${Date.now().toString(36)}@example.test`, "E2E Done");
   expect(new URL(page.url()).pathname).toBe("/enrol");
   await page.getByRole("button", { name: "I have saved my codes" }).click();
   // Chromium has WebAuthn, so the passkey offer comes first (M3g-2a-2 decision 10); Skip sends nothing.

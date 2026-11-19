@@ -89,8 +89,11 @@ def test_every_failure_counts_and_logs_one_failure(case: str) -> None:
 
 
 def test_the_sixth_attempt_is_limited_without_a_lookup_even_when_it_is_right(
-    spied: dict[str, list[Any]],
+    spied: dict[str, list[Any]], clock: Clock
 ) -> None:
+    """All six attempts in one frozen instant, so one fixed window: on a real clock a window edge
+    between the fifth and the sixth reset the count (CI run 44085549833 ran this file across
+    12:45:00 UTC). The edge itself is test_auth_throttle_live's rollover test."""
     _, email = enrolled()
     for address in (email, unknown()):
         for count in range(settings.SKIW_AUTH_FAILS_PER_ACCOUNT):
