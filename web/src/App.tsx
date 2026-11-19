@@ -3,15 +3,18 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Mo
 import { endSession, sessionState, unauthenticated, type SessionState } from "./api";
 import { content } from "./content";
 import { discardInvitation, leaveEnrol, onEnrolPath, takeToken } from "./enrolLink";
-import { leave, operation, stay, trusted } from "./passkey";
+import { leave, operation, passkeySupported, stay, trusted } from "./passkey";
 import { EnrolMissing, EnrolPassword, EnrolSetup, type Setup } from "./screens/Enrol";
+import { Offer } from "./screens/Offer";
 import { Recovery } from "./screens/Recovery";
 import { SecondFactor } from "./screens/SecondFactor";
 import { Security } from "./screens/Security";
 import { SignIn } from "./screens/SignIn";
 
+/** `offer`: the passkey step after the recovery codes (spec M3g-2a-2 decision 10). */
+type Step = SessionState | "recovery" | "offer";
 type Shown = {
-  kind: SessionState | "recovery";
+  kind: Step;
   notice: string | null;
   setup: Setup | null;
   codes: string[];
@@ -47,23 +50,29 @@ export function App() {
     };
   }, []);
 
+  /** A notice on Today (the offer's "Passkey added") leaves with the page it was said on. */
+  const turn = useCallback((next: Page) => {
+    setPage(next);
+    setView((shown) => (shown.kind === "signed_in" && shown.notice !== null ? { ...shown, notice: null } : shown));
+  }, []);
+
   // The address decides the page, so click, Back, Forward, reload and a pasted link all agree.
   useEffect(() => {
-    const read = () => { setPage(pageOf(window.location.hash)); };
+    const read = () => { turn(pageOf(window.location.hash)); };
     window.addEventListener("hashchange", read);
     window.addEventListener("popstate", read);
     return () => {
       window.removeEventListener("hashchange", read);
       window.removeEventListener("popstate", read);
     };
-  }, []);
+  }, [turn]);
 
   // After the person acts, the new screen takes focus; the first load leaves focus where it is.
   useEffect(() => {
     if (moves > 0) mainRef.current?.focus();
   }, [moves]);
 
-  const go = useCallback((kind: SessionState | "recovery", extra: Extra = {}) => {
+  const go = useCallback((kind: Step, extra: Extra = {}) => {
     // The next person to sign in starts on Today, not on this one's page.
     if (kind === "signed_out" && window.location.hash === "#security") {
       window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
@@ -81,7 +90,7 @@ export function App() {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     window.history.pushState(null, "", event.currentTarget.href);
-    setPage(pageOf(window.location.hash));
+    turn(pageOf(window.location.hash));
   }
 
   async function signOut() {
@@ -141,7 +150,7 @@ export function App() {
 type ScreenProps = {
   view: Shown | { kind: "loading" };
   page: Page;
-  go: (kind: SessionState | "recovery", extra?: Extra) => void;
+  go: (kind: Step, extra?: Extra) => void;
   expired: () => void;
   onModal: (open: boolean) => void;
   signOutError: string | null;
@@ -171,7 +180,7 @@ function Screen({ view, page, go, expired, onModal, signOutError }: ScreenProps)
             </>
           )}
           <div aria-live="polite" className="message">
-            {signOutError}
+            {signOutError ?? view.notice}
           </div>
         </>
       );
@@ -185,10 +194,12 @@ function Screen({ view, page, go, expired, onModal, signOutError }: ScreenProps)
           codes={view.codes}
           onDone={() => {
             leaveEnrol();
-            go("signed_in");
+            go(passkeySupported() ? "offer" : "signed_in");
           }}
         />
       );
+    case "offer":
+      return <Offer onDone={(notice) => { go("signed_in", notice === undefined ? {} : { notice }); }} onSignedOut={expired} onModal={onModal} />;
     case "signed_out":
       return <SignedOut notice={view.notice} go={go} />;
   }

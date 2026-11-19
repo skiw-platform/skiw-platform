@@ -78,6 +78,11 @@ export const content = {
   passkeys: {
     unsupported: "This browser cannot use passkeys.",
   },
+  /** The once-only step after the recovery codes (spec M3g-2a-2 decision 10); its other words are Security's. */
+  offer: {
+    title: "Add a passkey?",
+    skip: "Skip",
+  },
   security: {
     title: "Security",
     intro: "A passkey is an optional way to confirm it is you. Your authenticator app always stays available.",

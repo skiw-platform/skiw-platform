@@ -512,7 +512,10 @@ sudo env SKIW_IMAGE="$running" docker compose -f /srv/skiw/compose.yml \
   means the list still has it; "That passkey is no longer there." means it was already gone.
   After a lost answer, the next Add or Remove first re-checks the session. Pressing Sign out
   then cancels that change: nothing more is sent, and a re-check that answers late is ignored,
-  so sign-out's new token stands.
+  so sign-out's new token stands. **After enrolment** (M3g-2a-2d): where the browser has WebAuthn,
+  "Add a passkey?" follows the recovery codes once, with **Add a passkey** (the same add) and
+  **Skip**. Only "Passkey added" (said on Today) leaves it; a failed or unconfirmed add stays there
+  with the same words as above. A user who skips or reloads can add one later from Security.
 - **Sign in with a passkey** (M3g-1d-1): after the password, a user with a passkey in use can
   answer the second step with it (`POST /api/auth/second-factor/passkey` gives the options,
   `POST /api/auth/second-factor/passkey/confirm` checks the assertion) instead of a code; a user
