@@ -147,7 +147,10 @@ test("the done button on the recovery codes leaves the invitation for Today", as
   await expect(page.getByRole("heading", { level: 1, name: "Save your recovery codes" })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/enrol");
   await page.getByRole("button", { name: "I have saved my codes" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Today" })).toBeVisible();
+  // Chromium has WebAuthn, so the passkey offer comes first (M3g-2a-2 decision 10); Skip sends nothing.
+  await expect(page.getByRole("heading", { level: 1, name: "Add a passkey?" })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/");
+  await page.getByRole("button", { name: "Skip" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Today" })).toBeVisible();
   await clean(page);
 });

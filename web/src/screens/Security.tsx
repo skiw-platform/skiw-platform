@@ -17,7 +17,7 @@ type Props = {
 const count = (total: number) => (total === 0 ? content.security.empty : total === 1 ? content.security.one : content.security.many(total));
 
 /** The words for an add that added nothing; one text for every failed ceremony or refusal (AUTH-05). */
-const FAILED: Partial<Record<Added, string>> = {
+export const FAILED: Partial<Record<Added, string>> = {
   failed: content.security.notAdded,
   offline: content.errors.network,
   unsure: content.sessionUnsure,
