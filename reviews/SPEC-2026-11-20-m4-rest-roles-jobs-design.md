@@ -1,5 +1,24 @@
 # Review — 2026-11-20-m4-rest-roles-jobs-design
 
+## Round 7 — 2026-11-20 · scope: slice
+- **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.4 · hash `17b3f78376be4da968ebe338fb120f45b7ffd55b`
+- **Model used:** GPT-6 (Codex; project deep-tier mapping unavailable) · **Switch model next step?** Yes — project specifies deep tier for auth, tenancy and spec review.
+
+### Findings
+No new defect findings. The Round 6 blocker remains: owner decisions Q1–Q6 are essential and not established in the evidence visible to this reviewer. The user forwarded a builder-written proposed confirmation after Round 6, but did not adopt it as their own decision. Do not record forwarded text as approval.
+
+### Verification performed
+- Recomputed `git hash-object` and confirmed the spec is unchanged from Round 6; checked the intervening conversation and the prior review.
+- No implementation, database or browser tests run. Earlier RLS, worker and concurrency controls remain design-level and require their specified tests.
+
+### Required to unblock
+- Obtain the owner's actual Q1–Q6 decisions with their source, reconcile the spec and governing amendment, and request another review.
+
+### Deferred conditions
+- None.
+
+**Verdict: Blocked**
+
 ## Round 6 — 2026-11-20 · scope: slice
 - **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.4 · hash `17b3f78376be4da968ebe338fb120f45b7ffd55b`
 - **Model used:** GPT-6 (Codex; project deep-tier mapping unavailable) · **Switch model next step?** Yes — project specifies its deep tier for auth, tenancy and spec review.
