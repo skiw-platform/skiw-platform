@@ -1,5 +1,27 @@
 # Review — 2026-11-20-m4-rest-roles-jobs-design
 
+## Round 6 — 2026-11-20 · scope: slice
+- **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.4 · hash `17b3f78376be4da968ebe338fb120f45b7ffd55b`
+- **Model used:** GPT-6 (Codex; project deep-tier mapping unavailable) · **Switch model next step?** Yes — project specifies its deep tier for auth, tenancy and spec review.
+
+### Findings
+No new defect findings in the changes reviewed. The remaining gate is missing owner decisions: the proposed permission matrix, reset timing, interim audit design and RLS exception depend on Q1–Q6, and the previously reported answers are not independently established in evidence available to this reviewer (spec lines 49–50, 205–212). The spec appropriately treats them as proposals and requires owner statements and the governing amendment in M4r-0. These business and security decisions are essential to approve this spec, not deferred P2 conditions.
+
+### Previous findings
+- Round 5 provenance P1: resolved in the revision at the design-record level; the relevant claims are now explicitly attributed to the builder's unverified account, and the conflicting visible evidence and independent confirmation gate are stated. This review does not independently verify the separate transcript or treat its reported answers as owner decisions.
+- Round 4 event-count finding: resolved at design level. Earlier implementation controls remain unverified pending their PRs.
+
+### Applicability and verification
+Applicable: UNI-03/04/06/09/13/16; AUTH-01/02/03/09/12; TEN-01–11; EVT-01/03/05/06; project tenant, job and module constraints. Compared the revision with prior findings and visible conversation; `git hash-object` returned the hash above. Static review only; no implementation, database or browser tests were run. Worker integration, RLS and concurrency assumptions require the specified implementation tests.
+
+### Required to unblock
+- Obtain and record the owner's actual decisions for Q1–Q6 with their real source; reconcile this spec and the governing amendment to those decisions, then request a new spec review. No approval to implement is implied.
+
+### Deferred conditions
+- None.
+
+**Verdict: Blocked**
+
 ## Round 5 — 2026-11-20 · scope: slice
 - **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.3 · hash `6413b23a3094df1add015ec73d21df394c8f6424`
 - **Model used:** GPT-6 (Codex; project deep-tier mapping unavailable) · **Switch model next step?** Yes — project specifies deep tier for auth, tenancy and spec review.
