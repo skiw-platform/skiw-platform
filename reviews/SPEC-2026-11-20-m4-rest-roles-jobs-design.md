@@ -1,5 +1,38 @@
 # Review — 2026-11-20-m4-rest-roles-jobs-design
 
+## Round 5 — 2026-11-20 · scope: slice
+- **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.3 · hash `6413b23a3094df1add015ec73d21df394c8f6424`
+- **Model used:** GPT-6 (Codex; project deep-tier mapping unavailable) · **Switch model next step?** Yes — project specifies deep tier for auth, tenancy and spec review.
+
+### Findings
+
+#### [P1] The spec still asserts the disputed Q5 and Q6 answers as facts
+- Category: defect / consistency.
+- Rule: evidence integrity; PROJECT §2.
+- Evidence: spec lines 49, 201, 204–205 and 212. Decision 25 and §10.1 now require owner confirmation and treat reported answers as working assumptions, but M4 done-when still calls Q5 the owner's typed answer and Q6 says the owner typed confirm. In the visible conversation, the Q5 text is the assistant's recommendation and the Q6 exchange asks for advice, followed by the assistant's recommendation. The separately identified builder transcript has not been examined.
+- Failure scenario: A reader treats either disputed attribution as an established historical owner answer despite the proposal-only gate; the working assumptions and normative text give different accounts.
+- Why it matters: The decision history must distinguish verified statements from reported but unverified claims, especially where a prior owner decision would change.
+- Required correction: Make these statements consistent with the evidence caveat throughout, including the done-when and Q6 heading; identify Q5 text as the assistant recommendation visible here and any separately claimed owner action as unverified pending evidence. Retain the new dated owner-decision gate in M4r-0.
+- Owner: builder.
+- Verification: Search the full revision for claims that Q1–Q6 have been answered or confirmed, compare each to available evidence, and check that the governing amendment records actual future owner statements only.
+- Status: open.
+
+### Previous findings
+- Round 4 audit event-count P1: resolved at design level. Decision 32, main-spec amendment items 4 and 6, test plan and M4 done-when now specify one event per inserted/deleted row and per changed update field, two for both fields and none for a no-op.
+- Round 4 provenance P1: M4r-0 no longer directs the builder to copy the quotation as an owner statement; conflicting claims remain, as described above.
+- Earlier authorization, RLS, audit and concurrency changes remain design-level only. Owner answers and the governing amendment are prerequisites, not established by this review.
+
+### Applicability and verification
+Applicable: UNI-03/04/06/09/13/16; AUTH-01/02/03/09/12; TEN-01–11; EVT-01/03/05/06 and project tenant, job and module constraints. Compared spec v1.3 against prior findings, the amendment text, and visible conversation; `git hash-object` returned the hash above. Static review only; no implementation, database or browser tests were run. Worker integration and concurrency assumptions remain unverified.
+
+### Required before approval
+- Reconcile the remaining answer-provenance statements with available evidence and resubmit.
+
+### Deferred conditions
+- None.
+
+**Verdict: Revision required**
+
 ## Round 4 — 2026-11-20 · scope: slice
 - **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.2 · hash `c2690314a896d4a37b93f757a92695a43720e5f2`
 - **Model used:** GPT-6 (Codex; project deep-tier mapping unavailable) · **Switch model next step?** Yes — project specifies deep tier for security, auth and spec review.
