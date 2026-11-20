@@ -1,5 +1,51 @@
 # Review — 2026-11-20-m4-rest-roles-jobs-design
 
+## Round 3 — 2026-11-20 · scope: slice
+- **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.2 · hash `3538b1fc34c29c06f517b5f11b4b9f31a700b42e`
+- **Model used:** GPT-6 (Codex; project deep-tier mapping unavailable) · **Switch model next step?** Yes — auth, tenancy and spec review call for the project's deep tier.
+
+### Findings
+
+#### [P0] The Q5 recommendation is still presented as the owner's verbatim answer
+- Category: defect — fabricated attribution.
+- Rule: reviewer evidence and severity rules; PROJECT §2.
+- Evidence: slice spec lines 49–50, 205 and 211. The text at line 211 is the assistant's recommendation in this conversation, not a message typed by the user. The revision describes it as the owner's own words and instructs M4r-0 to copy it into DECISIONS as the owner's answer.
+- Failure scenario: The governing amendment records assistant advice as an owner decision. The planned later confirmation cannot establish that this text was an earlier owner statement.
+- Why it matters: The provenance record would be false, even if the owner later agrees with the proposed option.
+- Required correction: Identify the text accurately as assistant advice; mark Q5 unconfirmed unless an independently evidenced owner answer exists, and record any subsequent confirmation as a new decision with its real source. Apply the same evidence standard to Q1–Q4 and Q6: the exchanges visible in this review are requests for advice, not selections. A separate builder session may exist, but its claimed selections are unverified here and must not be presented as established without evidence.
+- Owner: builder.
+- Verification: Compare every attribution against the actual source, and inspect the corrected M4r-0 decision record.
+- Status: open.
+
+#### [P2] The audit event count contradicts the allowed two-field update
+- Category: consistency.
+- Rule: spec §9 done-when; Decision 32.
+- Evidence: slice spec lines 57, 132 and 201. Decision 32 permits one org-unit update changing both parent and name and requires two events; M4 done-when requires exactly one event per changed row.
+- Failure scenario: A valid move-and-rename produces two events and fails the milestone criterion, or a builder suppresses one and loses required detail.
+- Why it matters: The completion gate and the audited behavior cannot both hold.
+- Required correction: State the exact invariant consistently, including two events for one update that changes both fields and zero for a no-op.
+- Owner: builder.
+- Verification: Trace the revised done-when to the multi-field and no-op tests.
+- Disposition: before merge.
+- Status: open.
+
+### Previous findings
+- Round 2 P0 remains open: the draft adds a confirmation gate but still misattributes the Q5 recommendation. Q6 is also not confirmed by the exchange visible in this session; the assistant recommended confirmation.
+- Round 2 audit-bypass P1: addressed at design level by database triggers and grants sequenced after them (Decision 32). Implementation and intermediate migration tests remain unverified.
+- Round 2 cross-agency P1: addressed at design level for change rows by Decision 33 and its three-context test plan; Q6 and the governing amendment remain subject to owner confirmation. Pre-tenant rows remain shared as explicitly stated.
+- Round 1 action-line and concurrency findings: addressed at design level; implementation and snapshot assumptions remain to be tested.
+
+### Applicability and verification
+Applicable: UNI-03/04/06/09/13/16; AUTH-01/02/03/09/12; TEN-01–11; EVT-01/03/05/06; project tenant, job and module constraints. Compared the revision with prior rounds, relevant project and governing-spec evidence, and the visible conversation. `git hash-object` returned the hash above. Static review only: no implementation, database or browser tests run; worker integration and database concurrency assumptions remain unverified.
+
+### Required before approval
+- Correct the decision provenance and align the audit completion criterion.
+
+### Deferred conditions
+- None.
+
+**Verdict: Revision required**
+
 ## Round 2 — 2026-11-20 · scope: slice
 - **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.1 · hash `a5a8d159ff6f3a087793386b7f2a414f2d44d0fc`
 - **Model used:** GPT-6 (Codex; exact tier mapping unavailable) · **Switch model next step?** Yes — the project specifies its deep tier for auth, isolation and spec review.
