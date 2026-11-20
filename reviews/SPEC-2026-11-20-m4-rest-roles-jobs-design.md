@@ -1,5 +1,65 @@
 # Review — 2026-11-20-m4-rest-roles-jobs-design
 
+## Round 2 — 2026-11-20 · scope: slice
+- **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.1 · hash `a5a8d159ff6f3a087793386b7f2a414f2d44d0fc`
+- **Model used:** GPT-6 (Codex; exact tier mapping unavailable) · **Switch model next step?** Yes — the project specifies its deep tier for auth, isolation and spec review.
+
+### Findings
+
+#### [P0] Recommendations are falsely recorded as owner decisions
+- Category: defect — fabricated attribution
+- Rule: reviewer evidence and severity rules; PROJECT §2 and §11.
+- Evidence: slice spec lines 49–50 and 200–204. In this conversation, the user asked which Q1–Q5 option to choose; the assistant recommended options. The user did not state a selection or authorize a change to the earlier owner decision. Q5's purported verbatim owner quote is the assistant's own answer.
+- Failure scenario: M4r-0 copies these claims to DECISIONS and changes the main spec, including moving a previously decided reset requirement, on the false premise that Ying approved them.
+- Why it matters: Recommendations are not owner approvals; the audit trail and governing authorization would be materially false.
+- Required correction: Remove the attributed quotations and claims of owner approval; label them as recommendations, and obtain and accurately record the owner's actual answers before relying on them. Retain the M4r-0 prerequisite.
+- Owner: builder and owner.
+- Verification: Compare recorded answers against the owner's direct statements and re-review the governing amendment.
+- Status: open.
+
+#### [P1] The database grants permit unaudited role and org changes
+- Category: guardrail mismatch
+- Rule: main spec §4.1 role-change audit; slice spec Decision 30 and M4 done-when.
+- Evidence: slice spec lines 28, 55, 64–65, 78 and 194; M4r-1b grants direct INSERT/UPDATE/DELETE before M4r-5a's application change functions and event writer (lines 175–180). The database trigger checks event shape, not that a change has a corresponding event.
+- Failure scenario: Direct SQL as skiw_app, or another code path using its existing grants, changes a role or org unit without calling `_record`. Even the period between M4r-1b and M4r-5a permits such writes without the proposed event.
+- Why it matters: Atomicity of the designated helper does not establish the stated invariant that every committed change is recorded; missing events undermine the required audit trail.
+- Required correction: Enforce the change/event invariant at the database boundary or restrict writes to a database-enforced audited path, including the deployment sequence. Specify any deliberately excluded threat and reconcile it with the governing requirement rather than asserting universal coverage.
+- Owner: builder.
+- Verification: Direct INSERT, UPDATE and DELETE through every granted path either produce the correct event in the same transaction or are refused; test rollback and intermediate migrations.
+- Status: open.
+
+#### [P1] Q6 permits cross-agency disclosure of change records
+- Category: material risk / guardrail mismatch
+- Rule: TEN-06–08; main spec D18 and §4.2 tenant isolation.
+- Evidence: slice spec lines 55, 66 and 205 explicitly say Q6 option (a) allows agency B to read agency A's role-history events. The rows contain user and org identifiers and role information.
+- Failure scenario: A request or SQL running as skiw_app in agency B reads agency A's role changes from the global table.
+- Why it matters: This introduces a known cross-tenant disclosure into the proposed design. Describing identifiers as codes does not make the records non-tenant data.
+- Required correction: Remove the unisolated option as a shippable design; specify and test enforced isolation for all tenant-bearing events, pre-tenant writers and no-token access, with the governing amendment. Obtain the owner decision on the permissible implementation.
+- Owner: builder and owner.
+- Verification: Live tests as skiw_app for A, B and no tenant prove no cross-agency read or write; pre-tenant and definer paths continue working.
+- Status: open.
+
+### Previous findings
+- R1 governing conflict: **open**. M4r-0 is now a prerequisite, but its claimed owner answers are not established (P0 above).
+- R1 action-line restriction: **resolved at design level** by Decisions 7–9 and 26 and the matching test plan; implementation remains unverified.
+- R1 concurrent tree moves and last-owner revocations: **addressed at design level**, with explicit locks, isolation requirements and two-connection tests. Snapshot behavior is explicitly an assumption to prove in M4r-1b; no live test was run during this review.
+
+### Applicability and evidence
+Applicable: UNI-03/04/06/09/13/16; AUTH-01/02/03/09/12; TEN-01–11; EVT-01/03/05/06; project module boundaries and tenant/job constraints. This is a design review, not verification of unbuilt implementation. Q6 is unanswered and the prerequisite governing amendment does not yet exist.
+
+### Verification performed
+- Compared v1.1 with Round 1, the current conversation, the governing project/spec/decision evidence and existing security_event grants.
+- `git hash-object docs/specs/2026-11-20-m4-rest-roles-jobs-design.md` → `a5a8d159ff6f3a087793386b7f2a414f2d44d0fc`; spec remains untracked.
+- Static review only; no implementation, database or browser tests run. The worker integration and database concurrency assumptions remain for their implementation gates.
+
+### Required before approval
+- Correct the attributed owner decisions and obtain actual answers; resolve the audit enforcement and cross-agency isolation findings.
+
+### Deferred conditions
+- None.
+
+**Verdict: Revision required**
+
 ## Round 1 — 2026-11-20 · scope: slice
 - **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.0 · hash `f9da331de63b907f2079e401fa70d135c3f682c7`
 - **Model used:** GPT-6 (Codex; exact tier mapping unavailable) · **Switch model next step?** Yes — project specifies its deep tier for auth, isolation and spec review.
