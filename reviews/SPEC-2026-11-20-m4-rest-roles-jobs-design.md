@@ -1,5 +1,49 @@
 # Review — 2026-11-20-m4-rest-roles-jobs-design
 
+## Round 4 — 2026-11-20 · scope: slice
+- **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.2 · hash `c2690314a896d4a37b93f757a92695a43720e5f2`
+- **Model used:** GPT-6 (Codex; project deep-tier mapping unavailable) · **Switch model next step?** Yes — project specifies deep tier for security, auth and spec review.
+
+### Findings
+
+#### [P1] The governing amendment still contains an incorrect event-count rule
+- Category: spec/guardrail mismatch.
+- Rule: consistency; main-spec amendment §10.2 items 4 and 6.
+- Evidence: slice spec lines 57, 132, 201, 218 and 220. The test and M4 done-when now specify two events for a move-and-rename and none for a no-op, but Decision 32 and the exact amendment text for the governing spec still say one per changed row.
+- Failure scenario: M4r-0 copies its prescribed text into the governing spec, creating a conflict with the implemented two-event behavior.
+- Why it matters: The main spec wins over this slice and its approval gate would leave a contradictory audit requirement.
+- Required correction: Align all normative statements and amendment text on one event per insert/delete, one per changed update field, two when both change, and none on no-op.
+- Owner: builder.
+- Verification: Trace all audit invariant statements and the two-field/no-op tests into the proposed main-spec amendment.
+- Status: open.
+
+#### [P1] The provenance correction still directs the builder to copy an unverified quotation as an owner statement
+- Category: defect / spec consistency.
+- Rule: evidence integrity; PROJECT §2.
+- Evidence: slice spec lines 50, 177, 205 and 211. Section 10.1 now says the reported builder-session answers are unverified working assumptions and must not be copied as owner statements, but Decision 25 and M4r-0 still direct a DECISIONS entry to record Q5 as the owner's typed text verbatim. The quotation exactly matches this reviewer's earlier recommendation in the visible conversation; the separately identified builder transcript was not accessible or verified during this review.
+- Failure scenario: M4r-0 copies the quotation into the durable log as a historical owner statement despite the lack of accessible supporting evidence, even if the owner subsequently agrees to the option.
+- Why it matters: A later confirmation establishes a new decision, not the provenance of an earlier quotation.
+- Required correction: Remove the instruction to attribute or copy the historical quotation unless its actual source is independently verified; state consistently that current values are proposals, and record any owner answer as a new decision with its actual source and date. Preserve the requirement for confirmation before dependent work.
+- Owner: builder.
+- Verification: Inspect the corrected Decision 25, M4r-0 and owner-question text and trace the eventual record to evidence.
+- Status: open.
+
+### Previous findings
+- Round 3 provenance P0: the added evidence caveat and independent-confirmation gate reduce the immediate risk; the conflicting copy instruction remains open as P1 above. The separate builder transcript has not been inspected, so this review does not conclude what happened there.
+- Round 3 event-count P2: M4 done-when and test table are corrected, but governing amendment text and Decision 32 remain inconsistent, as P1 above.
+- Round 2 database audit and tenant isolation: addressed at design level; no implementation or live tests were run.
+
+### Applicability and verification
+Applicable: UNI-03/04/06/09/13/16; AUTH-01/02/03/09/12; TEN-01–11; EVT-01/03/05/06, and project tenant, job and module constraints. Compared the current spec with prior rounds, its amendment text, and the visible conversation. `git hash-object` returned the hash above. The file changed since Round 3 but still declares version 1.2; fix workflow should bump the version when revising. Static review only; database concurrency, worker integration, and RLS tests are unverified.
+
+### Required before approval
+- Correct the governing amendment's event count and reconcile decision provenance throughout the spec.
+
+### Deferred conditions
+- None.
+
+**Verdict: Revision required**
+
 ## Round 3 — 2026-11-20 · scope: slice
 - **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.2 · hash `3538b1fc34c29c06f517b5f11b4b9f31a700b42e`
 - **Model used:** GPT-6 (Codex; project deep-tier mapping unavailable) · **Switch model next step?** Yes — auth, tenancy and spec review call for the project's deep tier.
