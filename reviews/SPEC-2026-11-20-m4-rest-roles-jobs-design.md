@@ -1,5 +1,247 @@
 # Review — 2026-11-20-m4-rest-roles-jobs-design
 
+## Round 10 — 2026-11-21 · scope: slice
+- **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 2.3 · hash (`git hash-object`) `38b7be31f6dc59ac9425b3c6297ccdd47597c84d` · `main` = `df7ce21`
+
+**Verdict:** Approved
+**Model used:** Claude Opus 5.5 (deep tier, PROJECT §6) · **Switch model next step?** No — M4r-0 is docs-only; the code PRs that follow are deep tier per PROJECT §6.
+
+This approval is of the design only. OD-1, Q3–Q6, the Owner-only seed, the AUTH-03 exception and the T20 acceptance are still proposals. They govern nothing until the owner states them in the M4r-0 PR (Decision 25), and no PR whose "Needs" names M4r-0 starts before M4r-0 merges with an owner-Approved review.
+
+### Findings
+No blocking findings.
+
+#### [P3] Rounding of the schedule cap at small TTLs
+- Evidence: Decision 15 caps `scheduled_at` at `now + TTL × 23/24`. The §8 bound allows a TTL of 60 s, which gives 57.5 s with no rounding rule.
+- Suggested: state integer seconds, rounded down (or a minimum margin), in M4r-6.
+- Status: open (optional)
+
+#### [P3] Wording drift between the DECISIONS proposal record and Decision 25
+- Evidence: The working-tree entry is titled "(v2.2)" and says "the §9 AUTH-03 note lands in M4r-0". Decision 25 (v2.3) says it lands in "M4r-0's `setup` reconcile that follows it".
+- Suggested: align the two when the entry is committed (title v2.3; same landing point).
+- Status: open (optional)
+
+### Previous findings (Round 9)
+- P2 Owner-only seed fallout: **resolved**. §7 now says 1 `role.created` + 31 `permission.set` (32 events) and "seeded Owner role and a no-role user". M4r-3 is updated. Decision 24 and §10.1 Q4 now describe `device.revoke` `own` as a tickable catalogue pair with no default to confirm. A grep for `59`, `63`, "four seeded" and "every starting role" finds only the v2.0 history line.
+- P2 M4r-0 gate: **resolved**. Decision 25 and the M4r-0 scope and done-when name the Owner-only seed, the AUTH-03 exception ("Exception to a rule: yes — AUTH-03") and the T20 acceptance, and say where the PROJECT §9 note lands.
+- P2 `exp` base: **resolved** by option (b). `exp = signing time + TTL`, so main spec §4.1's "expiry ≤ 24 h" holds unamended. Schedules are capped at TTL × 23/24, derived from the existing setting, so no new §8 row is needed. The §7 replay row ("Expiry ≤ 86 400 s") is now accurate. M4r-6 tests the boundary and one second past it; 10.2 #9 matches. No trace of the 7-day setting remains.
+
+### Self-check audit
+As Round 8. v2.3 changes touch AUTH-03 (gate now complete), TEN-11 / EVT-05 (`exp` from signing, §4.1 ceiling kept) and UNI-02 (no new setting). No hard-rule issue.
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| `git hash-object` | `38b7be31…` |
+| Word diff v2.2 → v2.3 | every change reviewed |
+| grep for stale seed / expiry text | only historical lines |
+| `docs/DECISIONS.md` diff | proposal record, "Decided by: nobody yet"; lists all items |
+| Tests, database | not run (spec review) |
+
+### Residual risks and test gaps
+- The `[A]` items (trigger and snapshot semantics, `pg_trigger_depth()`, Procrastinate 3.10 hooks, the ACCESS EXCLUSIVE lock level) are proved only in their named PRs (M4r-1c, 1d, 1f, 1h, 8). A failed proof sends the spec back for revision.
+- The owner's answers are unconfirmed by design until M4r-0.
+
+### Required before merge
+- None.
+
+### Deferred conditions
+- None.
+
+### Optional improvements
+- The two P3s; splitting the jobs items (10.2 #7–#10) out of M4r-0.
+
+## Round 9 — 2026-11-21 · scope: slice
+- **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 2.2 · hash (`git hash-object`) `4939fdefbf374fcbe4f688396a3cb18258c63a01` · `main` = `df7ce21`
+
+**Verdict:** Revision required
+**Model used:** Claude Opus 5.5 (deep tier, PROJECT §6) · **Switch model next step?** No — the fixes are mechanical spec edits; the builder may use its usual tier, and the next spec review stays deep.
+
+### Findings
+
+#### [P2] The Owner-only seed was not carried through the test plan and the Q4 text
+- Category: defect (inconsistency; two builders would read it differently)
+- Rule: Decision 5 (v2.2), §9 M4r-1f done-when
+- Evidence: M4r-1f done-when says "fresh agency → 1 role, 31 ticks, 32 events". But the §7 row "A role, tick, assignment or org change commits with no record" still says "**Seed:** a fresh agency's seed writes exactly 4 `role.created` + 59 `permission.set`" (spec line 149). The §7 first row still tests "the four seeded roles + no-role × 20 codes" (line 131). M4r-3 done-when still says "seeded roles and no-role × 20 codes". Decision 24 (line 50) and §10.1 Q4 (line 234) still describe Q4 as "ticked by default for every starting role", while Decision 5 and §6.1 say the seeded part of Q4 is moot.
+- Failure scenario: M4r-1f is built to its done-when (32 events) and fails the §7 test (63 events), or the other way round. In M4r-0 the owner is asked to confirm a Q4 default that no longer exists.
+- Required correction: Change §7 lines 131 and 149 and the M4r-3 done-when to the Owner-only seed (1 role, 31 ticks, 32 events; table-driven tests use roles the test creates). Restate Q4 in Decision 24 and §10.1 as "`device.revoke` `own` is a tickable catalogue pair; no starting role besides Owner", or withdraw Q4 like Q1 and Q2.
+- Owner: builder
+- Verification: grep for `59`, `63`, `four seeded`, `starting role` and `every starting role` returns only historical-version text.
+- Disposition: before merge
+- Status: open
+
+#### [P2] M4r-0's confirmation gate does not list the new items the owner must state
+- Category: spec/guardrail mismatch (completes Round 8 P1 and the AUTH-03 P2)
+- Rule: Decision 25; §9 M4r-0 row; AUTH-03
+- Evidence: The M4r-0 done-when requires the owner to state "OD-1 (including Decisions 34, 35) and Q3–Q6". It does not name (a) the v2.2 Owner-only seed, which Decision 5 and §6.1 call "a proposal until restated in the M4r-0 PR", or (b) the AUTH-03 exception and the over-broad-tick residual (T20). The uncommitted DECISIONS proposal record lists (b) as "to be confirmed in M4r-0" and says "the §9 AUTH-03 note lands in M4r-0", but neither the spec's M4r-0 row nor Decision 25 requires either.
+- Failure scenario: M4r-0 merges with the owner stating OD-1 and Q3–Q6 only. The Owner-only seed and the AUTH-03 exception then govern M4r-1f and M4r-2/3 with no owner statement, which is exactly the gap Rounds 3–8 closed for the other answers.
+- Required correction: Add the Owner-only seed, the AUTH-03 exception (Decision 34 reading) and the T20 acceptance to Decision 25, the §9 M4r-0 scope and done-when, and §10.1. Say where the PROJECT §9 AUTH-03 note lands (M4r-0, or the `setup` reconcile that follows it).
+- Owner: builder
+- Verification: The M4r-0 row names each item the spec calls "a proposal until M4r-0", and the DECISIONS proposal record lists the same set.
+- Disposition: before merge
+- Status: open
+
+#### [P2] Counting `exp` from scheduled time breaks the main spec's 24 h ceiling without amending it
+- Category: spec/guardrail mismatch (security control numbers)
+- Rule: main spec §4.1 Procrastinate row ("`args_mac` … expiry ≤ 24 h", line 189); Decision 15 (v2.2); §7 "Replay of a copied genuine job"; §8; UNI-02
+- Evidence: v2.2 sets `exp = scheduled_at + TTL` with schedules accepted up to `SKIW_JOBS_MAX_SCHEDULE_DELAY_S` = 7 days. A MAC signed at enqueue can therefore stay valid for about 8 days. The §7 replay row still claims "Expiry ≤ 86 400 s". 10.2 #7 amends only "the encoding", not the ceiling. `SKIW_JOBS_MAX_SCHEDULE_DELAY_S` appears in no §8 row, so it has no bound, no env file and no start-up check.
+- Failure scenario: A copied genuine job can be replayed for up to about 8 days, not 24 h, against a main spec that promises 24 h. A builder following §8 never creates the new setting.
+- Why it matters: The replay window is a stated security bound (T1, §4.2 item (b)), and the main spec governs this slice.
+- Required correction: Pick one. (a) Keep the new base: amend main spec §4.1 through 10.2 #7 to "expiry ≤ scheduled run time + 24 h, schedules ≤ 7 days ahead", update the §7 replay row to the real window, and add `SKIW_JOBS_MAX_SCHEDULE_DELAY_S` to §8 with a bound and its env files. (b) Count `exp` from signing and refuse schedules later than TTL minus a margin. Either way the §8 table lists every value.
+- Owner: builder
+- Verification: §4.1 amendment, §7 row, §8 row and Decision 15 state the same window; M4r-6 done-when tests the boundary of the chosen rule.
+- Disposition: before merge
+- Status: open
+
+### Previous findings (Round 8)
+- P1 provenance: **resolved** by Route A. The DECISIONS entry is now titled "PROPOSAL RECORD, not yet confirmed", says "Decided by: nobody yet" and replaces nothing in §10.1. The completeness gap is the second P2 above.
+- P2 READ COMMITTED: **resolved**. The refusal is in the shared roles-lock function for all four tables and the deferred checks (Decision 27, 28), with REPEATABLE READ and SERIALIZABLE tests in M4r-1d. Re-checked the race reasoning: under READ COMMITTED the deferred check's query sees the other unassigner's commit, and any other isolation is refused at its first write.
+- P2 AUTH-03 exception: **partly resolved**. It is recorded in the proposal entry, but the spec's M4r-0 gate does not require it (second P2 above).
+- P2 `args_mac` base: **resolved** as an ambiguity, but the chosen base creates the third P2 above.
+- P2 seed lock: **resolved**. Flow 5.5 reads first and issues no `ALTER TABLE`; the M4r-1f done-when checks the statement log. Matches `tenancy/seed.py`'s `_lift` pattern [V].
+- P3s: the Role.name allow-list and UNI-02 exceptions were addressed. The M4r-0 split was not taken; optional, still open.
+
+### Self-check audit
+As Round 8. Changes in v2.2 affect AUTH-03 (gate), AUTH-12 and Decision 28 (isolation fix verified), TEN-11 and EVT-05 (`exp` base) and UNI-02 (§8 gap). No new hard-rule issue.
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| `git hash-object` | `4939fdef…` (changed from Round 8's `b7da8987`) |
+| Word diff of v2.0 → v2.2 against the copy read in Round 8 | every change reviewed |
+| grep of v2.2 for leftover four-role, 59/63 and "every starting role" text | stale lines 50, 131, 149, 234 and M4r-3 found |
+| `docs/DECISIONS.md` working-tree diff | proposal record only, "Decided by: nobody yet" |
+| Main spec §4.1 line 189 | "expiry ≤ 24 h" confirmed |
+| `app/tenancy/seed.py` | lift / NO FORCE / restore pattern and per-deploy run confirmed |
+| §8 table | no `SKIW_JOBS_MAX_SCHEDULE_DELAY_S` row |
+| Tests, database | not run (spec review) |
+
+### Residual risks and test gaps
+- Concurrency, `pg_trigger_depth()` and Procrastinate hook behaviour stay `[A]` until M4r-1c / 1d / 1h / 8.
+- The owner's answers are still unconfirmed by design (gate = M4r-0).
+
+### Required before merge
+- The three P2s above.
+
+### Deferred conditions
+- None.
+
+### Optional improvements
+- Split the jobs items (10.2 #7–#10) out of M4r-0 so the jobs track does not wait on the roles answers.
+
+## Round 8 — 2026-11-21 · scope: slice
+- **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 2.0 · hash (`git hash-object`) `b7da898764ed58680e6497e372bff104c05cefe7` · written on `main` = `df7ce21`
+
+**Verdict:** Revision required
+**Model used:** Claude Sonnet 5.5 · **Switch model next step?** Yes — PROJECT §6 puts spec review, auth and data isolation on the deep tier (Claude Opus). This round ran below it. Re-run `review spec` on the deep tier before the spec is treated as approved.
+
+### Findings
+
+#### [P1] Two incompatible rules for what confirms OD-1 and Q3–Q6, and the log entry does not meet the spec's own rule
+- Category: spec/guardrail mismatch (evidence integrity)
+- Rule: spec Decisions 24, 25, §10.1 "Provenance and confirmation", §9 M4r-0 done-when; PROJECT §2
+- Evidence: Decision 25 and §10.1 say the owner's confirmation is "the owner's own dated statement in the M4r-0 PR (a PR comment or review … linked from the entry)" and that a builder-session account is "never copied into DECISIONS as an owner statement". The uncommitted entry in `docs/DECISIONS.md` (branch `docs/m4r-owner-decisions-2026-11-21`, "2026-11-21 — M4-rest: owner decisions on the roles and jobs spec (v2.0)") does exactly that: its source is "stated by the owner in the builder session", item 7 is "agreed by the owner … ('agree')", it also says "Not changed by this entry: the spec file", and it ends "Exception to a rule? no". I cannot see the builder session, the reply "agree", or any owner message that states these decisions. In this session the owner only asked for the review.
+- Failure scenario: The entry merges through the docs PR and is read as the owner's confirmation. The spec still labels OD-1 and Q3–Q6 "proposal … unverified", so M4r-0 either (a) repeats the owner statement the spec demands, which makes the entry redundant, or (b) is skipped because the entry exists, which breaks Decision 25 as written. Rounds 3–7 were spent on exactly this confusion.
+- Why it matters: The permission model, the RLS change on `security_event`, the move of the admin screens to M5 and the reversal of the 2026-11-10 decision all rest on these answers.
+- Required correction: The owner picks one route and the spec is revised to match it. Route A: keep Decision 25 and make the DECISIONS entry a proposal record only, with no "Decided by: owner" line, no "agree" attribution and no claim that it replaces §10.1, until the owner's own statement exists in the M4r-0 PR. Route B: the owner states OD-1, Q3–Q6 and Decision 35 directly (PR comment, review, or a message in a session the reviewer can see). Then Decisions 24 and 25, §10.1, §9 M4r-0 and 10.2 are rewritten to cite that statement and drop the "proposal" labels. In either route, the entry's "Exception to a rule?" field is corrected (see the AUTH-03 finding below).
+- Owner: owner (chooses the route), then builder
+- Verification: Re-review compares every provenance sentence in the spec with the entry and with the evidence visible to the reviewer.
+- Status: open
+
+#### [P2] The last-owner and system-role guards trust a fresh snapshot but only the `org_unit` trigger refuses non-READ COMMITTED
+- Category: defect (material risk to the lockout control)
+- Rule: Decisions 27, 28; spec §7 "Two unassigners remove the last Owner"
+- Evidence: Decision 27 (a) refuses unless `transaction_isolation = 'read committed'` in the `org_unit` trigger only, and §7 tests "REPEATABLE READ writer → refused" for moves only. Decision 28's `user_role_owner_remains` and `role_system_complete` say "under a fresh snapshot" and make the triggers "the guarantee", with no isolation check. In REPEATABLE READ or SERIALIZABLE the check query uses the transaction's snapshot, taken before the other unassigner's commit.
+- Failure scenario [A, not run]: two Owner assignments, two REPEATABLE READ transactions each delete one. The roles lock serialises them, but the second check still sees the first's deleted row as present and passes. The agency ends with no Owner holder.
+- Why it matters: Decision 28 is the recovery-path guarantee (AUTH-12). The spec already treats stale snapshots as a real risk for the tree.
+- Required correction: Take the READ COMMITTED refusal out of the `org_unit` trigger into the shared roles-lock trigger function, so it covers all four tables and the deferred checks. Add the matching REPEATABLE READ and SERIALIZABLE refusal tests for `user_role` and `role` to M4r-1d / M4r-1h.
+- Owner: builder
+- Verification: Live two-connection test: the second unassigner at REPEATABLE READ is refused at its first write, one Owner remains.
+- Disposition: before merge
+- Status: open
+
+#### [P2] AUTH-03 reading is a departure from the rule text, and nothing records it as an exception or records the owner's acceptance of over-broad ticks
+- Category: guardrail mismatch
+- Rule: AUTH-03 ("Permissions match the permission matrix in the spec exactly"; not marked hard); spec Decision 34, §7 "Over-permissive ticks", 10.2 #2 and #11, 10.3 first bullet
+- Evidence: Decision 34 reads the "matrix" as the fixed catalogue plus seeded defaults, while the run-time outcome is whatever the agency's admin ticked. §7 says over-permissive ticks are "Accepted: the owner's call under OD-1". The DECISIONS entry lists no accepted risk and says "Exception to a rule? no".
+- Failure scenario: A later reviewer finds Staff holding `data.export` `agency` and cannot tell whether that is a defect or the accepted outcome of OD-1.
+- Why it matters: This is a deliberate weakening of an authorization rule. The spec itself says the reviewer must judge it. My judgement: the reading is reasonable because the catalogue, scopes, step-up, lines, tenant isolation and Owner protection stay fixed, but it must be a recorded exception.
+- Required correction: The M4r-0 DECISIONS entry records "Exception to a rule: yes — AUTH-03, reading in Decision 34, accepted by owner" and the owner's acceptance of the over-broad-tick residual (T20). PROJECT §9 gets a one-line note naming the reading. This is the same owner statement as the P1 above.
+- Owner: owner / builder
+- Verification: The entry and PROJECT §9 name AUTH-03 and the accepted residual.
+- Disposition: before merge (of M4r-0)
+- Status: open
+
+#### [P2] `args_mac` expiry is ambiguous for delayed and retried jobs
+- Category: ambiguity
+- Rule: Decision 15, Decision 21, 10.2 #9
+- Evidence: `exp` is "Unix seconds", TTL 86 400 s, but the spec does not say whether it counts from enqueue time or from the job's scheduled time. Decision 14 keeps the M0c signature, whose scheduling arguments the spec does not list.
+- Failure scenario: One builder counts from enqueue, so a job deferred by more than 24 h is refused when it runs. Another counts from scheduled time, so the MAC lifetime exceeds the §4.1 ceiling for replay.
+- Why it matters: It decides whether replay of a copied job is bounded and whether legitimately delayed work is silently refused.
+- Required correction: State the base of `exp`, the maximum schedule delay `enqueue_in_tx` accepts, and what happens to a Procrastinate-owned retry that falls past `exp`. M4r-0 #9 repeats it.
+- Owner: builder
+- Verification: M4r-6 test: delayed job past TTL, retry past TTL, frozen-clock boundaries.
+- Disposition: deferred to M4r-6 (spec text fixed in the fix round, tests in M4r-6)
+- Status: open
+
+#### [P2] The starting-role seed may take ACCESS EXCLUSIVE locks on `security_event` on every start
+- Category: material risk (unverified)
+- Rule: Decision 5, Flow 5.5; UNI-15 spirit (deploys must not disturb the running version)
+- Evidence: Flow 5.5 runs `NO FORCE` on `role`, `role_permission` and `security_event` before checking whether the agency already has a system role. `tenancy/seed.py` is a post-migrate step that leaves an existing agency alone, so it runs on every deploy. I believe `ALTER TABLE … NO FORCE ROW LEVEL SECURITY` takes ACCESS EXCLUSIVE; I did not re-read the PostgreSQL docs, so this is unverified.
+- Failure scenario: Every deploy briefly blocks login-path inserts into `security_event` behind the seed's lock, even when nothing is seeded.
+- Required correction: Check "agency has a system role" first and open the `NO FORCE` window only when seeding.
+- Owner: builder
+- Verification: M4r-1f test: a second seed run issues no `ALTER TABLE` (statement log).
+- Disposition: deferred to M4r-1f
+- Status: open
+
+#### [P3] Smaller points
+- M4r-0 bundles the jobs items (10.2 #7–#10) behind the owner's roles answers. They do not depend on them, so the jobs track waits on the owner for no reason. Consider splitting M4r-0.
+- Decision 36 bans reading `Role.name` outside five places. M5's role screens must display names, so M5's spec has to widen the allow-list. Say so in Decision 29's "M5 must".
+- `ORG_MAX_DEPTH` (32) and `ROLE_NAME_MAX` (64) are code or migration constants. UNI-02 puts limits in config. The spec gives its reason ("technical bound"); the reviewer accepts it, but it should be listed in the UNI-02 self-check as an exception.
+
+### Self-check audit
+No builder self-check exists for a spec round; applicability list built first from the spec scope.
+| Rule | Applies? | Reviewer found | Evidence |
+|---|---|---|---|
+| AUTH-01 (hard) | yes | Order kept; role step moves to stored grants | Decision 7, §5.1 |
+| AUTH-03 | yes | Reading departs from text; recorded-exception finding above | Decision 34 |
+| AUTH-09 | yes | No M4-rest route registers a sensitive action; operator commands are host acts | Decision 29 |
+| AUTH-12 | yes | Read per request; lockout isolation-level gap (P2) | Decisions 7, 28 |
+| TEN-02 (hard), TEN-05–08 | yes | New tenant tables and `security_event` RLS have read and write tests planned | §4, Decision 33, §7 |
+| TEN-03 | yes | `security_event` stays append-only, no UPDATE/DELETE | Decision 30 |
+| TEN-09 (hard) | yes | `set_config(…, true)` form for `skiw.operator` | Decision 12 |
+| TEN-11 (hard) | yes | Tenant for jobs comes from the verified MAC | Decisions 14–16 |
+| TEN-12 | n-a here | No admin bypass added; the seed uses the existing `NO FORCE` pattern | Decision 5 |
+| EVT-01, 03, 05, 06 | yes | Atomic enqueue, unknown args ignored, `failed` retry command, schedules in the worker | Decisions 14, 16, 18, 21 |
+| UNI-02, 04, 06, 09, 15, 16 | yes | UNI-02 note (P3); Semgrep and import-linter gates planned; croniter pin; no names in events; additive migrations; runbooks in 5b, 5c, 8, 12 | §3, §9 |
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| `git hash-object` of the spec | `b7da898764ed58680e6497e372bff104c05cefe7` |
+| Read the whole spec, `agents/START.md`, reviewer role, `PROJECT.md` (parts), auth / tenancy-rls / events-jobs / universal packs, Rounds 3–7, the `DECISIONS.md` diff | done |
+| Arithmetic: 31 pairs; seed 31 + 12 + 11 + 5 = 59 ticks, 63 events; 15 + 5 = 20 route codes; PR counts 24 / 23; line totals 4 080 + 2 510 + 260 = 6 850 | all consistent |
+| Seed table against main spec §6 (lines 541–565) | matches, with the stated changes (General dropped, Staff "assigned" cells unticked, ✓ → agency, Q4 own-device revoke) |
+| `[V]` references: `runworker.py` still calls `procrastinate worker`; `SKIW_DEPLOYMENT_AGENCY` exists in `config/env.py`; `schema.py` lists `role` as global but the table does not exist yet (so no UNI-15 issue); Dockerfile uid 10001; Postgres 17.11; `ci.env` 30/40; staging/production values empty; croniter 6.2.4 locked; `skiw_auth_lookup` NOLOGIN BYPASSRLS | confirmed |
+| Procrastinate 3.10 hooks, PostgreSQL trigger and lock semantics, `pg_trigger_depth()` behaviour, builder session content | not verified; marked `[A]` in the spec |
+| Tests, database, browser | not run (spec review) |
+
+### Residual risks and test gaps
+- Everything concurrency-related is design-level until M4r-1d / 1h run.
+- The owner's answers are not verifiable from what the reviewer can see (P1).
+- This round ran below the deep tier.
+
+### Required before merge
+- P1 provenance route chosen and spec / entry aligned.
+- P2 isolation-level guard; P2 AUTH-03 exception record (with M4r-0).
+
+### Deferred conditions
+- `args_mac` expiry base → M4r-6; seed lock window → M4r-1f.
+
+### Optional improvements
+- The three P3 points.
+
 ## Round 7 — 2026-11-20 · scope: slice
 - **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 1.4 · hash `17b3f78376be4da968ebe338fb120f45b7ffd55b`
 - **Model used:** GPT-6 (Codex; project deep-tier mapping unavailable) · **Switch model next step?** Yes — project specifies deep tier for auth, tenancy and spec review.
