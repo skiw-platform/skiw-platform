@@ -352,7 +352,7 @@ def bases(text: str) -> dict[str, str]:
 
 # The one apk layer allowed (DECISIONS 2026-11-11, "base images krb5-libs"): only these packages,
 # each at a minimum fixed version, from Alpine's signed repository; `>=` is a deliberate exception.
-APK_FIX = r'apk add --no-cache( "(krb5-libs|libxslt)>=[0-9][0-9.]*-r[0-9]+")+'
+APK_FIX = r'apk add --no-cache( "(krb5-libs|libxslt|libxml2)>=[0-9][0-9.]*-r[0-9]+")+'
 
 
 def check_dockerfile(text: str) -> None:
