@@ -1634,3 +1634,11 @@
 - **Scope / affects:** `infra/host/backup/predeploy/Dockerfile`, `infra/host/tests/test_predeploy.py`, this file. No code, setting, dependency or runbook change.
 - **Versions:** libxml2 2.13.9-r3 (minimum), golang 1.27.4-alpine3.24 (digest `70bd7dde…`).
 - **Decided by:** owner (2026-11-21, chat: "yes, open the libxml2 fix PR"); the golang bump was found while verifying and is reported in the PR for the owner and reviewer to accept. Built by the Sonnet builder.
+
+## 2026-11-21 — M4-rest: proposed owner decisions on the roles and jobs spec (v2.3) — PROPOSAL RECORD, not yet confirmed
+- **Status:** proposal record only. The owner's confirmation is the owner's own dated statement in the M4r-0 PR (spec Decision 25, §10.1), linked from a later entry. Until then OD-1 and Q3–Q6 stay "proposal … unverified" in the spec. This entry replaces nothing in §10.1.
+- **What the builder session recorded (builder's account, not an owner statement):** (1) roles are agency data, no hard-coded permissions per role (spec OD-1; Q1 and Q2 withdrawn); (2) admin screens and the owner factor reset move to M5, operator commands until then (Q3); (3) a user may revoke their own paired browser (Q4); (4) role and org changes are recorded as a database row atomic with the change (Q5); (5) those rows are isolated per agency (Q6); (6) the Owner role always holds every permission and each agency keeps at least one owner (Decisions 28, 34); (7) escalation rule, Decision 35. **Also proposed 2026-11-21:** only the Owner role is seeded; the owner creates any other role later (spec Decision 5, v2.3).
+- **Accepted-risk and exception items to be confirmed in M4r-0:** AUTH-03 is read as in spec Decision 34 (fixed catalogue; run-time permissions are what the agency's admin ticked); the over-broad-tick residual (spec T20) is accepted by the owner.
+- **Not changed by this entry:** `PROJECT.md` beyond the §2 listing of the slice spec (the PROJECT §9 AUTH-03 note lands in the `setup` reconcile that follows M4r-0, after the owner's statement); main spec v1.23 text changes (M4r-0, spec §10.2).
+- **Exception to a rule?** proposed, not yet decided: AUTH-03, reading in spec Decision 34, to be accepted by the owner in the M4r-0 PR.
+- **Decided by:** nobody yet. Pending: the owner's own statement in the M4r-0 PR.
