@@ -5,7 +5,7 @@
 # same libssl3/libcrypto3 as the postgres base; pip removed), and age v1.3.2 built from its source
 # archive, checked by SHA-256, with the pinned Go. CI scans it on every PR and publishes it by digest
 # (M1h); hosts name that digest in SKIW_BACKUP_IMAGE. Never built on a host.
-FROM golang:1.27.3-alpine3.24@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS age
+FROM golang:1.27.4-alpine3.24@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS age
 ADD --checksum=sha256:b07c28c6c4bdafa272073a310b75bc22c49da8904585a89c30e5ca4233e63843 \
     https://github.com/FiloSottile/age/archive/refs/tags/v1.3.2.tar.gz /src/age.tar.gz
 # Modules come from the default proxy and are checked against the archive's go.sum (and GOSUMDB).
@@ -23,9 +23,9 @@ RUN mkdir -p /out/usr/local/bin /out/usr/local/lib \
 
 FROM postgres:17.11-alpine3.24@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
 # REMOVE-WHEN-UPSTREAM-REBUILDS (DECISIONS 2026-11-11, "base images krb5-libs"): the postgres base
-# ships krb5-libs 1.22.2-r1 and libxslt 1.1.43-r3, both with fixed HIGH CVEs, and Docker Hub has no
-# rebuild yet. These are the only apk packages allowed here (test_predeploy.py); `>=` is deliberate.
-RUN apk add --no-cache "krb5-libs>=1.22.3-r0" "libxslt>=1.1.43-r4"
+# ships krb5-libs 1.22.2-r1, libxslt 1.1.43-r3 and libxml2 2.13.9-r2, all with fixed HIGH CVEs, and Docker
+# Hub has no rebuild yet (libxml2: DECISIONS 2026-11-21, "dump image libxml2"). These are the only apk packages allowed here (test_predeploy.py); `>=` is deliberate.
+RUN apk add --no-cache "krb5-libs>=1.22.3-r0" "libxslt>=1.1.43-r4" "libxml2>=2.13.9-r3"
 COPY --from=python /out/ /
 COPY --from=age /out/age /usr/local/bin/age
 RUN rm /usr/local/bin/gosu \
