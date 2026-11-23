@@ -5,16 +5,12 @@ names only the columns the row needs."""
 import uuid
 from collections.abc import Mapping
 
-from django.db.backends.utils import CursorWrapper
-
 from accounts.factor_model import TOTP_SECRET_CT_LENGTH
 from accounts.stepup_model import EVIDENCE_LENGTH
-from tenancy.tests.isolation import IsolationCase
+from tenancy.tests.isolation import Executes, IsolationCase
 
 
-def _app_user(
-    cursor: CursorWrapper, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
-) -> uuid.UUID:
+def _app_user(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]) -> uuid.UUID:
     row = uuid.uuid4()
     cursor.execute(
         "INSERT INTO public.app_user (id, agency_id, email, display_name) VALUES (%s, %s, %s, %s)",
@@ -24,7 +20,7 @@ def _app_user(
 
 
 def _user_factor(
-    cursor: CursorWrapper, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
+    cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
 ) -> uuid.UUID:
     row = uuid.uuid4()
     cursor.execute(
@@ -36,7 +32,7 @@ def _user_factor(
 
 
 def _session_revocation(
-    cursor: CursorWrapper, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
+    cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
 ) -> uuid.UUID:
     row = uuid.uuid4()
     cursor.execute(
@@ -47,7 +43,7 @@ def _session_revocation(
 
 
 def _auth_stepup(
-    cursor: CursorWrapper, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
+    cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
 ) -> uuid.UUID:
     row = uuid.uuid4()
     cursor.execute(
@@ -61,6 +57,27 @@ def _auth_stepup(
             "0" * 64,
             b"\x00" * EVIDENCE_LENGTH,
         ],
+    )
+    return row
+
+
+def _role(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]) -> uuid.UUID:
+    row = uuid.uuid4()
+    cursor.execute(
+        "INSERT INTO public.role (id, agency_id, name) VALUES (%s, %s, %s)",
+        [row, agency, f"Isolation role {row}"],
+    )
+    return row
+
+
+def _role_permission(
+    cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
+) -> uuid.UUID:
+    row = uuid.uuid4()
+    cursor.execute(
+        "INSERT INTO public.role_permission (id, agency_id, role_id, permission_code, scope)"
+        " VALUES (%s, %s, %s, 'client.view', 'own')",
+        [row, agency, parents["role_id"]],
     )
     return row
 
@@ -82,5 +99,13 @@ CASES = [
         _auth_stepup,
         frozenset({"SELECT", "INSERT"}),
         {**USER, "factor_id": "public.user_factor"},
+    ),
+    # SELECT only until M4r-1g: the harness writes their rows as the owner (tenancy isolation.py).
+    IsolationCase("public.role", _role, frozenset({"SELECT"})),
+    IsolationCase(
+        "public.role_permission",
+        _role_permission,
+        frozenset({"SELECT"}),
+        {"role_id": "public.role"},
     ),
 ]

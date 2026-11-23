@@ -25,10 +25,24 @@ def test_refused_accepts_only_the_expected_sqlstate() -> None:
 
 @pytest.mark.parametrize(
     ("table", "commands"),
-    [("client", {"SELECT", "INSERT"}), ("public.client", {"SELECT"}), ("public.c", {"TRUNCATE"})],
+    [
+        ("client", {"SELECT", "INSERT"}),
+        ("public.client", {"INSERT"}),
+        ("public.client", {"SELECT", "UPDATE"}),
+        ("public.client", {"SELECT", "DELETE"}),
+        ("public.c", {"TRUNCATE"}),
+    ],
 )
-def test_a_case_needs_a_qualified_name_and_select_and_insert(
+def test_a_case_needs_a_qualified_name_select_and_insert_or_select_only(
     table: str, commands: set[str]
 ) -> None:
     with pytest.raises(ValueError, match="isolation case"):
         IsolationCase(table, lambda cursor, agency, parents: uuid.uuid4(), frozenset(commands))
+
+
+def test_a_select_only_case_is_accepted() -> None:
+    """M4r-1a: `role` and `role_permission` are SELECT only; the owner writes their rows."""
+    case = IsolationCase(
+        "public.c", lambda cursor, agency, parents: uuid.uuid4(), frozenset({"SELECT"})
+    )
+    assert case.commands == {"SELECT"}
