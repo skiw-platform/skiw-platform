@@ -82,6 +82,37 @@ def _role_permission(
     return row
 
 
+def _org_unit(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]) -> uuid.UUID:
+    """With no parent: the agency's one root, made on first use and kept. Else a unit under it."""
+    if "parent_id" not in parents:
+        cursor.execute(
+            "INSERT INTO public.org_unit (id, agency_id, kind, name)"
+            " VALUES (gen_random_uuid(), %s, 'agency', 'Isolation agency') ON CONFLICT DO NOTHING",
+            [agency],
+        )
+        cursor.execute(
+            "SELECT id FROM public.org_unit WHERE agency_id = %s AND parent_id IS NULL", [agency]
+        )
+        return uuid.UUID(str(cursor.fetchone()[0]))
+    row = uuid.uuid4()
+    cursor.execute(
+        "INSERT INTO public.org_unit (id, agency_id, parent_id, kind, name)"
+        " VALUES (%s, %s, %s, 'unit', 'Isolation unit')",
+        [row, agency, parents["parent_id"]],
+    )
+    return row
+
+
+def _user_role(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]) -> uuid.UUID:
+    row = uuid.uuid4()
+    cursor.execute(
+        "INSERT INTO public.user_role (id, agency_id, user_id, role_id, org_unit_id, line)"
+        " VALUES (%s, %s, %s, %s, %s, 'both')",
+        [row, agency, parents["user_id"], parents["role_id"], parents["org_unit_id"]],
+    )
+    return row
+
+
 USER = {"user_id": "public.app_user"}
 CASES = [
     IsolationCase("public.app_user", _app_user, frozenset({"SELECT", "INSERT", "UPDATE"})),
@@ -101,11 +132,21 @@ CASES = [
         {**USER, "factor_id": "public.user_factor"},
     ),
     # SELECT only until M4r-1g: the harness writes their rows as the owner (tenancy isolation.py).
+    # org_unit's self-FK: its parent is the agency root, made by `_org_unit` with no parents.
     IsolationCase("public.role", _role, frozenset({"SELECT"})),
     IsolationCase(
         "public.role_permission",
         _role_permission,
         frozenset({"SELECT"}),
         {"role_id": "public.role"},
+    ),
+    IsolationCase(
+        "public.org_unit", _org_unit, frozenset({"SELECT"}), {"parent_id": "public.org_unit"}
+    ),
+    IsolationCase(
+        "public.user_role",
+        _user_role,
+        frozenset({"SELECT"}),
+        {**USER, "role_id": "public.role", "org_unit_id": "public.org_unit"},
     ),
 ]

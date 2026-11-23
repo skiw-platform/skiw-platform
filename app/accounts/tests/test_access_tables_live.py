@@ -19,7 +19,7 @@ from tenancy.tests.isolation import B
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 
 APP_ROLE = "skiw_app"
-TABLES = ("permission", "role", "role_permission")
+TABLES = ("permission", "role", "role_permission", "org_unit", "user_role")  # + M4r-1b
 TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
 AGENCY = uuid.UUID(os.environ.get("SKIW_DEPLOYMENT_AGENCY_ID", str(uuid.UUID(int=0))))
 
@@ -140,4 +140,4 @@ def test_the_only_grants_are_skiw_app_select() -> None:
         " WHERE c.oid = ANY(%s::regclass[]) AND a.grantee <> c.relowner",
         list(TABLES),
     )
-    assert sorted(rows) == [(table, "skiw_migrator", APP_ROLE, "SELECT") for table in TABLES]
+    assert sorted(rows) == sorted((table, "skiw_migrator", APP_ROLE, "SELECT") for table in TABLES)
