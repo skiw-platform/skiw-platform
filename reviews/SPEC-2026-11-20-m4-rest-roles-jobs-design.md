@@ -1,5 +1,41 @@
 # Review — 2026-11-20-m4-rest-roles-jobs-design
 
+## Round 12 — 2026-11-23 · scope: spec-change slice (v2.4 → v2.5: Round 11 fix)
+- **Spec review:** spec path `docs/specs/2026-11-20-m4-rest-roles-jobs-design.md` · version 2.5 · hash (`git hash-object`) bb262ec4fd9a7daa05eb9b1e5ecd49f34cc930e9 (branch `docs/slice-spec-v2-4` at 0fee1af = `origin/docs/slice-spec-v2-4`, PR 173; working tree clean for this file)
+- **Previous round:** Round 11, v2.4 hash 437249fd (Revision required). Last approved: Round 10, v2.3 hash 38b7be31.
+- **Delta 1e6af50 → 0fee1af:** 29 change groups, all provenance and status text (header, Supersedes, §1, §2, Decisions 5, 24, 25, 33, §6 note, §7 seed totals, §9 M4r-0 row, M5 note, §10.1, §10.3). No decision, data-model, test or number changed (checked against the full word diff).
+
+**Verdict:** Approved
+**Model used:** Claude Opus 5.5 (deep) · **Switch model next step?** No
+
+### Findings
+No blocking findings.
+
+### Round 11 findings
+- [P2] stale "proposal / unverified / v1.22 governs" state: **resolved.** Header and Supersedes now name main spec v1.24 (`e47de4ed`) and PR 170 (`594284e`); Decisions 5, 24, 25, 33, §6 and §10.1 record OD-1 (with 34, 35), Q3–Q6, the Owner-only seed, AUTH-03 and T20 as owner decisions of 2026-11-21 (issuecomment-7063756554, confirmed to the reviewer 2026-11-22, DECISIONS 2026-11-21), each matching the proposal; §9 M4r-0 row marked done; Q6 notes one agency per deployment (v1.24). The builder-session account is kept and labelled history. Residual sweep for "proposal", "unverified here", "OPEN until", "v1.22 governs", `79a9a40e`: only the v2.2 version-history line and the §10.1 history paragraph (l.229, under "History — provenance and confirmation before M4r-0").
+- [P3] TTL × 23/24 rounding rule: still open, optional; settle in M4r-6.
+
+No prompt-injection text found.
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| `git hash-object <spec>`; `git rev-parse origin/docs/slice-spec-v2-4:<spec>` | both bb262ec4 |
+| word diff 1e6af50 → 0fee1af (29 groups) read in full | provenance/status only |
+| residual sweep (above) | history lines only |
+
+### Residual risks and test gaps
+- As Round 10: `[A]` items are proven in M4r-1c, 1d, 1f, 1h and 8.
+
+### Required before merge
+- none
+
+### Deferred conditions
+- none
+
+### Optional improvements
+- P3 rounding rule (M4r-6).
+
 ## Round 11 — 2026-11-23 · scope: spec-change slice (v2.3 → v2.4: align with main spec v1.24)
 - **Spec review:** spec path `docs/specs/2026-11-20-m4-rest-roles-jobs-design.md` · version 2.4 · hash (`git hash-object`) 437249fd78d4439cacfd11daaccee8e017c4b399 (branch `docs/slice-spec-v2-4` at 1e6af50 = `origin/docs/slice-spec-v2-4`, PR 173 open; working tree clean for this file)
 - **Previous approved version:** v2.3, hash 38b7be31f6dc59ac9425b3c6297ccdd47597c84d (Round 10; the blob on `origin/main`).
