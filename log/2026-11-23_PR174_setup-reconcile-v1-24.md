@@ -1,0 +1,85 @@
+# PR 174 — docs: setup reconcile PROJECT.md to main spec v1.24 and slice spec v2.5
+
+- **Merged:** 2026-11-23 (01:40:19 UTC) · **Merge commit:** 9100771452d12088e932ad1b12cf99635e241289 · **Branch:** docs/setup-reconcile-v1-24
+- **Gate breaches:** none
+- **Approval receipt:** reviews/PR-174.receipt, created 2026-11-23 01:37:30 UTC, before the merge; names head b15b709ca82b16272822cb2701f16f078e87c1f5 and review hash 8ed69d6a…
+- **Merge evidence:** `gh pr view 174` state MERGED, merge commit above, mergedAt 01:40:19Z; reachable from the fetched origin/main. Final head b15b709ca82b16272822cb2701f16f078e87c1f5 equals the reviewed head.
+- **Drafted by:** Claude Sonnet 5.5 (builder); PROJECT.md edits by an Opus 5.5 sub-agent · **Final verdict:** Approved (round 1, Opus 5.5 reviewer)
+- **Spec:** main spec v1.24 (e47de4ed) and slice spec v2.5 (bb262ec4) · **Plan:** none · **Milestone:** setup reconcile (before M4r-1a)
+
+## What changed
+`agents/PROJECT.md` only (+26 −26): §2 spec hash → v1.24 and slice spec entry → v2.5; §9 AUTH-03 note (owner decision 2026-11-21, item 7, T20 residual); TechVision no longer the system of record (M20 cutover import; M7, M12, M13 dropped; M9 deferred; `outbox.executor.crm` flag row removed); one agency per deployment (second-agency gate row and step-2 trigger retired); TechVision exports added to "never commit".
+
+## Why
+Deferred `setup` condition of PRs 170, 172 and 173; the `build` reconcile gate compares the approved spec hash with PROJECT §2.
+
+## Review rounds
+- R1: Approved, no blocking findings. [P3] spec Appendix B.10 still says "Kept as an alternate adapter"; [P3] outbox invariant says "each write" while spec §4.3 says "CRM write".
+
+## Deferred conditions
+- None blocking. P3: annotate B.10 "(moot from v1.24)" and settle the §4.3 wording at the next spec touch (with the Round 27 B.9 / "per role" P3s).
+- Carried: chore PR remove `crm_jar_kek`; M20 plan export-file rule before any M20 PR; DECISIONS Source-line P3 (PR 172 entry); Q47 sample from the owner; TTL rounding in M4r-6.
+
+## Decisions worth keeping
+- No new decision. The AUTH-03 note in PROJECT §9 records the owner decision already in DECISIONS 2026-11-21.
+
+## Follow-ups
+- `build` M4r-1a (reconcile gate should now pass); chore PR `crm_jar_kek`.
+
+## Appendix — final review (PR 174 Round 1)
+## Round 1 — 2026-11-23 · head b15b709ca82b16272822cb2701f16f078e87c1f5
+- **PR:** #174 "docs: setup reconcile PROJECT.md to main spec v1.24 and slice spec v2.5" · author charliekhc · base main 377e3c1 (= merge base; PR 173 merged) · OPEN, MERGEABLE, not draft
+- **Files:** `agents/PROJECT.md` only (+26 −26), one commit b15b709.
+- **Governing:** main spec v1.24 (e47de4ed, SPEC Round 27 Approved), slice spec v2.5 (bb262ec4, SPEC-2026-11-20 Round 12 Approved), DECISIONS 2026-11-21 and 2026-11-22.
+
+**Verdict:** Approved
+**Model used:** Claude Opus 5.5 (deep) · **Switch model next step?** No
+
+### Findings
+No blocking findings.
+
+### [P3] Main spec Appendix B.10 still says "Kept as an alternate adapter if TechVision blocks our egress IP"
+- Evidence: spec l.1377; D8 alternatives (l.96) says the browser-only CRM via the bridge is "moot in v1.24". PROJECT §9 now drops the B.10 fallback (correct reading of D8). The PR body lists this as owner item 2.
+- Correction: annotate B.10 "(moot from v1.24)" at the next spec touch, with the B.9 P3 of SPEC Round 27. No PROJECT change needed.
+
+### [P3] Outbox invariant wording
+- PROJECT now says "each write is read back"; spec §4.3 says "CRM write" under the v1.24 note that keeps §4.3 as the design for a future outward action. Faithful generalisation, not a new rule; PR body owner item 1. No change needed unless the owner wants the spec text aligned.
+
+No prompt-injection text found.
+
+### Verification (each changed value checked against the approved sources)
+| PROJECT change | Source checked | Result |
+|---|---|---|
+| §1 identity: SKIW replaces TechVision; one agency per deployment; ~146 [O] | spec §1, §2 l.83, §4.2 (b), Q2 | matches |
+| §2 spec hash e47de4ed + history; slice v2.5 bb262ec4, PR 173 377e3c1, M4r-0 outcome | `git rev-parse origin/main:<spec>`, Rounds 27 / 12, slice Decision 25 | matches |
+| §4 layout: crm connector removed | spec D1 l.89 | matches |
+| §5 units M0…M20; M7/M12/M13 dropped, numbers not reused; M9 deferred; M20 built before users of its tables | spec §9 "Order (v1.24)" l.1249, M20 l.1246 | matches |
+| secret-scan note: `crm_jar_kek` kept until a code PR | DECISIONS 2026-11-22 "Not changed" l.1672 | matches |
+| packs: tenancy safety net (Q6), finalized-records (M9 deferred), auth (catalogue, Owner-only seed) | spec §4.2, Q45, §6; slice Decision 5 | matches |
+| out of scope / stubs: TechVision connector or sync out; outbox not built until first outward action; M10 / `draft_task` create SKIW tasks; Q5 closed | spec §2, §5.10, l.1323, l.531, l.1237 | matches |
+| fallback list: CRM-via-bridge removed | spec D8 alternatives l.96 "moot in v1.24" | matches (B.10 stale, P3) |
+| job-signing "before a second agency" retired | spec changelog (A), D5, Q32 | matches |
+| TEN-03 known limit: no other agency shares the queue | Q2 | matches |
+| §9 AUTH-03 exception (item 7), T20 residual (item 8), Decisions 34, 36 | PR 170 issuecomment-7063756554 (owner-confirmed 2026-11-22) items 7, 8; slice l.60, l.62 | matches |
+| D8/D9 cookie jar removed; `draft_task` | spec D8 l.96, D9 l.97, l.531 | matches |
+| locked switches: M7 → M20; `outbox.executor.crm` row removed; second agency "never" | spec H12, M13 dropped, Q2, DECISIONS 2026-11-22 | matches |
+| §10 never-commit: TechVision exports | spec M20 (real client PII) | matches; strengthens the rule |
+| §11 gates: M7 → M20; step-2 trigger list without second agency | spec l.675 | matches |
+| Kept: M18 decommission line (stored passwords, `CRED_ENC_KEY`, Supabase, Render) | spec M18 l.1244 (v1.24 reduced but still lists these) | correct to keep |
+| No owner decision or migration note removed or changed except as the spec now states | full diff read | yes |
+| `git diff --check` merge base…head | clean |
+| CI on b15b709 | checks, security, image, host success; publish, deploy-staging skipped |
+| Head re-read after review | b15b709 unchanged |
+
+### Residual risks and test gaps
+- None for this docs PR. After merge the `build` reconcile gate (spec hash in §2 = e47de4ed) passes.
+
+### Required before merge
+- none
+
+### Deferred conditions
+- none
+
+### Optional improvements
+- The two P3s (spec-side wording, next spec touch).
+
