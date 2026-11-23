@@ -1653,3 +1653,22 @@
 - **Applied by:** M4r-0 (this PR): main spec v1.22 → v1.23 with the 16 changes of the slice spec's §10.2.
 - **Exception to a rule?** **yes — AUTH-03**, the reading in spec Decision 34, accepted by the owner (item 7); and the accepted residual of item 8 (spec T20). The one-line AUTH-03 note in `PROJECT.md` §9 lands in the `setup` reconcile that follows M4r-0.
 - **Decided by:** owner (2026-11-21), items 1–8, in the PR comment linked above.
+
+## 2026-11-22 — Main spec v1.24: one agency per deployment, SKIW replaces the TechVision CRM
+- **Source:** the owner's statement on PR 172 (https://github.com/skiw-platform/skiw-platform/pull/172#issuecomment-7087756355). The text was drafted in the builder session from the owner's chat answers of 2026-11-22, approved by the owner, and posted with `gh` from the owner's GitHub account at the owner's instruction ("post it", 2026-11-23). The owner's direct confirmation in the reviewer session that it is their own statement is **not yet recorded**; the reviewer may ask for it, as on PR 170.
+- **Decision (the comment, verbatim; the linked comment governs):**
+  > I'm stating my decisions for the main spec v1.24:
+  >
+  > 1. **One agency per deployment.** SKIW is a custom CRM for SKIW only. I will not host a second agency on the same server. If another agency ever needs this, it gets its own separate deployment. This answers Q2, and the second-agency gate is retired. The per-agency isolation in the database stays as a safety net.
+  > 2. **SKIW replaces TechVision.** After a complete one-time cutover, I no longer use TechVision. There is no live sync and no period of running both.
+  > 3. **SKIW owns all five record types** that TechVision held: clients, tasks, insurance, assets and cash-flow. Each needs its own screens and an import.
+  > 4. **Export route:** I will export from TechVision as CSV first. If CSV can't carry everything, a one-off script is built later, by a reviewed change. I'll provide a sample export later (Q47).
+  > 5. **FAME and ePartner stay as they are.** The browser bridge remains read-only. The ePartner import now fills SKIW's own records.
+  > 6. **Supabase and Render** are test apps with no real data. There is no data import from them, and they are only decommissioned.
+  > 7. **Approval step:** the "a person approves before it is sent" outbox is not built until the first outward action exists (Q45). Its agency setting is built later (Q46). The rule stays for any future outward action.
+- **Open:** Q47 (the TechVision CSV columns, stable ids and client links, the asset and cash-flow fields, and a sample export, to come from the owner later); Q45 and Q46 are answered as in item 7. M20's rehearsal waits for the sample; nothing in M4-rest does.
+- **Supersedes:** the main-spec non-goal "Not a CRM replacement. TechVision CRM stays the system of record" (v1.23 §2, §10 Q4) and the second-agency gate of 2026-10-10 (Q2, Q32). The older entries are not rewritten.
+- **Applied by:** this PR (main spec v1.23 → v1.24): Q2 answered; Q4, Q5, Q6, Q7 and Q27 closed as not needed; M7, M12 and M13 dropped; M9 deferred; M15 and M18 rewritten; new M20 (SKIW CRM records and the cutover import); D5, D8, D9, D11, D18, §4.1 tables, §4.2 (b), flows 5.2, 5.5, 5.6, 5.8, 5.9, 5.10, T1, T2, T10, T11, §8 and H2 revised.
+- **Not changed:** no code. `crm_jar_kek` is still provisioned by existing infra code; its removal is a later code PR.
+- **Exception to a rule?** no.
+- **Decided by:** owner (2026-11-22), items 1–7, in the PR comment linked above.
