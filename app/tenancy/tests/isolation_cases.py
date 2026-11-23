@@ -5,16 +5,12 @@ grants all four commands; `child` is append-only and has a composite FK to `pare
 import uuid
 from collections.abc import Mapping
 
-from django.db.backends.utils import CursorWrapper
-
-from tenancy.tests.isolation import IsolationCase
+from tenancy.tests.isolation import Executes, IsolationCase
 
 SCHEMA = "tenancy_fixture"
 
 
-def _parent(
-    cursor: CursorWrapper, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
-) -> uuid.UUID:
+def _parent(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]) -> uuid.UUID:
     row = uuid.uuid4()
     cursor.execute(
         "INSERT INTO tenancy_fixture.parent (id, agency_id) VALUES (%s, %s)", [row, agency]
@@ -22,7 +18,7 @@ def _parent(
     return row
 
 
-def _child(cursor: CursorWrapper, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]) -> uuid.UUID:
+def _child(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]) -> uuid.UUID:
     row = uuid.uuid4()
     cursor.execute(
         "INSERT INTO tenancy_fixture.child (id, agency_id, parent_id) VALUES (%s, %s, %s)",

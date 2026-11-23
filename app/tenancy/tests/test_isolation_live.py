@@ -5,12 +5,11 @@ import uuid
 from collections.abc import Mapping
 
 import pytest
-from django.db.backends.utils import CursorWrapper
 
 from tenancy.check import check, tenant_tables
 from tenancy.tests import isolation
 from tenancy.tests.conftest import COLUMNS, build, migrator
-from tenancy.tests.isolation import COMMANDS, IsolationCase
+from tenancy.tests.isolation import COMMANDS, Executes, IsolationCase
 from tenancy.tests.isolation_cases import SCHEMA
 
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db", "fixture_pair")]
@@ -94,7 +93,7 @@ def test_every_composite_fk_is_a_declared_parent() -> None:
     assert found == declared
 
 
-def _leaky(cursor: CursorWrapper, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]) -> uuid.UUID:
+def _leaky(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]) -> uuid.UUID:
     row = uuid.uuid4()
     cursor.execute(
         "INSERT INTO tenancy_fixture.leaky (id, agency_id) VALUES (%s, %s)", [row, agency]

@@ -1,18 +1,24 @@
 """The TEN-08 isolation harness (spec §4.2; plan M4c-7a; DECISIONS "M4c-7a"). Apps list tenant
 tables as `CASES` in `<app>/tests/isolation_cases.py`; a case's `insert(cursor, agency_id, parents)`
-adds one row and returns its id, `parents` mapping each composite-FK column to a parent row id."""
+adds one row and returns its id, `parents` mapping each composite-FK column to a parent row id.
+
+A case without INSERT (skiw_app may only SELECT, as `role` until M4r-1g) gets its rows from the
+table owner, skiw_migrator, under transaction-local NO FORCE (the tenancy.seed pattern); every
+check still reads and writes as skiw_app."""
 
 import importlib
+import os
 import re
 import uuid
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Protocol
 
+import psycopg
 from django.apps import apps
 from django.db import DatabaseError, connection, transaction
-from django.db.backends.utils import CursorWrapper
 
 from tenancy.binding import with_agency
 
@@ -27,7 +33,15 @@ TOUCH = "UPDATE {t} SET agency_id = agency_id WHERE id = %s"
 MOVE = "UPDATE {t} SET agency_id = %s WHERE id = %s"
 DELETE = "DELETE FROM {t} WHERE id = %s"
 
-Insert = Callable[[CursorWrapper, uuid.UUID, Mapping[str, uuid.UUID]], uuid.UUID]
+
+class Executes(Protocol):
+    """Django's CursorWrapper (skiw_app) or a psycopg cursor (the owner, for SELECT-only cases)."""
+
+    # Any: Django's stubs and psycopg type the parameters differently; both accept these lists.
+    def execute(self, sql: str, params: Sequence[Any], /) -> object: ...
+
+
+Insert = Callable[[Executes, uuid.UUID, Mapping[str, uuid.UUID]], uuid.UUID]
 
 
 @dataclass(frozen=True)
@@ -40,8 +54,10 @@ class IsolationCase:
     def __post_init__(self) -> None:
         if not QUALIFIED.fullmatch(self.table):
             raise ValueError(f"isolation case {self.table!r}: use a schema-qualified name")
-        if not {"SELECT", "INSERT"} <= self.commands <= COMMANDS:
-            raise ValueError(f"isolation case {self.table}: commands must include SELECT, INSERT")
+        if not {"SELECT"} <= self.commands <= COMMANDS:
+            raise ValueError(f"isolation case {self.table}: commands must include SELECT")
+        if "INSERT" not in self.commands and self.commands != {"SELECT"}:
+            raise ValueError(f"isolation case {self.table}: UPDATE or DELETE without INSERT")
 
 
 def registry() -> dict[str, IsolationCase]:
@@ -81,7 +97,7 @@ Cases = Mapping[str, IsolationCase]
 
 def make_row(cases: Cases, case: IsolationCase, agency: uuid.UUID) -> uuid.UUID:
     """One committed row of `case` for `agency`, with a fresh parent row (same agency) per FK."""
-    return _insert(case, agency, _parents(cases, case, agency), bound=agency)
+    return _commit(case, agency, _parents(cases, case, agency), bound=agency)
 
 
 def _parents(cases: Cases, case: IsolationCase, agency: uuid.UUID) -> dict[str, uuid.UUID]:
@@ -98,6 +114,31 @@ def _insert(
     binding = transaction.atomic() if bound is None else with_agency(bound)
     with binding, connection.cursor() as cursor:
         return case.insert(cursor, agency, parents)
+
+
+def _owner_insert(
+    case: IsolationCase, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
+) -> uuid.UUID:
+    """`case.insert` committed by the table owner under transaction-local NO FORCE; FORCE is set
+    again before the commit, and a raise rolls both back."""
+    with (
+        psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn,
+        conn.transaction(),
+        conn.cursor() as cursor,
+    ):
+        cursor.execute(f"ALTER TABLE {case.table} NO FORCE ROW LEVEL SECURITY")
+        row = case.insert(cursor, agency, parents)
+        cursor.execute(f"ALTER TABLE {case.table} FORCE ROW LEVEL SECURITY")
+    return row
+
+
+def _commit(
+    case: IsolationCase, agency: uuid.UUID, parents: Mapping[str, uuid.UUID], bound: uuid.UUID
+) -> uuid.UUID:
+    """A committed row: as skiw_app bound to `bound`, or by the owner if skiw_app may not INSERT."""
+    if "INSERT" in case.commands:
+        return _insert(case, agency, parents, bound=bound)
+    return _owner_insert(case, agency, parents)
 
 
 def _sql(case: IsolationCase, statement: str, params: list[uuid.UUID]) -> int:
@@ -168,9 +209,19 @@ def check_append_only(cases: Cases, case: IsolationCase) -> None:
 
 def check_cross_fk(cases: Cases, case: IsolationCase, column: str) -> None:
     """Under A, a row of A whose `column` points at B's parent row fails the composite FK. RI
-    checks bypass RLS, so only the composite FK can refuse it."""
+    checks bypass RLS, so only the composite FK can refuse it (also for the owner's insert)."""
     parents = _parents(cases, case, A)
     parents[column] = make_row(cases, cases[case.parents[column]], B)
+    if "INSERT" not in case.commands:
+        try:
+            _owner_insert(case, A, parents)
+        except psycopg.Error as exc:
+            assert exc.sqlstate == NO_PARENT, f"{case.table}.{column}: got SQLSTATE {exc.sqlstate}"
+        else:
+            raise AssertionError(
+                f"{case.table}.{column}: the owner's child of B's parent succeeded"
+            )
+        return
     with refused(NO_PARENT, f"{case.table}.{column}: A child of B's parent"):
         _insert(case, A, parents, bound=A)
 

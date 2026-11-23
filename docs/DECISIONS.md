@@ -1672,3 +1672,17 @@
 - **Not changed:** no code. `crm_jar_kek` is still provisioned by existing infra code; its removal is a later code PR.
 - **Exception to a rule?** no.
 - **Decided by:** owner (2026-11-22), items 1–7, in the PR comment linked above.
+
+## 2026-11-23 — M4r-1a: catalogue and role tables (permission, role, role_permission)
+- **Source:** slice spec v2.5 (`docs/specs/2026-11-20-m4-rest-roles-jobs-design.md`, hash bb262ec4, Round 12 Approved), §7 data model, §9 row M4r-1a; main spec v1.24 (Decisions 1, 4).
+- **Decision:** the first code PR of M4-rest adds the catalogue (`accounts.access.catalogue`: 15 codes, 31 (code, scope) pairs, step-up per pair, the five-code self-service group), the global `permission` table filled by a data migration, and the tenant tables `role` and `role_permission` with RLS and SELECT-only grants for `skiw_app`. Nothing reads them at run time yet; the triggers, audit and write grants are M4r-1c, 1f and 1g. The schema check's global list drops `role` and gains `permission`.
+- **Choices the spec does not dictate:**
+  1. Migration `0019` keeps its own frozen copy of the 31 pairs (not an import of the catalogue); a non-database test and the live equality test fail if the copy and the catalogue drift. A new pair needs its own migration.
+  2. The reverse of `0019` keeps the rows and the forward uses `ON CONFLICT DO NOTHING` (a deleting reverse failed while tick rows existed); dropping the table in `0017`'s reverse removes them. Same as the `0016` precedent.
+  3. The name index is (lower(name), agency_id), not (agency_id, lower(name)): django-migration-linter 6.0 misreads the table when an expression is not the first column. Uniqueness is the same.
+  4. The composite FK `role_permission` → `role` is written by hand (the template cannot do `ON DELETE RESTRICT`); the FK to `permission` is NO ACTION.
+  5. Control characters in role names are Unicode category Cc, as explicit ranges (0x01–0x1F, 0x7F–0x9F), not `[[:cntrl:]]` (locale-dependent). `is_system` defaults to false.
+  6. The isolation harness accepts SELECT-only tables: their rows are written by `skiw_migrator` with RLS forcing lifted for that one transaction (as the agency seed does); `cross_insert` and `no_token` show INSERT refused for lack of a grant (SQLSTATE 42501). A SELECT-only grant set is now allowed; INSERT-only, SELECT+UPDATE and SELECT+DELETE are still refused.
+- **Spec note:** the slice spec says the new `role` "replaces the existing global role", but no `role` table ever existed (it was only a name on the schema-check global list), so there was no data to move.
+- **Exception to a rule?** no.
+- **Decided by:** builder within the approved spec; owner approved the build start ("proceed", 2026-11-23).

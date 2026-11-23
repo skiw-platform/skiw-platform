@@ -1,3 +1,4 @@
+from accounts.access.tables import Permission, Role, RolePermission
 from accounts.auth.tables import AuthThrottle, SecurityEvent
 from accounts.factor_model import UserFactor
 from accounts.revocation_model import SessionRevocation
@@ -9,6 +10,9 @@ __all__ = [
     "AppUser",
     "AuthStepup",
     "AuthThrottle",
+    "Permission",
+    "Role",
+    "RolePermission",
     "SecurityEvent",
     "Session",
     "SessionRevocation",

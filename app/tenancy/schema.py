@@ -2,7 +2,7 @@
 Every other table is the tenant root `agency` or tenant-owned and must meet spec §4.2; the schema
 check (M4c-6b) and `test_queue_grants.py` read this list. Names are schema-qualified.
 
-Some listed tables do not exist yet (`role`, `currency`, `form_template`, `bridge_session`,
+Some listed tables do not exist yet (`currency`, `form_template`, `bridge_session`,
 `django_content_type`, the waffle tables and the approval key in `guard`), so a listed table that is
 missing is not a failure; an existing table that is not listed is. The waffle names are those of
 django-waffle's three models; the PR that installs it (M5) checks them against its migrations.
@@ -24,7 +24,7 @@ GLOBAL_TABLES = frozenset(
         *(
             f"public.{name}"
             for name in (
-                "role",
+                "permission",
                 "currency",
                 "form_template",
                 "django_session",
