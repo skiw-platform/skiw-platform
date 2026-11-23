@@ -123,7 +123,9 @@ def test_every_existing_global_table_is_in_the_closed_list() -> None:
     )
     existing = {name for name, _ in rows}
     assert {"public.django_migrations", "guard.tenant_mac_key", ROOT_TABLE} <= existing
-    tenant = {name for name, has_agency_id in rows if has_agency_id}
+    # A listed global keeps its class with an agency_id column, as in tenancy.check
+    # (`bridge_session`; `security_event` from M4r-1c, slice spec Decision 33).
+    tenant = {name for name, has_agency_id in rows if has_agency_id and name not in GLOBAL_TABLES}
     checked = existing - TEST_ONLY_TABLES - {ROOT_TABLE} - tenant
     # PR 98 R1 P3: known globals stay in the checked set, so a classification that marks every
     # table as tenant cannot make the subset test pass on an empty set.

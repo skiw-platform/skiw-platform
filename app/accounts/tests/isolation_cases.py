@@ -103,6 +103,18 @@ def _org_unit(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UU
     return row
 
 
+def _change_event(
+    cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
+) -> uuid.UUID:
+    row = uuid.uuid4()
+    cursor.execute(
+        "INSERT INTO public.security_event (id, at, kind, agency_id, details_json)"
+        " VALUES (%s, now(), 'role.created', %s, '{}')",
+        [row, agency],
+    )
+    return row
+
+
 def _user_role(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]) -> uuid.UUID:
     row = uuid.uuid4()
     cursor.execute(
@@ -149,4 +161,7 @@ CASES = [
         frozenset({"SELECT"}),
         {**USER, "role_id": "public.role", "org_unit_id": "public.org_unit"},
     ),
+    # Hand-registered (slice spec Decision 33, M4r-1c): security_event is a listed global, so the
+    # coverage test does not ask for it; its change rows carry an agency and get these checks.
+    IsolationCase("public.security_event", _change_event, frozenset({"SELECT", "INSERT"})),
 ]

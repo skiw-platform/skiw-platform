@@ -5,7 +5,8 @@ lives here because its SQL names `security_event` (Semgrep `auth-tables-accounts
 
 skiw_app has USAGE on `guard` from tenancy.0003 (M4c-4a). A call from the skiw_app login sees only
 committed state, so the probe commits the function, and the fixture drops it and deletes the
-probe rows, also when the test fails."""
+probe rows, also when the test fails. FORCE binds the migrator on `security_event` (M4r-1c), so its
+reads and deletes there lift it for their own transaction (`unforced`)."""
 
 import os
 import uuid
@@ -65,6 +66,15 @@ def as_migrator(query: LiteralString, *params: object) -> list[tuple[Any, ...]]:
         return cursor.fetchall() if cursor.description else []
 
 
+def unforced(conn: "psycopg.Connection[Any]", query: LiteralString, *params: object) -> Any:
+    """`query` on security_event as its owner, under NO FORCE for the caller's open transaction."""
+    conn.execute("ALTER TABLE security_event NO FORCE ROW LEVEL SECURITY")
+    cursor = conn.execute(query, params)
+    rows = cursor.fetchall() if cursor.description else []
+    conn.execute("ALTER TABLE security_event FORCE ROW LEVEL SECURITY")
+    return rows
+
+
 def call_as_app() -> uuid.UUID:
     with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
         row = conn.execute("SELECT guard.probe_definer()").fetchone()
@@ -82,7 +92,11 @@ def function_row() -> list[tuple[Any, ...]]:
 
 
 def events(event_id: uuid.UUID) -> list[tuple[Any, ...]]:
-    return as_migrator("SELECT kind, details_json FROM security_event WHERE id = %s", event_id)
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        found: list[tuple[Any, ...]] = unforced(
+            conn, "SELECT kind, details_json FROM security_event WHERE id = %s", event_id
+        )
+    return found
 
 
 @pytest.fixture
@@ -95,7 +109,7 @@ def probe() -> Iterator[None]:
             conn.execute(
                 sql.SQL("REVOKE CREATE ON SCHEMA guard FROM {}").format(sql.Identifier(LOOKUP))
             )
-            conn.execute("DELETE FROM security_event WHERE kind = ANY(%s)", (list(KINDS),))
+            unforced(conn, "DELETE FROM security_event WHERE kind = ANY(%s)", list(KINDS))
             owner = conn.execute(
                 "SELECT proowner::regrole::text FROM pg_proc WHERE oid = to_regprocedure(%s)",
                 (FUNCTION,),
@@ -105,9 +119,11 @@ def probe() -> Iterator[None]:
                     conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(owner[0])))
                 conn.execute(sql.SQL(f"DROP FUNCTION {FUNCTION}"))
         assert function_row() == []
-        assert as_migrator(
-            "SELECT count(*) FROM security_event WHERE kind = ANY(%s)", list(KINDS)
-        ) == [(0,)]
+        with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+            left = unforced(
+                conn, "SELECT count(*) FROM security_event WHERE kind = ANY(%s)", list(KINDS)
+            )
+        assert left == [(0,)]
 
 
 @pytest.mark.usefixtures("probe")
