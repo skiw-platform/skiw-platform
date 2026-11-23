@@ -1686,3 +1686,15 @@
 - **Spec note:** the slice spec says the new `role` "replaces the existing global role", but no `role` table ever existed (it was only a name on the schema-check global list), so there was no data to move.
 - **Exception to a rule?** no.
 - **Decided by:** builder within the approved spec; owner approved the build start ("proceed", 2026-11-23).
+
+## 2026-11-23 — M4r-1b: org_unit and user_role tables
+- **Source:** slice spec v2.5 (hash bb262ec4), §4 data model, §9 row M4r-1b, M4r-0 #5, #6.
+- **Decision:** the second code PR of the roles track adds the tenant tables `org_unit` (one root per agency, kinds agency/unit/team) and `user_role` (user, role, unit, line) with RLS and SELECT-only grants for `skiw_app`. Nothing reads them at run time yet; the tree-guard, roles-lock and audit triggers and the write grants are M4r-1c, 1d and 1g.
+- **Choices the spec does not dictate:**
+  1. Unit names use the role-name rules (1 to 64 characters, no control characters, 0x01–0x1F and 0x7F–0x9F); the spec gives no `org_unit` name rule.
+  2. The four composite foreign keys (`org_unit` parent, `user_role` to user, role and unit) are hand-written with `ON DELETE RESTRICT`, as in M4r-1a; a root's NULL `parent_id` skips its FK check. `app_user` already had the (agency_id, id) unique key from migration 0004.
+  3. The isolation harness supports a self-referencing FK: the parent row is the agency's root, got or created with `INSERT … ON CONFLICT DO NOTHING`. Those roots stay committed under agencies A and B, like the harness's other rows.
+  4. No extra indexes on `user_role.role_id` or `org_unit_id` and no default on `kind`; the unique key covers lookups by agency and user and the tables are small.
+  5. The generated migration `0020` (172 lines, one `AddConstraint` per constraint because of the self-referencing FK) is kept as Django wrote it; folding it into `CreateModel` would save about 60 lines but means hand-editing generated code.
+- **Exception to a rule?** no.
+- **Decided by:** builder within the approved spec; the owner asked for the build ("build", 2026-11-23).

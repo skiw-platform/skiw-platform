@@ -40,6 +40,8 @@ class Executes(Protocol):
     # Any: Django's stubs and psycopg type the parameters differently; both accept these lists.
     def execute(self, sql: str, params: Sequence[Any], /) -> object: ...
 
+    def fetchone(self) -> Any: ...
+
 
 Insert = Callable[[Executes, uuid.UUID, Mapping[str, uuid.UUID]], uuid.UUID]
 
@@ -101,7 +103,16 @@ def make_row(cases: Cases, case: IsolationCase, agency: uuid.UUID) -> uuid.UUID:
 
 
 def _parents(cases: Cases, case: IsolationCase, agency: uuid.UUID) -> dict[str, uuid.UUID]:
-    return {column: make_row(cases, cases[table], agency) for column, table in case.parents.items()}
+    """A fresh parent row per FK. A self-referencing FK (`org_unit.parent_id`) gets the row
+    `case.insert` makes with no parents (the case's root), so the recursion ends there."""
+    return {
+        column: (
+            _commit(case, agency, {}, bound=agency)
+            if table == case.table
+            else make_row(cases, cases[table], agency)
+        )
+        for column, table in case.parents.items()
+    }
 
 
 def _insert(
