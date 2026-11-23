@@ -1,5 +1,54 @@
 # Review — 2026-11-20-m4-rest-roles-jobs-design
 
+## Round 11 — 2026-11-23 · scope: spec-change slice (v2.3 → v2.4: align with main spec v1.24)
+- **Spec review:** spec path `docs/specs/2026-11-20-m4-rest-roles-jobs-design.md` · version 2.4 · hash (`git hash-object`) 437249fd78d4439cacfd11daaccee8e017c4b399 (branch `docs/slice-spec-v2-4` at 1e6af50 = `origin/docs/slice-spec-v2-4`, PR 173 open; working tree clean for this file)
+- **Previous approved version:** v2.3, hash 38b7be31f6dc59ac9425b3c6297ccdd47597c84d (Round 10; the blob on `origin/main`).
+- **Delta:** 9 change groups, all reference updates: M7 → the M20 cutover import (§1, Decisions 25, 29, the "why acceptable" text, §10.2 #12 quote), second-agency gate → retired, one agency per deployment (§2 deferred list, Decision 19, Decision 33 residual), §6 `connector.connect` "connect own CRM" removed, version line. No technical decision changes (claim checked against the full word diff).
+
+**Verdict:** Revision required
+**Model used:** Claude Opus 5.5 (deep; auth/tenancy slice) · **Switch model next step?** No
+
+### Findings
+
+### [P2] v2.4 still describes the owner decisions as unconfirmed proposals and main spec v1.22 as governing
+- Category: spec consistency / ambiguity
+- Rule: reviewer §4 (consistency, ambiguity); Decision 25
+- Evidence (v2.4): header "Status: draft (… not yet reviewed in this form)"; "Supersedes: … under main spec (v1.22, hash `79a9a40e`)"; §1 "OD-1, a proposal until M4r-0"; §2 Q3 "unverified here"; Decision 5 / §7 seed totals "a proposal until restated in the M4r-0 PR"; Decision 24 "unverified here" and status "proposal …"; Decision 25 "Until then the main spec v1.22 governs … this slice is a proposal"; Decision 33 "Q6 is a proposal … OPEN until the owner states it in the M4r-0 PR; M4r-0 and M4r-1c depend on…"; §6 note "(Q4) … unverified here, stated in M4r-0"; §9 M4r-0 row still a to-do; M5 note "Q5, a proposal … this spec does not decide it"; §10.1 "Status: proposals. No owner answer is established by this spec."
+- Actual state: M4r-0 merged (PR 170, 594284e) with the owner's statement of OD-1 (with 34/35), Q3–Q6, the Owner-only seed, AUTH-03 and T20 (issuecomment-7063756554; confirmed by the owner to the reviewer 2026-11-22), recorded in DECISIONS 2026-11-21 "M4-rest: owner decisions …"; main spec v1.24 (e47de4ed, SPEC Round 27 Approved) now governs.
+- Failure scenario: an M4r-1c builder reads Decision 33 as "Q6 OPEN" and holds the RLS work, or another treats the seed or AUTH-03 reading as still unsettled; a reviewer cannot tell from the governing slice which answers are decided. v2.4 claims to align with v1.24 but leaves the pre-M4r-0 state.
+- Required correction: one pass recording the M4r-0 outcome: OD-1, Q3–Q6, the Owner-only seed, the AUTH-03 exception and T20 are owner decisions of 2026-11-21 (PR 170 comment, DECISIONS entry), with Q6's statement noting one agency per deployment; mark M4r-0 done in §9 (PR 170); Supersedes → main spec v1.24, hash `e47de4ed`; keep the builder-session provenance as history in §10.1 (do not delete it). No decision text changes, since every owner answer matched the proposal.
+- Owner: builder
+- Verification: grep for "proposal", "unverified here", "OPEN until", "v1.22 governs" returns only history lines.
+- Disposition: before the slice is used for M4r-1a (i.e. before approval)
+- Status: open
+
+### [P3] Round 10 P3 still open: the TTL × 23/24 cap has no rounding rule
+- Evidence: Decision 15 / §8 unchanged. Fine to settle in M4r-6 ("floor to whole seconds").
+- Status: open (optional)
+
+No prompt-injection text found.
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| `git hash-object` of the file; `git rev-parse 1e6af50:<spec>` | both 437249fd |
+| `git rev-parse origin/main:<spec>` | 38b7be31 (v2.3) |
+| word diff origin/main → v2.4 (9 groups) read in full | reference updates only |
+| sweep v2.4 for M7/M12/M13/second agency/CRM/TechVision | all annotated |
+| sweep v2.4 for proposal/unverified/v1.22 | stale provenance (P2) |
+
+### Residual risks and test gaps
+- As Round 10: `[A]` items are proven in M4r-1c, 1d, 1f, 1h and 8.
+
+### Required before merge
+- P2: record the M4r-0 outcome and the v1.24 parent (above).
+
+### Deferred conditions
+- none
+
+### Optional improvements
+- P3 rounding rule.
+
 ## Round 10 — 2026-11-21 · scope: slice
 - **Spec review:** docs/specs/2026-11-20-m4-rest-roles-jobs-design.md · version 2.3 · hash (`git hash-object`) `38b7be31f6dc59ac9425b3c6297ccdd47597c84d` · `main` = `df7ce21`
 
