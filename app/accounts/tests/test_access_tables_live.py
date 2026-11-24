@@ -1,8 +1,8 @@
 """`permission`, `role` and `role_permission` on the live schema (plan row M4r-1a; slice spec §4,
 Decisions 1, 3, 4). Reads run as skiw_app; rows are written by the owner, skiw_migrator, inside one
-transaction under transaction-local NO FORCE that is rolled back, because skiw_app may only SELECT
-these tables until M4r-1g. TEN-08 read isolation and the cross-agency composite FK run through
-the harness (accounts/tests/isolation_cases.py)."""
+transaction under transaction-local NO FORCE that is rolled back. skiw_app's write grants (Decision
+3) arrive in M4r-1g (accounts.0030); the grant audit is here. TEN-08 isolation and the cross-agency
+composite FK run through the harness (accounts/tests/isolation_cases.py)."""
 
 import os
 import uuid
@@ -125,21 +125,51 @@ def separate(sql: str, *params: object) -> list[tuple[Any, ...]]:
         return conn.execute(sql, params).fetchall()
 
 
+# Decision 3 (M4r-1g, accounts.0030): skiw_app's table privileges, and its one column grant.
+DECISION_3 = {
+    "permission": {"SELECT"},
+    "role": {"SELECT", "INSERT", "DELETE"},
+    "role_permission": {"SELECT", "INSERT", "DELETE"},
+    "org_unit": {"SELECT", "INSERT", "UPDATE"},
+    "user_role": {"SELECT", "INSERT", "DELETE"},
+}
+COLUMN_GRANTS = {("role", "name", "UPDATE")}  # "UPDATE (`name` only, column grant)"
+COLUMN_HELD = (
+    "SELECT a.attname::text, p FROM pg_attribute a, unnest(ARRAY['SELECT', 'INSERT', 'UPDATE',"
+    " 'REFERENCES']) p WHERE a.attrelid = %s::regclass AND a.attnum > 0 AND NOT a.attisdropped"
+    " AND has_column_privilege(%s, a.attrelid, a.attnum, p)"
+    " AND NOT has_table_privilege(%s, a.attrelid, p)"
+)
+
+
 @pytest.mark.parametrize("table", TABLES)
-def test_app_role_holds_select_only(table: str) -> None:
+def test_app_role_holds_exactly_decision_3(table: str) -> None:
     held = {
         privilege
         for privilege in TABLE_PRIVILEGES
         if separate("SELECT has_table_privilege(%s, %s, %s)", APP_ROLE, table, privilege)[0][0]
     }
-    assert held == {"SELECT"}
+    assert held == DECISION_3[table]
+    columns = {(table, column, p) for column, p in separate(COLUMN_HELD, table, APP_ROLE, APP_ROLE)}
+    assert columns == {grant for grant in COLUMN_GRANTS if grant[0] == table}
 
 
-def test_the_only_grants_are_skiw_app_select() -> None:
+def test_the_only_grants_are_decision_3() -> None:
     rows = separate(
         "SELECT c.relname, c.relowner::regrole::text, a.grantee::regrole::text, a.privilege_type"
         " FROM pg_class c, aclexplode(c.relacl) a"
         " WHERE c.oid = ANY(%s::regclass[]) AND a.grantee <> c.relowner",
         list(TABLES),
     )
-    assert sorted(rows) == sorted((table, "skiw_migrator", APP_ROLE, "SELECT") for table in TABLES)
+    assert sorted(rows) == sorted(
+        (table, "skiw_migrator", APP_ROLE, privilege)
+        for table, privileges in DECISION_3.items()
+        for privilege in privileges
+    )
+    columns = separate(
+        "SELECT c.relname, a.attname::text, e.grantee::regrole::text, e.privilege_type"
+        " FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid, aclexplode(a.attacl) e"
+        " WHERE c.oid = ANY(%s::regclass[])",
+        list(TABLES),
+    )
+    assert sorted(columns) == sorted((t, c, APP_ROLE, p) for t, c, p in COLUMN_GRANTS)
