@@ -1727,3 +1727,18 @@
 - **Open for M4r-1g or the next spec touch:** pin with one test that `skiw_app` has no TEMP privilege on the database (`has_database_privilege`); it is what stops `skiw_app` creating a temporary trigger function to reach depth 2. Today this rests on `roles.sql` (`REVOKE ALL ON DATABASE … FROM PUBLIC`).
 - **Exception to a rule?** no.
 - **Decided by:** builder within the approved spec.
+
+## 2026-11-24 — M4r-1d-i: roles lock, READ COMMITTED refusal and refusal triggers
+- **Source:** slice spec v2.5 (hash bb262ec4), Decisions 27 and 32 and the M4r-1d row; the TEMP pinning condition of the PR 178 review.
+- **Decision (owner):** M4r-1d is built as two PRs, M4r-1d-i (this one) and M4r-1d-ii (the `org_unit` tree guard, the system-role guards, `role_system_complete` and `user_role_owner_remains`). The owner chose "split" on 2026-11-24 when asked (the spec names no split for 1d); the roles track is now 26 PRs.
+- **What this PR does (migration 0026):** a shared roles-lock function `roles_lock()` (per-agency advisory lock, then a refusal unless the transaction is READ COMMITTED) as BEFORE INSERT OR UPDATE OR DELETE row triggers on `role`, `role_permission`, `user_role` and `org_unit`; one refusal function `roles_refuse()` behind eight triggers (UPDATE on `role_permission` and `user_role`, DELETE on `org_unit`, UPDATE of any column but `name` on `role`, TRUNCATE on all four); functions SECURITY INVOKER with a pinned `search_path`, EXECUTE revoked from PUBLIC; the reverse refuses while `skiw_app` holds a write privilege on any of the four tables (the §9 1d row requires it). No write grants. The test that `skiw_app` has no TEMP privilege (and cannot create a temporary table) is added (PR 178 deferred condition).
+- **Choices the spec does not dictate:**
+  1. Lock class constant `0x524F4C45` ("ROLE"), key `hashtext(agency_id::text)`, kept in the migration; the test reads it from there; M4r-5 needs an app copy pinned to it.
+  2. On UPDATE the lock is taken for both the old and the new agency (one lock when equal).
+  3. The `org_unit` lock is its own trigger `org_unit_roles_lock`, so a later tree guard named `org_unit_tree_guard` sorts after it and runs with the lock held (BEFORE row triggers fire in name order).
+  4. Errors, none naming data: 25000 "roles change refused: the transaction must be read committed" (a REPEATABLE READ, SERIALIZABLE or READ UNCOMMITTED writer); 42501 "roles change refused: this statement is not allowed on this table"; 55000 for the reverse guard.
+  5. `role` UPDATE check compares the whole row without `name`, so a column added later is also refused (Decision 32 "any column but `name`").
+  6. The reverse guard counts INSERT, UPDATE, DELETE and TRUNCATE, plus column-level INSERT or UPDATE, as write privileges.
+  7. Tests turn other tables' triggers off inside a rolled-back owner transaction when the trigger under test must be the only one that can act; two-connection races stay in M4r-1h. Two existing tests (`test_org_tables_live` delete cases, `test_agency_live` `TRUNCATE agency CASCADE`) do the same, because the new triggers now fire first.
+- **Exception to a rule?** no.
+- **Decided by:** owner (split, 2026-11-24); the rest builder within the approved spec.

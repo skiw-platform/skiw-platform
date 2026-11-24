@@ -142,7 +142,10 @@ def test_an_empty_table_gets_the_configured_agency() -> None:
     other = uuid.uuid4()
     with migrator() as conn, conn.transaction(force_rollback=True), conn.cursor() as cursor:
         # TRUNCATE ignores RLS, and CASCADE empties the tenant tables whose rows point at an
-        # agency (accounts, M3d), which a DELETE would refuse; all of it rolls back.
+        # agency (accounts, M3d), which a DELETE would refuse; all of it rolls back. The roles
+        # tables refuse TRUNCATE (accounts.0026), so the owner turns that off for this transaction.
+        for table in ("role", "role_permission", "user_role", "org_unit"):
+            cursor.execute(f"ALTER TABLE {table} DISABLE TRIGGER {table}_refuse_truncate")
         cursor.execute("TRUNCATE agency CASCADE")
         assert seed.seed_deployment_agency(cursor, other, "Fresh") is True
         seed._lift(cursor)

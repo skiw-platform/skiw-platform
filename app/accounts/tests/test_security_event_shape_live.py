@@ -185,3 +185,20 @@ def test_only_the_two_lookup_definers_name_security_event_in_the_database() -> N
     finally:
         event_probe.install()
     assert found == ["guard.auth_lookup_credential", "guard.auth_lookup_login"]
+
+
+def test_skiw_app_cannot_create_temporary_objects() -> None:
+    """With no TEMP on the database (roles.sql revokes ALL from PUBLIC and grants CONNECT only),
+    skiw_app cannot create a pg_temp trigger function to write a change kind at depth 2
+    (DECISIONS 2026-11-24, M4r-1c-ii, open item)."""
+    assert as_migrator(
+        "SELECT has_database_privilege('skiw_app', current_database(), 'TEMPORARY'),"
+        " has_database_privilege('skiw_app', current_database(), 'CREATE')"
+    ) == [(False, False)]
+    with (
+        pytest.raises(DatabaseError) as raised,
+        transaction.atomic(),
+        connection.cursor() as cursor,
+    ):
+        cursor.execute("CREATE TEMPORARY TABLE probe_temp (id int)")
+    assert isinstance(raised.value.__cause__, psycopg.errors.InsufficientPrivilege)
