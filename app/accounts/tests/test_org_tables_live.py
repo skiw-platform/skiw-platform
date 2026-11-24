@@ -28,10 +28,12 @@ type Cursor = psycopg.Cursor[Any]
 
 @pytest.fixture
 def owner() -> Iterator[Cursor]:
-    """The migrator fixture: FORCE lifted on the tables these tests write, agencies X and Y added,
-    all rolled back at the end (DDL is transactional, so FORCE is back too)."""
+    """The migrator fixture: FORCE lifted on the tables these tests write (security_event: the audit
+    triggers), a test skiw.operator, agencies X and Y added, all rolled back at the end (DDL is
+    transactional, so FORCE is back too)."""
     with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn, conn.cursor() as cursor:
-        for table in ("app_user", "role", "org_unit", "user_role"):
+        cursor.execute("SELECT set_config('skiw.operator', 'test-operator', true)")
+        for table in ("app_user", "role", "org_unit", "user_role", "security_event"):
             cursor.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
         seed.insert_agency(cursor, X, "Org test X")
         seed.insert_agency(cursor, Y, "Org test Y")
