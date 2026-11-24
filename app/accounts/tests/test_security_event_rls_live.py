@@ -1,10 +1,13 @@
 """`security_event` agency isolation (slice spec Decision 33, owner Q6; §7 "Agency B reads or writes
-agency A's change events"; plan row M4r-1c-i), as skiw_app in three contexts: agency A's token, B's
-and none. The owner plants one pre-tenant row and a change row for A and for B under
-transaction-local NO FORCE and deletes them afterwards; rows the writers add stay (skiw_app may not
-delete, TEN-03), as in the other auth tests. The TEN-08 harness case is in isolation_cases.py and
-the grant audit in jobs/tests/test_queue_grants.py."""
+agency A's change events"; plan rows M4r-1c-i, M4r-1c-ii), as skiw_app in three contexts: agency A's
+token, B's and none. The owner plants one pre-tenant row and a change row for A and for B under
+transaction-local NO FORCE and deletes them afterwards; change rows go through the probe trigger
+(event_probe), as only a trigger may write a change kind (accounts.0025); rows the writers add
+stay (skiw_app may not delete, TEN-03), as in the other auth tests. The TEN-08 harness case is in
+isolation_cases.py, the shape and depth rule in test_security_event_shape_live.py and the grant
+audit in jobs/tests/test_queue_grants.py."""
 
+import json
 import os
 import secrets
 import uuid
@@ -17,6 +20,8 @@ import pytest
 from django.db import DatabaseError, connection, transaction
 
 from accounts.auth.events import KINDS, record_event
+from accounts.auth.tables import CHANGE_KINDS
+from accounts.tests import event_probe
 from tenancy import seed
 from tenancy.binding import with_agency
 from tenancy.check import SECURITY_EVENT, check
@@ -51,6 +56,11 @@ def as_owner(statement: str, params: list[Any]) -> list[tuple[Any, ...]]:
     return rows
 
 
+def shaped(kind: str) -> str:
+    """details_json for `kind`: the Decision 30 key set for a change kind, else empty."""
+    return json.dumps(event_probe.details(kind) if kind in CHANGE_KINDS else {})
+
+
 @pytest.fixture(scope="module")
 def planted() -> Iterator[dict[str, uuid.UUID]]:
     rows = {"pre": uuid.uuid4(), "A": uuid.uuid4(), "B": uuid.uuid4()}
@@ -59,7 +69,8 @@ def planted() -> Iterator[dict[str, uuid.UUID]]:
         seed.insert_agency(cursor, B, "Isolation B")
     as_owner(INSERT, [rows["pre"], "login.failed", None, HMAC, None])
     for name in ("A", "B"):
-        as_owner(INSERT, [rows[name], "role.created", CONTEXTS[name], None, None])
+        planted = [rows[name], "role.created", CONTEXTS[name], None, None, shaped("role.created")]
+        as_owner(event_probe.INSERT, planted)
     yield rows
     as_owner("DELETE FROM security_event WHERE id = ANY(%s)", [list(rows.values())])
 
@@ -73,12 +84,16 @@ def sqlstate(action: Callable[[], object]) -> tuple[str | None, str | None]:
     return cause.sqlstate, cause.diag.constraint_name
 
 
-def app_insert(context: str, kind: str, agency: uuid.UUID | None, *hmacs: bytes | None) -> None:
-    """One INSERT as skiw_app in `context`, rolled back if it passes."""
+def app_insert(context: str, kind: str, agency: uuid.UUID | None, *hmacs: bytes | None) -> int:
+    """One INSERT as skiw_app in `context` through the probe trigger, rolled back if it passes;
+    returns how many rows with its id the transaction then sees."""
     email, ip = (*hmacs, None, None)[:2]
+    row = uuid.uuid4()
     with bound(context), connection.cursor() as cursor:
-        cursor.execute(INSERT, [uuid.uuid4(), kind, agency, email, ip])
+        cursor.execute(event_probe.INSERT, [row, kind, agency, email, ip, shaped(kind)])
+        cursor.execute("SELECT count(*) FROM security_event WHERE id = %s", [row])
         transaction.set_rollback(True)
+        return int(cursor.fetchone()[0])
 
 
 def app_count(sql: str, params: list[Any]) -> int:
@@ -110,7 +125,7 @@ def test_a_change_row_for_another_agency_or_with_no_token_is_refused(
 
 @pytest.mark.parametrize("context", ["A", "B"])
 def test_a_change_row_for_the_own_agency_passes_the_policies(context: str) -> None:
-    app_insert(context, "role.created", CONTEXTS[context])  # until M4r-1c-ii's shape trigger
+    assert app_insert(context, "role.created", CONTEXTS[context]) == 1
 
 
 @pytest.mark.parametrize("context", CONTEXTS)
@@ -190,6 +205,7 @@ def test_force_binds_the_owner_too(planted: dict[str, uuid.UUID]) -> None:
 P = "agency_id IS NULL OR agency_id = (SELECT guard.current_agency())"
 OWN = "agency_id = (SELECT guard.current_agency())"
 POLICIES = "policies are not exactly the Decision 33 set"
+SHAPE = "trigger security_event_shape missing, not enabled or changed"
 MUTANTS = {
     "FORCE dropped": ("ALTER TABLE security_event NO FORCE ROW LEVEL SECURITY", ["RLS not forced"]),
     "RLS disabled": ("ALTER TABLE security_event DISABLE ROW LEVEL SECURITY", ["RLS not enabled"]),
@@ -233,6 +249,21 @@ MUTANTS = {
     "FK dropped": (
         "ALTER TABLE security_event DROP CONSTRAINT security_event_agency_fk",
         ["no FK (agency_id) to agency(id)"],
+    ),
+    "shape trigger dropped": ("DROP TRIGGER security_event_shape ON security_event", [SHAPE]),
+    "shape trigger disabled": (
+        "ALTER TABLE security_event DISABLE TRIGGER security_event_shape",
+        [SHAPE],
+    ),
+    "shape trigger for replicas only": (
+        "ALTER TABLE security_event ENABLE REPLICA TRIGGER security_event_shape",
+        [SHAPE],
+    ),
+    "shape trigger fires after the insert": (
+        "DROP TRIGGER security_event_shape ON security_event;"
+        " CREATE TRIGGER security_event_shape AFTER INSERT ON security_event"
+        " FOR EACH ROW EXECUTE FUNCTION security_event_shape()",
+        [SHAPE],
     ),
 }
 

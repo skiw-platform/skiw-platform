@@ -2,11 +2,13 @@
 tenancy/tests/isolation.py, M4c-7a). `commands` repeat the RLS migrations' grants; each insert
 names only the columns the row needs."""
 
+import json
 import uuid
 from collections.abc import Mapping
 
 from accounts.factor_model import TOTP_SECRET_CT_LENGTH
 from accounts.stepup_model import EVIDENCE_LENGTH
+from accounts.tests import event_probe
 from tenancy.tests.isolation import Executes, IsolationCase
 
 
@@ -106,12 +108,10 @@ def _org_unit(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UU
 def _change_event(
     cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
 ) -> uuid.UUID:
+    """Through the probe trigger (event_probe): only a trigger may write a change kind."""
     row = uuid.uuid4()
-    cursor.execute(
-        "INSERT INTO public.security_event (id, at, kind, agency_id, details_json)"
-        " VALUES (%s, now(), 'role.created', %s, '{}')",
-        [row, agency],
-    )
+    details = json.dumps(event_probe.details("role.created"))
+    cursor.execute(event_probe.INSERT, [row, "role.created", agency, None, None, details])
     return row
 
 

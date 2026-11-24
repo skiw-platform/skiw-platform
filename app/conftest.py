@@ -1,10 +1,25 @@
 """Fixtures shared by the app test packages."""
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from pytest_django import Settings
+
+from accounts.tests import event_probe
+
+
+@pytest.fixture(scope="session", autouse=True)
+def security_event_probe(request: pytest.FixtureRequest) -> Iterator[None]:
+    """The test-only probe trigger (accounts.tests.event_probe) for a live run: the accounts tests
+    and the TEN-08 harness plant change rows through it. Removed afterwards, also a leftover."""
+    live = any(item.get_closest_marker("live") for item in request.session.items)
+    if live:
+        event_probe.install()
+    yield
+    if live:
+        event_probe.remove()
 
 
 @pytest.fixture

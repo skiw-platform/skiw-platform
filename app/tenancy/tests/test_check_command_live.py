@@ -15,7 +15,7 @@ from tenancy.schema import GLOBAL_TABLES
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 
 # Probe tables another test session may hold open (tests only, plan M4c-6b).
-TEST_ONLY = ("public.jobs_probe", "public.files_probe")
+TEST_ONLY = ("public.jobs_probe", "public.files_probe", "public.security_event_probe")
 
 
 def test_a_clean_schema_passes(monkeypatch: pytest.MonkeyPatch) -> None:

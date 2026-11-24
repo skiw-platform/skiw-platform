@@ -14,7 +14,7 @@ from tenancy.template import tenant_table_sql
 
 pytestmark = pytest.mark.live
 
-TEST_ONLY = ("public.jobs_probe", "public.files_probe")
+TEST_ONLY = ("public.jobs_probe", "public.files_probe", "public.security_event_probe")
 ALL = {"SELECT", "INSERT", "UPDATE", "DELETE"}
 TENANT_COLUMNS = "id uuid PRIMARY KEY, agency_id uuid NOT NULL"
 
