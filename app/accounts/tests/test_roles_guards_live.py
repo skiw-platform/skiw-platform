@@ -272,6 +272,8 @@ EXPECTED_TRIGGERS = {
     # M4r-1e-i (accounts.0028): the audit triggers, AFTER (no BEFORE bit) FOR EACH ROW.
     ("role", "role_audit", ROW | INSERT | UPDATE | DELETE, "public.role_audit", False),
     *((t, f"{t}_audit", ROW | INSERT | DELETE, f"public.{t}_audit", False) for t in AUDITED),
+    # M4r-1e-ii (accounts.0029): AFTER INSERT OR UPDATE (any column) FOR EACH ROW.
+    ("org_unit", "org_unit_audit", ROW | INSERT | UPDATE, "public.org_unit_audit", False),
 }
 DEFERRED = {"role_system_complete", "user_role_owner_remains"}  # DEFERRABLE INITIALLY DEFERRED
 
@@ -282,7 +284,7 @@ def as_migrator(query: str, *params: object) -> list[tuple[Any, ...]]:
 
 
 def test_every_trigger_on_the_four_tables_is_listed_and_enabled() -> None:
-    """Exactly the M4r-1d and M4r-1e-i triggers (M4r-1e-ii adds org_unit_audit), each enabled in
+    """Exactly the M4r-1d and M4r-1e triggers (M4r-1e-ii: org_unit_audit), each enabled in
     the normal session_replication_role ('O'), with its event, timing, level and function; only
     the two constraint triggers are deferred."""
     rows = as_migrator(
@@ -339,7 +341,7 @@ def test_the_tree_guard_fires_only_on_parent_id_updates() -> None:
         SYSTEM,
         REMAINS,
         "public.role_system_complete",
-        *(f"public.{t}_audit" for t in ("role", *AUDITED)),
+        *(f"public.{t}_audit" for t in ("role", *AUDITED, "org_unit")),
     ],
 )
 def test_the_functions_are_invokers_with_a_pinned_search_path(function: str) -> None:
@@ -381,13 +383,18 @@ def test_the_reverse_refuses_while_skiw_app_holds_a_write_grant(table: str, gran
 
 
 def test_without_a_write_grant_the_reverse_drops_every_trigger_and_both_functions() -> None:
-    """0028's and 0027's reverses run first, as `migrate accounts 0025` would order them."""
+    """0029's, 0028's and 0027's reverses run first, as `migrate accounts 0025` would order them."""
     later = [
-        importlib.import_module(f"accounts.migrations.{name}").REVERSE
-        for name in ("0028_role_audit_triggers", "0027_tree_system_role_guards")
+        statement
+        for name in (
+            "0029_org_unit_audit_trigger",
+            "0028_role_audit_triggers",
+            "0027_tree_system_role_guards",
+        )
+        for statement in importlib.import_module(f"accounts.migrations.{name}").REVERSE
     ]
     with migrator_rolled_back() as cursor:
-        for statement in [*later[0], *later[1], *MIGRATION.REVERSE]:
+        for statement in [*later, *MIGRATION.REVERSE]:
             cursor.execute(statement)
         left = cursor.execute(
             "SELECT count(*) FROM pg_trigger"

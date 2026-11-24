@@ -3,9 +3,11 @@ split M4r-1e-i; slice spec Decisions 30, 31, 32; accounts.0028). As in test_role
 owner, skiw_migrator, in one transaction under transaction-local NO FORCE with a test
 skiw.operator, rolled back; skiw_app has no write grant until M4r-1g. The trigger set, the function
 properties and the grant audit are in test_roles_guards_live and test_access_tables_live, the
-pg_proc scan in test_security_event_shape_live; org_unit_audit is M4r-1e-ii."""
+pg_proc scan in test_security_event_shape_live; org_unit_audit (M4r-1e-ii, accounts.0029) is in
+test_org_audit_live, except its operator refusals, which are here with the other tables'."""
 
 import importlib
+import json
 import os
 import uuid
 from collections.abc import Callable, Iterator
@@ -18,7 +20,7 @@ from django.db import connection, transaction
 
 from accounts.access.catalogue import PAIRS
 from accounts.tests.test_access_tables_live import add_role
-from accounts.tests.test_org_tables_live import assign, assignment
+from accounts.tests.test_org_tables_live import add_unit, assign, assignment
 from accounts.tests.test_roles_guards_live import LIFTED, Cursor, X, owner, refusal, tick
 from accounts.tests.test_roles_tree_owner_live import (
     EVERY_PAIR,
@@ -39,6 +41,7 @@ OPERATOR = "test-operator"  # set by owner()
 NO_OPERATOR = ("22023", "roles change refused: skiw.operator is missing or malformed")
 EVENTS = "SELECT id, kind, agency_id, details_json FROM security_event WHERE agency_id = ANY(%s)"
 AUDITS = [f"{t}_audit" for t in MIGRATION.AUDITS]
+AUDITED = (*MIGRATION.AUDITS, "org_unit")  # 0028's three tables and accounts.0029's org_unit
 type Event = tuple[str, uuid.UUID, dict[str, Any]]
 
 
@@ -52,11 +55,24 @@ class Log:
         rows = self.cursor.execute(EVENTS, [self.agencies]).fetchall()
         fresh = [row for row in rows if row[0] not in self.seen]
         self.seen.update(row[0] for row in fresh)
-        return sorted(((k, a, d) for _, k, a, d in fresh), key=str)
+        return ordered([(k, a, d) for _, k, a, d in fresh])
+
+
+def ordered(events: list[Event]) -> list[Event]:
+    """Sorted independently of the key order of each details dict."""
+    return sorted(events, key=lambda event: json.dumps(event, sort_keys=True, default=str))
 
 
 def keys(**values: object) -> dict[str, Any]:
     return {"operator": OPERATOR, **{key: str(value) for key, value in values.items()}}
+
+
+def root_of(cursor: Cursor, agency: uuid.UUID) -> uuid.UUID:
+    row = cursor.execute(
+        "SELECT id FROM org_unit WHERE agency_id = %s AND parent_id IS NULL", [agency]
+    ).fetchone()
+    assert row is not None
+    return uuid.UUID(str(row[0]))
 
 
 def test_each_change_writes_one_event_with_its_decision_30_keys() -> None:
@@ -64,9 +80,15 @@ def test_each_change_writes_one_event_with_its_decision_30_keys() -> None:
     every event passed security_event_shape. A name-unchanged UPDATE writes none."""
     with owner() as cursor:
         log = Log(cursor, X)
-        ids = assignment(cursor, X)  # also a root and a unit: org_unit is not audited here (1e-ii)
-        role = ids["role_id"]
-        assert log.new() == [("role.created", X, keys(role_id=role))]
+        ids = assignment(cursor, X)  # also a root and a unit (org.added: test_org_audit_live)
+        role, root, unit = ids["role_id"], root_of(cursor, X), ids["org_unit_id"]
+        assert log.new() == ordered(
+            [
+                ("role.created", X, keys(role_id=role)),
+                ("org.added", X, {**keys(org_unit_id=root, unit_kind="agency"), "parent_id": None}),
+                ("org.added", X, keys(org_unit_id=unit, parent_id=root, unit_kind="unit")),
+            ]
+        )
         assign(cursor, X, ids, "investment")
         row = cursor.execute("SELECT id FROM user_role WHERE role_id = %s", [role]).fetchone()
         assert row is not None
@@ -130,11 +152,17 @@ REFUSED_WRITES = {
     "assign": "INSERT INTO user_role (id, agency_id, user_id, role_id, org_unit_id, line)"
     " VALUES (gen_random_uuid(), %(a)s, %(user_id)s, %(spare)s, %(org_unit_id)s, 'both')",
     "unassign": "DELETE FROM user_role WHERE role_id = %(r)s",
+    "org add": "INSERT INTO org_unit (id, agency_id, parent_id, kind, name)"
+    " VALUES (gen_random_uuid(), %(a)s, %(root)s, 'unit', 'N')",
+    "org move": "UPDATE org_unit SET parent_id = %(root)s WHERE id = %(team)s",
+    "org rename": "UPDATE org_unit SET name = 'New' WHERE id = %(org_unit_id)s",
+    "org no-op update": "UPDATE org_unit SET name = name WHERE id = %(org_unit_id)s",
 }
 STATE = (
     "SELECT (SELECT array_agg(name ORDER BY name) FROM role WHERE agency_id = %(a)s),"
     " (SELECT count(*) FROM role_permission WHERE agency_id = %(a)s),"
-    " (SELECT count(*) FROM user_role WHERE agency_id = %(a)s)"
+    " (SELECT count(*) FROM user_role WHERE agency_id = %(a)s),"
+    " (SELECT array_agg(o::text ORDER BY o.id) FROM org_unit o WHERE agency_id = %(a)s)"
 )
 
 
@@ -149,8 +177,8 @@ def without_operator(value: str | None, earlier: bool) -> Iterator[Cursor]:
         with conn.transaction(force_rollback=True), conn.cursor() as cursor:
             for table in LIFTED:
                 cursor.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
-            for name, table in zip(AUDITS, MIGRATION.AUDITS, strict=True):
-                cursor.execute(f"ALTER TABLE {table} DISABLE TRIGGER {name}")
+            for table in AUDITED:
+                cursor.execute(f"ALTER TABLE {table} DISABLE TRIGGER {table}_audit")
             yield cursor
 
 
@@ -163,8 +191,9 @@ def test_a_missing_empty_or_malformed_operator_is_refused_with_nothing_written(b
         assign(cursor, X, ids, "both")
         tick(cursor, X, ids["role_id"])
         params = {**ids, "a": X, "r": ids["role_id"], "spare": add_role(cursor, "Spare", agency=X)}
-        for name, table in zip(AUDITS, MIGRATION.AUDITS, strict=True):
-            cursor.execute(f"ALTER TABLE {table} ENABLE TRIGGER {name}")
+        params |= {"root": root_of(cursor, X), "team": add_unit(cursor, X, ids["org_unit_id"])}
+        for table in AUDITED:
+            cursor.execute(f"ALTER TABLE {table} ENABLE TRIGGER {table}_audit")
         if bad not in ("never-set", "ended-earlier"):
             cursor.execute("SELECT set_config('skiw.operator', %s, true)", [value])
         found = cursor.execute("SELECT current_setting('skiw.operator', true)").fetchone()

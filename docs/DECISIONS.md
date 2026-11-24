@@ -1773,6 +1773,22 @@
   6. The `at` column is not asserted here; left to M4r-1g.
   7. The function scan test now expects the five functions that exist (two lookup definers, three audit functions); M4r-1e-ii makes it six.
   8. Test helpers: every migrator writer of the three tables now sets `skiw.operator = 'test-operator'` and lifts FORCE on `security_event` for the write (no policy there names the migrator); `isolation_cases.py` wraps its inserts the same way (the Semgrep rule `auth-tables-accounts-only` forbids it in `tenancy/tests`). The 0026 and 0027 reverse tests now run 0028's reverse first. No assertion weakened.
-- **For M4r-1f (note):** Decision 32 says the seed "writes as the migrator with every trigger on", but `security_event` is FORCE RLS with no migrator policy, so the seed must also lift FORCE on `security_event` around its writes, as the tests do. The spec does not say this.
+- **For M4r-1f (note):** Decision 32 says the seed "writes as the migrator with every trigger on", but `security_event` is FORCE RLS with no migrator policy, so the seed must also lift FORCE on `security_event` around its writes, as the tests do. Decision 33 and the §10 [A] list do say it (the seed writes under transaction-local `NO FORCE` on `role`, `role_permission` and `security_event`); only Decision 32's "with every trigger on" omits it. M4r-1f cites Decision 33. (Corrected in the M4r-1e-ii entry after the PR 181 review.)
 - **Exception to a rule?** no.
 - **Decided by:** owner (split, 2026-11-24); the rest builder within the approved spec.
+
+## 2026-11-24 — M4r-1e-ii: org_unit audit trigger
+- **Source:** slice spec v2.5 (hash bb262ec4), Decisions 30, 32 and the M4r-1e row; second half of M4r-1e (the split is in the M4r-1e-i entry); the PR 181 review.
+- **What this PR does (migration 0029):** `org_unit_audit`, AFTER INSERT OR UPDATE FOR EACH ROW, writes `org.added` on INSERT; on UPDATE it refuses a changed `id`, `agency_id`, `kind` or `created_at`, writes `org.moved` when `parent_id` changed and `org.renamed` when `name` changed (two events when both, none when neither). Operator check from 0028 reused inline; SECURITY INVOKER, pinned `search_path`, EXECUTE revoked from PUBLIC; reverse starts with 0026's write-grant guard. The function scan now expects the six functions of the spec; the trigger-set test includes the new trigger. No write grants.
+- **Choices the spec does not dictate:**
+  1. A new migration imports `OPERATOR_CHECK` from 0028 and `SHAPE`, `GUARD`, `REFUSE_BODY` from 0026; merged migrations are not edited.
+  2. Order inside the function: operator check, then the immutable-column refusal, then the events (a row with both a bad operator and an immutable change gets the operator error).
+  3. The immutable-column refusal reuses 0026's message and code (42501, "roles change refused: this statement is not allowed on this table"); names no data.
+  4. The check compares values, not the SET list: setting an immutable column to its own value is accepted and writes no event. The trigger listens to any column (`UPDATE OF` fires on a column in the SET list even when unchanged).
+  5. On a move plus rename, `org.moved` is inserted before `org.renamed`; both carry the same `statement_timestamp()`.
+  6. **No org deferred check exists** (0027's two deferred checks are on `role` and `user_role`), so the §9 row's "a deferred-check failure leaves no event" cannot apply literally to `org_unit`; the equivalent tested here is a tree-guard refusal (cycle, depth 33): no event and no change.
+  7. FK, CHECK and unique errors are reported before the immutable-column refusal (they run first), so the `agency_id` test also moves the unit under the other agency's root.
+  8. Test helpers adjusted as in PR 181 (org_unit writers set the operator and lift FORCE on `security_event`; `isolation_cases.py` wraps the `org_unit` case); `test_roles_audit_live` sorts events with a helper that ignores key order inside each details object (jsonb and Python order keys differently), and its first assertion now also expects the two `org.added` events. No assertion weakened.
+- **Correction:** the "For M4r-1f" note in the M4r-1e-i entry wrongly said the spec is silent on the seed lifting FORCE on `security_event`; fixed in place (Decision 33 says it).
+- **Exception to a rule?** no.
+- **Decided by:** builder within the approved spec.

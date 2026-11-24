@@ -109,7 +109,7 @@ type Insert = Callable[[Executes, uuid.UUID, Mapping[str, uuid.UUID]], uuid.UUID
 
 
 def _audited(insert: Insert) -> Insert:
-    """For the roles tables, written by the owner until M4r-1g: their audit triggers (accounts.0028)
+    """For the roles tables, written by the owner until M4r-1g: their audit triggers (0028, 0029)
     need a skiw.operator and write security_event as the owner, so its FORCE is lifted around the
     insert and set again before the harness commits."""
 
@@ -171,7 +171,10 @@ CASES = [
         {"role_id": "public.role"},
     ),
     IsolationCase(
-        "public.org_unit", _org_unit, frozenset({"SELECT"}), {"parent_id": "public.org_unit"}
+        "public.org_unit",
+        _audited(_org_unit),
+        frozenset({"SELECT"}),
+        {"parent_id": "public.org_unit"},
     ),
     IsolationCase(
         "public.user_role",
