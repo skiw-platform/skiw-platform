@@ -177,9 +177,9 @@ NAMES_THE_TABLE = r"""
 
 
 def test_only_the_lookup_definers_and_audit_functions_name_security_event() -> None:
-    """Decision 32: no other function can reach depth 2 with a change kind. Today the two lookup
-    definers and M4r-1e-i's three audit functions; M4r-1e-ii adds org_unit_audit (the six).
-    The probe trigger is removed for the scan."""
+    """Decision 32: no other function can reach depth 2 with a change kind: exactly the six, the
+    two lookup definers and the four audit functions (M4r-1e). The probe trigger is removed for
+    the scan."""
     event_probe.remove()
     try:
         found = sorted(name for (name,) in as_migrator(NAMES_THE_TABLE))
@@ -188,6 +188,7 @@ def test_only_the_lookup_definers_and_audit_functions_name_security_event() -> N
     assert found == [
         "guard.auth_lookup_credential",
         "guard.auth_lookup_login",
+        "public.org_unit_audit",
         "public.role_audit",
         "public.role_permission_audit",
         "public.user_role_audit",
