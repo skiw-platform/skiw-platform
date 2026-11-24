@@ -70,7 +70,7 @@ AUTH_TABLE_GRANTS = {
     ("security_event", LOOKUP_ROLE): {"INSERT"},
 }
 # Made by test fixtures only; tenancy.schema holds the closed global list (plan M4c-6a).
-TEST_ONLY_TABLES = {"public.jobs_probe", "public.files_probe"}
+TEST_ONLY_TABLES = {"public.jobs_probe", "public.files_probe", "public.security_event_probe"}
 # Spec §4.2 TEN-03 row: append-only evidence tables, each checked as it lands.
 TEN03_EVIDENCE_TABLES = [
     "audit_event",

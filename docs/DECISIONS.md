@@ -1713,3 +1713,17 @@
   7. Until M4r-1c-ii, change rows are planted by direct INSERT as `skiw_app` (no shape trigger yet); M4r-1c-ii switches the harness case and the own-agency test to the probe trigger.
 - **Exception to a rule?** no.
 - **Decided by:** owner (split, 2026-11-23); the rest builder within the approved spec.
+
+## 2026-11-24 — M4r-1c-ii: security_event shape trigger, key lists and depth rule
+- **Source:** slice spec v2.5 (hash bb262ec4), Decisions 30 and 32 and the M4r-1c row; second half of M4r-1c, split by the owner on 2026-11-23 (see the M4r-1c-i entry).
+- **Decision:** `security_event` gets a BEFORE INSERT row trigger `security_event_shape` (SECURITY INVOKER, pinned `search_path`, EXECUTE revoked from PUBLIC; migration 0025). For the ten change kinds it requires the exact key set and value types of Decision 30 and that the row is written from inside a trigger (`pg_trigger_depth() >= 2`); pre-tenant kinds are untouched. The schema check now also requires the trigger present, enabled (`tgenabled = 'O'`), BEFORE INSERT FOR EACH ROW and not SECURITY DEFINER. The harness case and the own-agency test now plant change rows through a test-only probe trigger instead of direct INSERT (the M4r-1c-i item 7 follow-up).
+- **Choices the spec does not dictate:**
+  1. Errors: the depth rule raises 42501 "change event refused: written only by a trigger"; a wrong shape raises 23514 "change event refused: details do not match the kind"; neither names any data.
+  2. `parent_id` is JSON null exactly when `unit_kind = 'agency'` (matches the `org_unit_root_is_agency` CHECK); for `org.moved` both parent ids must be uuids.
+  3. A permission code and scope only need to be strings forming a pair present in `permission`; no separate format rule. The operator code is checked for shape only, so the reserved code `seed` is accepted at this layer.
+  4. The probe is a session fixture in `app/conftest.py` (empty table `public.security_event_probe` with a trigger that copies the row into `security_event` as the inserting role, so RLS still applies). It is test-only, not in any migration, listed as test-only in three test files, and removed during the function scan. If a live run is interrupted the table stays until the next live run, as `jobs_probe` does today.
+  5. The function scan test reads SQL-standard function bodies and matches the whole word `security_event`; it cannot detect dynamic SQL that builds the name at run time. The scan finds only the two lookup definers.
+  6. Unknown pre-tenant kinds are still accepted with any details, as today.
+- **Open for M4r-1g or the next spec touch:** pin with one test that `skiw_app` has no TEMP privilege on the database (`has_database_privilege`); it is what stops `skiw_app` creating a temporary trigger function to reach depth 2. Today this rests on `roles.sql` (`REVOKE ALL ON DATABASE … FROM PUBLIC`).
+- **Exception to a rule?** no.
+- **Decided by:** builder within the approved spec.

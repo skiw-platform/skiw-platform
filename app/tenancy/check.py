@@ -63,6 +63,10 @@ EVENT_CHECKS = {
         f"CHECK (((NOT {_CHANGE}) OR ((email_hmac IS NULL) AND (ip_hmac IS NULL))))"
     ),
 }
+# Decision 32 (M4r-1c-ii): the BEFORE INSERT row trigger security_event_shape, enabled ('O': fires
+# in the normal session_replication_role), on its SECURITY INVOKER function, as
+# (tgenabled, tgtype, function, prosecdef); tgtype 7 = ROW (1) | BEFORE (2) | INSERT (4).
+EVENT_TRIGGER = ("security_event_shape", ("O", 7, "public.security_event_shape", False))
 
 RELATIONS = """
     SELECT c.oid, n.nspname, n.nspname || '.' || c.relname, c.relkind::text,
@@ -89,6 +93,13 @@ CONSTRAINTS = """
 CHECKS = """
     SELECT conrelid, conname::text, pg_get_constraintdef(oid)
     FROM pg_constraint WHERE contype = 'c' AND convalidated
+"""
+TRIGGERS = """
+    SELECT t.tgrelid, t.tgname::text, t.tgenabled::text, t.tgtype::int,
+           n.nspname || '.' || p.proname, p.prosecdef
+    FROM pg_trigger t JOIN pg_proc p ON p.oid = t.tgfoid
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE NOT t.tgisinternal
 """
 POLICIES = """
     SELECT p.polrelid, p.polname::text, p.polpermissive, p.polcmd::text,
@@ -138,6 +149,7 @@ class _Relation:
     fks: list[_ForeignKey]
     policies: list[_Policy]
     checks: dict[str, str] = field(default_factory=dict)  # validated CHECKs, as deparsed
+    triggers: dict[str, tuple[str, int, str, bool]] = field(default_factory=dict)  # user triggers
 
 
 def check(
@@ -207,6 +219,9 @@ def _load(conn: "psycopg.Connection[Any]") -> dict[int, _Relation]:
     for oid, name, definition in conn.execute(CHECKS).fetchall():
         if oid in relations:
             relations[oid].checks[name] = definition
+    for oid, name, enabled, kind, function, definer in conn.execute(TRIGGERS).fetchall():
+        if oid in relations:
+            relations[oid].triggers[name] = (enabled, kind, function, definer)
     for oid, name, permissive, command, roles, using, check_ in conn.execute(POLICIES).fetchall():
         if oid in relations:
             policy = _Policy(name, permissive, COMMANDS[command], roles, using, check_)
@@ -258,7 +273,8 @@ def _root(rel: _Relation) -> list[str]:
 
 def _security_event(rel: _Relation, root: int | None) -> list[str]:
     """Decision 33: RLS forced, a nullable agency_id with its FK, the change-kind CHECKs and
-    exactly the three policies, so a missing IS NULL branch or an extra policy is a finding."""
+    exactly the three policies, so a missing IS NULL branch or an extra policy is a finding;
+    Decision 32: the shape trigger, enabled."""
     reasons = _rls(rel)
     if rel.columns.get("agency_id") != ("uuid", False):
         reasons.append("agency_id is not nullable uuid")
@@ -277,6 +293,9 @@ def _security_event(rel: _Relation, root: int | None) -> list[str]:
     )
     if shapes != EVENT_POLICIES or len(rel.policies) != len(EVENT_POLICIES):
         reasons.append("policies are not exactly the Decision 33 set")
+    name, shape = EVENT_TRIGGER
+    if rel.triggers.get(name) != shape:
+        reasons.append(f"trigger {name} missing, not enabled or changed")
     return reasons
 
 
