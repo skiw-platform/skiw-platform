@@ -10,3 +10,9 @@ class AccountsConfig(AppConfig):
         from accounts.auth import passwords
 
         passwords.warm()
+
+        # The starting-role seed runs in the agency seed transaction (slice spec Decision 5).
+        from accounts.access.seed import seed_starting_roles
+        from tenancy.seed import add_agency_step
+
+        add_agency_step(seed_starting_roles)

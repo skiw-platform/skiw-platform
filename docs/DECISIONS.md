@@ -1792,3 +1792,24 @@
 - **Correction:** the "For M4r-1f" note in the M4r-1e-i entry wrongly said the spec is silent on the seed lifting FORCE on `security_event`; fixed in place (Decision 33 says it).
 - **Exception to a rule?** no.
 - **Decided by:** builder within the approved spec.
+
+## 2026-11-24 — M4r-1f: starting-role seed
+- **Source:** slice spec v2.5 (hash bb262ec4), Decisions 5, 24, 28, 30–33, Flow 5.5 and the M4r-1f row; the §10 [A] list.
+- **Decision (owner):** two deviations from Flow 5.5 are accepted. The owner answered "ok accept both" on 2026-11-24 when shown both with the alternatives (a migrator SELECT policy on `role`, or a definer read function). They are builder-found conflicts between the approved spec and the real schema, accepted by the owner; the spec wording is to be aligned at the next spec touch (not a spec revision now).
+  1. **No plain read exists.** `role` has FORCE on and every policy is `TO skiw_app`, so the migrator sees no rows. The seed lifts FORCE on `role` (`ALTER TABLE … NO FORCE`, then `FORCE`) for the existence check on every `migrate`: a very short ACCESS EXCLUSIVE lock on `role` only; `role_permission` and `security_event` are touched only when a seed actually runs. The row's "no `ALTER TABLE` in the statement log" therefore does not hold literally; the test asserts that the only ALTERs of the second run are `role` NO FORCE / FORCE.
+  2. **The commit order of Flow 5.5 fails.** Restoring FORCE and then committing with `role_system_complete` deferred raises 55006 (Postgres refuses `ALTER TABLE` with pending trigger events), and the deferred check would run under FORCE as the migrator and see no ticks. The seed runs `SET CONSTRAINTS role_system_complete IMMEDIATE` (then back to DEFERRED) before restoring FORCE.
+- **What this PR does (no migration, no grant change):** `accounts/access/seed.py` with `SEED_DEFAULTS` (the Owner system role, all 31 pairs) and operator `seed`; a hook list in `tenancy/seed.py` (`add_agency_step`, run after the agency is written and FORCE is back on, in the same transaction) registered from `AccountsConfig.ready`; `insert_agency(..., steps=True)` for tests. Fresh agency: 1 role, 31 ticks, 32 events (1 `role.created` + 31 `permission.set`) all with operator `seed`; second run: no change, 0 events; an agency whose roles were edited is untouched; a failed seed leaves FORCE on and writes nothing. No Owner assignment is seeded (Decision 28 allows an Owner role with no holder until its first assignment).
+- **Choices the spec does not dictate:**
+  1. `tenancy` may not import `accounts`, so the seed is a registered hook (`add_agency_step`).
+  2. The seed requires `accounts.0028` applied (read from `django_migrations`); otherwise it skips silently, as the agency seed does when migrated back.
+  3. It refuses to start if FORCE is already off on `role`, `role_permission` or `security_event`, so its own restore cannot hide a dropped FORCE (M4r-1c-i choice 5).
+  4. It restores the caller's previous `skiw.operator`, so later writes in the same transaction are not recorded as `seed`.
+  5. Role id from Python `uuid4`; the ticks go in as one `INSERT … SELECT unnest(...)`, which still writes 31 events (one per row).
+  6. Semgrep `auth-tables-accounts-only` now excludes `app/accounts/access/seed.py` (comment cites Decision 33); it flagged the file's own docstring and the seed writes no `security_event` row itself.
+  7. `test_one_system_role_per_agency` changed: the deployment agency now holds its seeded Owner, so it expects a second system role there to be refused. No assertion weakened.
+  8. A failed role seed surfaces through the existing "agency seed failed (SQLSTATE …)" error.
+  9. The live test file has a small statement-recording cursor wrapper.
+- **Authority for lifting FORCE on `security_event`:** Decision 33 and the §10 [A] list; Decision 32's "with every trigger on" omits it (all triggers do stay on).
+- **Note:** `make lint`'s Semgrep scans only git-tracked files, so a new untracked file is not linted locally until it is added (`git add` first, or run Semgrep with `--no-git-ignore`).
+- **Exception to a rule?** no.
+- **Decided by:** owner (accepted both deviations, 2026-11-24); the rest builder within the approved spec.

@@ -14,9 +14,15 @@ second-agency gate). After every `migrate`, in its own transaction after the gua
 Outside tests the seed is the only writer of `agency`, and it inserts only into an empty table, so
 a host holds at most one row. `insert_agency` is the test-only twin with no one-agency check (the
 A/B fixtures need two agencies).
+
+After step 4, still in the same transaction, the seed runs the agency steps other apps added from
+their AppConfig.ready() (tenancy imports no app): accounts adds the starting-role seed (slice spec
+Decision 5, Flow 5.5). A raise in a step rolls the agency write back with it. `insert_agency` runs
+them only when asked (`steps=True`).
 """
 
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 import psycopg
@@ -31,8 +37,23 @@ MIGRATOR = "skiw_migrator"
 TABLE_MIGRATION = ("tenancy", "0004_agency")
 
 
+type AgencyStep = Callable[["psycopg.Cursor[Any]", uuid.UUID], object]
+_steps: list[AgencyStep] = []
+
+
 class SecondAgencyRefused(RuntimeError):
     pass
+
+
+def add_agency_step(step: AgencyStep) -> None:
+    """Run `step(cursor, agency_id)` in the agency seed transaction, after FORCE is back on."""
+    if step not in _steps:
+        _steps.append(step)
+
+
+def _run_steps(cursor: "psycopg.Cursor[Any]", agency_id: uuid.UUID) -> None:
+    for step in _steps:
+        step(cursor, agency_id)
 
 
 def _lift(cursor: "psycopg.Cursor[Any]") -> None:
@@ -77,15 +98,20 @@ def seed_deployment_agency(cursor: "psycopg.Cursor[Any]", agency_id: uuid.UUID, 
     return not ids
 
 
-def insert_agency(cursor: "psycopg.Cursor[Any]", agency_id: uuid.UUID, name: str) -> None:
-    """Tests only: insert an agency with no one-agency check (the A/B fixtures). Runs in the
-    caller's open transaction, which must roll back on a raise."""
+def insert_agency(
+    cursor: "psycopg.Cursor[Any]", agency_id: uuid.UUID, name: str, *, steps: bool = False
+) -> None:
+    """Tests only: insert an agency with no one-agency check (the A/B fixtures), and with
+    `steps` also run the agency steps (the starting-role seed). Runs in the caller's open
+    transaction, which must roll back on a raise."""
     _lift(cursor)
     cursor.execute(
         "INSERT INTO agency (id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
         (agency_id, name),
     )
     _restore(cursor)
+    if steps:
+        _run_steps(cursor, agency_id)
 
 
 def seed_after_migrate(using: str = DEFAULT_DB_ALIAS) -> None:
@@ -99,6 +125,7 @@ def seed_after_migrate(using: str = DEFAULT_DB_ALIAS) -> None:
             raise CommandError(f"agency seed: {exc}") from None
         try:
             seed_deployment_agency(cursor, agency_id, name)
+            _run_steps(cursor, agency_id)
         except SecondAgencyRefused as exc:
             raise CommandError(str(exc)) from None
         except psycopg.Error as exc:
