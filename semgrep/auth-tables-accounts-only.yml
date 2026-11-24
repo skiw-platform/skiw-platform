@@ -13,6 +13,10 @@ rules:
         - /app/accounts/auth/
         - /app/accounts/migrations/
         - /app/accounts/tests/
+        # The starting-role seed lifts FORCE on security_event for its own transaction, so the
+        # audit triggers can write the seed's events as the migrator (slice spec Decision 33,
+        # Flow 5.5). It writes no security_event row itself.
+        - /app/accounts/access/seed.py
     pattern-either:
       - patterns:
           - pattern-either:

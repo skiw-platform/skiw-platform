@@ -115,7 +115,7 @@ def test_role_names_are_unique_per_agency_ignoring_case(owner: "psycopg.Cursor[A
 
 
 def test_one_system_role_per_agency(owner: "psycopg.Cursor[Any]") -> None:
-    add_role(owner, "Owner", is_system=True)
+    """AGENCY already holds the Owner role `make migrate` seeded (M4r-1f)."""
     assert refused_by(owner, ROLE, [AGENCY, "Second owner", True]) == "role_one_system_per_agency"
     add_role(owner, "Owner", agency=B, is_system=True)
 
