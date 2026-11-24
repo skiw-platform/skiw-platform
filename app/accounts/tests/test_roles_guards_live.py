@@ -7,7 +7,7 @@ The two-connection races are M4r-1h; the grant audit (SELECT only) is test_acces
 import importlib
 import os
 import uuid
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any
 
@@ -50,7 +50,9 @@ def owner(level: IsolationLevel | None = None, agencies: bool = True) -> Iterato
             yield cursor
 
 
-def refusal(cursor: Cursor, sql: str, params: Sequence[object] | None = None) -> tuple[str, str]:
+def refusal(
+    cursor: Cursor, sql: str, params: Sequence[object] | Mapping[str, object] | None = None
+) -> tuple[str, str]:
     """Run `sql` in a savepoint; the SQLSTATE and message of the error it raises."""
     with pytest.raises(psycopg.Error) as caught, cursor.connection.transaction():
         cursor.execute(sql, params)
@@ -249,6 +251,8 @@ def test_truncate_is_refused_on_each_table(table: str) -> None:
 
 ROW, BEFORE, INSERT, DELETE, UPDATE, TRUNCATE = 1, 2, 4, 8, 16, 32
 LOCK, REFUSE = "public.roles_lock", "public.roles_refuse"
+TREE, SYSTEM = "public.org_unit_tree_guard", "public.role_system_guard"
+REMAINS = "public.user_role_owner_remains"
 EXPECTED_TRIGGERS = {
     *((t, f"{t}_roles_lock", ROW | BEFORE | INSERT | DELETE | UPDATE, LOCK, False) for t in TABLES),
     ("role_permission", "role_permission_refuse_update", ROW | BEFORE | UPDATE, REFUSE, False),
@@ -256,7 +260,15 @@ EXPECTED_TRIGGERS = {
     ("org_unit", "org_unit_refuse_delete", ROW | BEFORE | DELETE, REFUSE, False),
     ("role", "role_refuse_update", ROW | BEFORE | UPDATE, REFUSE, True),  # WHEN: not only name
     *((t, f"{t}_refuse_truncate", BEFORE | TRUNCATE, REFUSE, False) for t in TABLES),
+    # M4r-1d-ii (accounts.0027): the tree guard (UPDATE OF parent_id), the system-role guards and
+    # the two deferred constraint triggers (AFTER, no BEFORE bit).
+    ("org_unit", "org_unit_tree_guard", ROW | BEFORE | INSERT | UPDATE, TREE, False),
+    ("role", "role_system_guard", ROW | BEFORE | DELETE, SYSTEM, True),  # WHEN: OLD.is_system
+    ("role_permission", "role_permission_system_guard", ROW | BEFORE | DELETE, SYSTEM, False),
+    ("role", "role_system_complete", ROW | INSERT, "public.role_system_complete", True),
+    ("user_role", "user_role_owner_remains", ROW | UPDATE | DELETE, REMAINS, False),
 }
+DEFERRED = {"role_system_complete", "user_role_owner_remains"}  # DEFERRABLE INITIALLY DEFERRED
 
 
 def as_migrator(query: str, *params: object) -> list[tuple[Any, ...]]:
@@ -265,11 +277,13 @@ def as_migrator(query: str, *params: object) -> list[tuple[Any, ...]]:
 
 
 def test_every_trigger_on_the_four_tables_is_listed_and_enabled() -> None:
-    """Exactly the M4r-1d-i triggers (M4r-1d-ii and 1e add theirs), each enabled in the normal
-    session_replication_role ('O'), with its event, timing, level and function."""
+    """Exactly the M4r-1d triggers (M4r-1e adds its own), each enabled in the normal
+    session_replication_role ('O'), with its event, timing, level and function; only the two
+    constraint triggers are deferred."""
     rows = as_migrator(
         "SELECT c.relname::text, t.tgname::text, t.tgenabled::text, t.tgtype::int,"
-        " n.nspname || '.' || p.proname, t.tgqual IS NOT NULL"
+        " n.nspname || '.' || p.proname, t.tgqual IS NOT NULL,"
+        " t.tgconstraint <> 0 AND t.tgdeferrable AND t.tginitdeferred"
         " FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid"
         " JOIN pg_proc p ON p.oid = t.tgfoid JOIN pg_namespace n ON n.oid = p.pronamespace"
         " WHERE NOT t.tgisinternal AND t.tgrelid = ANY(%s::regclass[])",
@@ -277,11 +291,43 @@ def test_every_trigger_on_the_four_tables_is_listed_and_enabled() -> None:
     )
     assert {row[2] for row in rows} == {"O"}
     assert {
-        (table, name, kind, function, when) for table, name, _, kind, function, when in rows
+        (table, name, kind, function, when) for table, name, _, kind, function, when, _ in rows
     } == (EXPECTED_TRIGGERS)
+    assert {row[1] for row in rows if row[6]} == DEFERRED
 
 
-@pytest.mark.parametrize("function", [LOCK, REFUSE])
+# BEFORE row triggers of one event fire in name order (CREATE TRIGGER, PostgreSQL 17): the lock
+# first, then the guard that relies on it. Names compare as bytes (the name type), as here.
+FIRING_ORDER = {
+    ("org_unit", INSERT): ["org_unit_roles_lock", "org_unit_tree_guard"],
+    ("org_unit", UPDATE): ["org_unit_roles_lock", "org_unit_tree_guard"],
+    ("role", DELETE): ["role_roles_lock", "role_system_guard"],
+    ("role_permission", DELETE): ["role_permission_roles_lock", "role_permission_system_guard"],
+}
+
+
+@pytest.mark.parametrize(("table", "event"), FIRING_ORDER)
+def test_each_guard_fires_after_the_roles_lock(table: str, event: int) -> None:
+    rows = as_migrator(
+        "SELECT tgname::text, tgtype::int FROM pg_trigger WHERE NOT tgisinternal"
+        ' AND tgrelid = %s::regclass ORDER BY tgname COLLATE "C"',
+        f"public.{table}",
+    )
+    ordered = [name for name, kind in rows if kind & (ROW | BEFORE | event) == ROW | BEFORE | event]
+    assert ordered == FIRING_ORDER[table, event] == sorted(ordered)
+
+
+def test_the_tree_guard_fires_only_on_parent_id_updates() -> None:
+    assert as_migrator(
+        "SELECT ARRAY(SELECT attname::text FROM pg_attribute"
+        " WHERE attrelid = tgrelid AND attnum = ANY(tgattr)) FROM pg_trigger"
+        " WHERE tgname = 'org_unit_tree_guard'"
+    ) == [(["parent_id"],)]
+
+
+@pytest.mark.parametrize(
+    "function", [LOCK, REFUSE, TREE, SYSTEM, REMAINS, "public.role_system_complete"]
+)
 def test_the_functions_are_invokers_with_a_pinned_search_path(function: str) -> None:
     assert as_migrator(
         "SELECT p.proowner::regrole::text, p.prosecdef, p.proconfig, l.lanname::text,"
@@ -321,8 +367,10 @@ def test_the_reverse_refuses_while_skiw_app_holds_a_write_grant(table: str, gran
 
 
 def test_without_a_write_grant_the_reverse_drops_every_trigger_and_both_functions() -> None:
+    """0027's reverse runs first, as `migrate accounts 0025` would order them."""
+    later = importlib.import_module("accounts.migrations.0027_tree_system_role_guards")
     with migrator_rolled_back() as cursor:
-        for statement in MIGRATION.REVERSE:
+        for statement in [*later.REVERSE, *MIGRATION.REVERSE]:
             cursor.execute(statement)
         left = cursor.execute(
             "SELECT count(*) FROM pg_trigger"

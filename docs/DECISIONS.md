@@ -1742,3 +1742,20 @@
   7. Tests turn other tables' triggers off inside a rolled-back owner transaction when the trigger under test must be the only one that can act; two-connection races stay in M4r-1h. Two existing tests (`test_org_tables_live` delete cases, `test_agency_live` `TRUNCATE agency CASCADE`) do the same, because the new triggers now fire first.
 - **Exception to a rule?** no.
 - **Decided by:** owner (split, 2026-11-24); the rest builder within the approved spec.
+
+## 2026-11-24 — M4r-1d-ii: org_unit tree guard, system-role guards and deferred checks
+- **Source:** slice spec v2.5 (hash bb262ec4), Decisions 27, 28 and the M4r-1d row; second half of M4r-1d (the owner's "split" of 2026-11-24, see the M4r-1d-i entry); notes from the PR 179 review.
+- **What this PR does (migration 0027):** BEFORE INSERT OR UPDATE OF parent_id trigger `org_unit_tree_guard` (bounded walk: no cycle, depth cap 32); BEFORE DELETE guards on `role` and `role_permission` that refuse deleting the system (Owner) role or any of its ticks; deferred constraint triggers `role_system_complete` and `user_role_owner_remains` (checked at commit). Functions plpgsql, SECURITY INVOKER, pinned `search_path`, EXECUTE revoked from PUBLIC; the reverse starts with 0026's write-grant guard. No write grants.
+- **Choices the spec does not dictate:**
+  1. No plain `(agency uuid)` lock helper (PR 179 review note): the trigger functions run as the writer, so a nested helper would need EXECUTE for `skiw_app` and become directly callable. Each deferred check instead takes the roles lock again with 0026's own lock expression (a no-op while already held) and does not repeat the isolation check, because the isolation level cannot change after the first query and the row's lock trigger already refused anything but READ COMMITTED.
+  2. Depth: the root is level 1; no path may have more than 32 units. M4r-4's `scoped()` must use the same meaning.
+  3. The tree guard also walks the moved unit's descendants, not only the ancestors Decision 27 names; otherwise a move could push a subtree past 32 levels. (Beyond the spec text.)
+  4. `user_role_owner_remains` fails closed if the writer can no longer see the agency at commit; otherwise a `skiw_app` writer could remove the last Owner assignment, clear its tenant token and commit. The assignment's unit (never deletable) is the visibility probe. (Beyond the spec text.)
+  5. Errors, none naming data: a cycle, the depth cap and both deferred checks raise 23514; the Owner guards raise 42501.
+  6. One function behind both Owner guards, with a nested IF (PL/pgSQL compiles an expression on first use and `role` has no `role_id` column).
+  7. Deferred checks are tested with SET CONSTRAINTS ALL IMMEDIATE in a rolled-back transaction for passing cases and a real COMMIT for refused cases.
+  8. Test change: the 0026 reverse test now runs 0027's reverse first, as a real `migrate accounts 0025` would. No assertion weakened.
+- **Not in this PR:** the optional PR 178 P3 (`tgqual IS NULL` in the schema-check trigger rule, plus a mutant) was built and then cut to keep the PR under 600 lines; it is still open for the next schema-check touch.
+- **Open for M4r-1h:** a test of choice 4 as `skiw_app` (clear the token before commit); today it is simulated as the migrator with FORCE turned back on.
+- **Exception to a rule?** no.
+- **Decided by:** builder within the approved spec; choices 3 and 4 go beyond the spec text and need the reviewer's and owner's eye.
