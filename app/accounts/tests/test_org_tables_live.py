@@ -180,12 +180,21 @@ def test_a_unit_cannot_sit_under_another_agencys_unit(owner: Cursor) -> None:
 def test_an_assigned_row_cannot_be_deleted(owner: Cursor, sql: str, column: str) -> None:
     ids = assignment(owner, X)
     assign(owner, X, ids, "both")
+    if column == "org_unit_id":
+        behind_the_delete_refusal(owner)
     assert refused_by(owner, sql, [ids[column]]) == f"user_role_{column}_fk"
+
+
+def behind_the_delete_refusal(cursor: Cursor) -> None:
+    """org_unit refuses every DELETE (accounts.0026, test_roles_guards_live); the owner turns
+    that trigger off for this rolled-back transaction, so the FK behind it is still shown."""
+    cursor.execute("ALTER TABLE org_unit DISABLE TRIGGER org_unit_refuse_delete")
 
 
 def test_a_unit_with_a_child_cannot_be_deleted(owner: Cursor) -> None:
     root = add_root(owner, X)
     add_unit(owner, X, root)
+    behind_the_delete_refusal(owner)
     assert refused_by(owner, "DELETE FROM org_unit WHERE id = %s", [root]) == (
         "org_unit_parent_id_fk"
     )
