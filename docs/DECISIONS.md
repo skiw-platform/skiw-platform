@@ -1698,3 +1698,18 @@
   5. The generated migration `0020` (172 lines, one `AddConstraint` per constraint because of the self-referencing FK) is kept as Django wrote it; folding it into `CreateModel` would save about 60 lines but means hand-editing generated code.
 - **Exception to a rule?** no.
 - **Decided by:** builder within the approved spec; the owner asked for the build ("build", 2026-11-23).
+
+## 2026-11-23 — M4r-1c-i: security_event agency isolation (column, CHECKs, RLS, schema-check rule)
+- **Source:** slice spec v2.5 (hash bb262ec4), Decision 33 and the M4r-1c row (which names the split "RLS + schema-check rule / shape trigger + key lists"); owner decisions of 2026-11-21 (Q6, DECISIONS 2026-11-21) and 2026-11-22 (one agency per deployment).
+- **Decision (owner):** M4r-1c is built as two PRs, M4r-1c-i (this one) and M4r-1c-ii (the `security_event_shape` trigger, closed key lists, the depth rule and the probe-trigger fixture). The owner chose "split" on 2026-11-23 when asked; the roles track is now 25 PRs.
+- **What this PR does:** `security_event` gets a nullable `agency_id` (FK to `agency`), the two CHECKs (the ten change kinds exactly when `agency_id` is set; change kinds have no `email_hmac` or `ip_hmac`), ENABLE + FORCE RLS and the three policies of Decision 33 for `skiw_app`, a named schema-check rule, and a hand-registered TEN-08 case. Grants are unchanged and no SQL function is added. Every writer and role Decision 33 names was checked against the code; none is missed.
+- **Choices the spec does not dictate:**
+  1. A new index `security_event_agency_id`, because the schema check that RLS can use an agency index fails for the table without one. The migration linter refuses a plain `CREATE INDEX`, so it is a separate non-atomic migration (0023) with `AddIndexConcurrently`.
+  2. The reverse of migration 0022 deletes change-kind rows (reversing would otherwise lose their agency and the CHECK could not be re-applied). No change-kind row can exist outside tests until M4r-1g gives `skiw_app` write grants and M4r-1e adds the audit triggers, and no real data exists on any host. Revisit before M4r-1g: from then on the reverse must refuse while change rows exist.
+  3. The two CHECKs live in the model (so `makemigrations --check` catches drift); the FK is hand-written, as in M4r-1a and M4r-1b. The list of ten kinds exists three times (model, a frozen copy in 0022, the deparsed text in `check.py`) because `tenancy` cannot import `accounts`.
+  4. `test_queue_grants`: the global-list test treats a listed global table that has an `agency_id` column as global, as `check.py` does.
+  5. The test helper that writes as the table owner asserts FORCE is on first; otherwise it silently restored FORCE and hid a dropped-FORCE mutant.
+  6. The spec's "evaluated once (InitPlan)" item is covered by the existing harness plan test, which now includes `security_event`.
+  7. Until M4r-1c-ii, change rows are planted by direct INSERT as `skiw_app` (no shape trigger yet); M4r-1c-ii switches the harness case and the own-agency test to the probe trigger.
+- **Exception to a rule?** no.
+- **Decided by:** owner (split, 2026-11-23); the rest builder within the approved spec.

@@ -4,13 +4,15 @@ Every relation of kind r, p, v, m or f outside `pg_*` and `information_schema` i
 (tested first, so `bridge_session` with its `agency_id` is global), the tenant root `public.agency`,
 or a tenant table (an `agency_id` column) of the `tenant_table()` shape. Anything else fails, and so
 does any PUBLIC, `true` or `current_setting` policy. Predicates are compared as `pg_get_expr`
-deparses them (plan A4; `guard` is never on `search_path`, so it stays qualified). All relations
+deparses them (plan A4; `guard` is never on `search_path`, so it stays qualified). The listed global
+`security_event` has a named rule of its own (slice spec Decision 33). All relations
 are classified, so an FK is judged by its target; `schemas` limits only what is reported. Reasons
 name tables, policies and constraints, never data.
 """
 
+from collections import Counter
 from collections.abc import Set
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import psycopg
@@ -28,6 +30,39 @@ TEMPLATE = {
     "DELETE": (DEPARSED, None),
 }
 COMMANDS = {"r": "SELECT", "a": "INSERT", "w": "UPDATE", "d": "DELETE", "*": "ALL"}
+
+# Decision 33 (M4r-1c): security_event is global with an optional agency. Exactly these policies,
+# all TO skiw_app, as (permissive, command, USING, WITH CHECK): no UPDATE or DELETE policy.
+SECURITY_EVENT = "public.security_event"
+EVENT_DEPARSED = (
+    "((agency_id IS NULL) OR (agency_id = ( SELECT guard.current_agency() AS current_agency)))"
+)
+EVENT_POLICIES = Counter(
+    [
+        (False, "ALL", EVENT_DEPARSED, EVENT_DEPARSED),
+        (True, "SELECT", EVENT_DEPARSED, None),
+        (True, "INSERT", None, EVENT_DEPARSED),
+    ]
+)
+# The ten change kinds of Decision 30 (accounts.auth.tables.CHANGE_KINDS), as the CHECKs deparse.
+_KINDS = (
+    "role.created", "role.renamed", "role.deleted", "permission.set", "permission.unset",
+    "role.assigned", "role.unassigned", "org.added", "org.moved", "org.renamed",
+)  # fmt: skip
+_CHANGE = (
+    "((kind)::text = ANY ((ARRAY["
+    + ", ".join(f"'{kind}'::character varying" for kind in _KINDS)
+    + "])::text[]))"
+)
+EVENT_CHECKS = {
+    "security_event_change_kind_agency": (
+        f"CHECK ((({_CHANGE} AND (agency_id IS NOT NULL)) OR"
+        f" ((NOT {_CHANGE}) AND (agency_id IS NULL))))"
+    ),
+    "security_event_change_kind_no_hmac": (
+        f"CHECK (((NOT {_CHANGE}) OR ((email_hmac IS NULL) AND (ip_hmac IS NULL))))"
+    ),
+}
 
 RELATIONS = """
     SELECT c.oid, n.nspname, n.nspname || '.' || c.relname, c.relkind::text,
@@ -50,6 +85,10 @@ CONSTRAINTS = """
                  JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.num
                  ORDER BY k.i)
     FROM pg_constraint con WHERE con.contype IN ('p', 'u', 'f')
+"""
+CHECKS = """
+    SELECT conrelid, conname::text, pg_get_constraintdef(oid)
+    FROM pg_constraint WHERE contype = 'c' AND convalidated
 """
 POLICIES = """
     SELECT p.polrelid, p.polname::text, p.polpermissive, p.polcmd::text,
@@ -98,6 +137,7 @@ class _Relation:
     keys: list[tuple[str, list[str]]]  # (contype, columns) of p and u constraints
     fks: list[_ForeignKey]
     policies: list[_Policy]
+    checks: dict[str, str] = field(default_factory=dict)  # validated CHECKs, as deparsed
 
 
 def check(
@@ -116,7 +156,9 @@ def check(
         if schemas is not None and rel.schema not in schemas:
             continue
         reasons = _policy_rules(rel)
-        if rel.name in allowed:
+        if rel.name == SECURITY_EVENT:
+            reasons += _security_event(rel, root)
+        elif rel.name in allowed:
             pass
         elif rel.name == ROOT_TABLE:
             reasons += _root(rel)
@@ -162,6 +204,9 @@ def _load(conn: "psycopg.Connection[Any]") -> dict[int, _Relation]:
             relations[oid].fks.append(_ForeignKey(name, target, columns, target_columns))
         else:
             relations[oid].keys.append((kind, columns))
+    for oid, name, definition in conn.execute(CHECKS).fetchall():
+        if oid in relations:
+            relations[oid].checks[name] = definition
     for oid, name, permissive, command, roles, using, check_ in conn.execute(POLICIES).fetchall():
         if oid in relations:
             policy = _Policy(name, permissive, COMMANDS[command], roles, using, check_)
@@ -208,6 +253,30 @@ def _root(rel: _Relation) -> list[str]:
     shape = ("SELECT", [APP_ROLE], ROOT_DEPARSED, None)
     if [(p.command, p.roles, p.using, p.check) for p in permissive] != [shape]:
         reasons.append("the tenant root needs exactly one permissive SELECT policy on id")
+    return reasons
+
+
+def _security_event(rel: _Relation, root: int | None) -> list[str]:
+    """Decision 33: RLS forced, a nullable agency_id with its FK, the change-kind CHECKs and
+    exactly the three policies, so a missing IS NULL branch or an extra policy is a finding."""
+    reasons = _rls(rel)
+    if rel.columns.get("agency_id") != ("uuid", False):
+        reasons.append("agency_id is not nullable uuid")
+    if not any(
+        (fk.target, fk.columns, fk.target_columns) == (root, ["agency_id"], ["id"])
+        for fk in rel.fks
+    ):
+        reasons.append("no FK (agency_id) to agency(id)")
+    reasons += [
+        f"CHECK {name} missing or changed"
+        for name, definition in EVENT_CHECKS.items()
+        if rel.checks.get(name) != definition
+    ]
+    shapes = Counter(
+        (p.permissive, p.command, p.using, p.check) for p in rel.policies if p.roles == [APP_ROLE]
+    )
+    if shapes != EVENT_POLICIES or len(rel.policies) != len(EVENT_POLICIES):
+        reasons.append("policies are not exactly the Decision 33 set")
     return reasons
 
 
