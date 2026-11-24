@@ -27,6 +27,7 @@ from accounts.tests.test_roles_guards_live import (
     Y,
     owner,
     refusal,
+    revoke_writes,
     tick,
 )
 from tenancy import seed
@@ -289,12 +290,14 @@ def test_the_holder_check_fails_closed_when_the_writer_cannot_see_the_agency() -
 def test_the_reverse_refuses_while_skiw_app_holds_a_write_grant() -> None:
     assert MIGRATION.REVERSE[0] == MIGRATION.LOCKS.GUARD  # the 0026 guard, the same statement
     with owner(agencies=False) as cursor:
+        revoke_writes(cursor)  # accounts.0030's grants, so the one below is what the guard sees
         cursor.execute("GRANT DELETE ON user_role TO skiw_app")
         assert refusal(cursor, MIGRATION.REVERSE[0])[0] == "55000"
 
 
 def test_without_a_write_grant_the_reverse_drops_its_triggers_and_functions() -> None:
     with owner(agencies=False) as cursor:
+        revoke_writes(cursor)
         for statement in MIGRATION.REVERSE:
             cursor.execute(statement)
         names = [name for name, _, _ in MIGRATION.TRIGGERS]

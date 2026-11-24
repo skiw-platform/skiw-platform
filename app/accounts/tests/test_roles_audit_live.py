@@ -21,7 +21,15 @@ from django.db import connection, transaction
 from accounts.access.catalogue import PAIRS
 from accounts.tests.test_access_tables_live import add_role
 from accounts.tests.test_org_tables_live import add_unit, assign, assignment
-from accounts.tests.test_roles_guards_live import LIFTED, Cursor, X, owner, refusal, tick
+from accounts.tests.test_roles_guards_live import (
+    LIFTED,
+    Cursor,
+    X,
+    owner,
+    refusal,
+    revoke_writes,
+    tick,
+)
 from accounts.tests.test_roles_tree_owner_live import (
     EVERY_PAIR,
     INCOMPLETE,
@@ -268,9 +276,11 @@ def test_the_event_carries_the_rows_agency_and_only_that_agency_sees_it() -> Non
 def test_the_reverse_refuses_with_a_write_grant_and_otherwise_drops_the_audit_triggers() -> None:
     assert MIGRATION.REVERSE[0] == MIGRATION.LOCKS.GUARD  # the 0026 guard, the same statement
     with owner(agencies=False) as cursor:
+        revoke_writes(cursor)  # accounts.0030's grants, so the one below is what the guard sees
         cursor.execute("GRANT INSERT ON role_permission TO skiw_app")
         assert refusal(cursor, MIGRATION.REVERSE[0])[0] == "55000"
     with owner(agencies=False) as cursor:
+        revoke_writes(cursor)
         for statement in MIGRATION.REVERSE:
             cursor.execute(statement)
         left = cursor.execute("SELECT count(*) FROM pg_trigger WHERE tgname = ANY(%s)", [AUDITS])

@@ -2,7 +2,7 @@
 slice spec Decisions 27, 28, 32; accounts.0026). skiw_app may only SELECT the four tables until
 M4r-1g, so every write here runs as the owner, skiw_migrator, on one connection, in one transaction
 under transaction-local NO FORCE with a test skiw.operator (the tenancy.seed pattern), rolled back.
-The two-connection races are M4r-1h; the grant audit (SELECT only) is test_access_tables_live."""
+The two-connection races are M4r-1h; the grant audit (Decision 3) is test_access_tables_live."""
 
 import importlib
 import os
@@ -22,6 +22,7 @@ from tenancy import seed
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 
 MIGRATION = importlib.import_module("accounts.migrations.0026_roles_lock_refusals")
+WRITE_GRANTS = importlib.import_module("accounts.migrations.0030_roles_write_grants")
 TABLES = MIGRATION.TABLES
 LIFTED = ("app_user", "security_event", *TABLES)  # NO FORCE: the writes and their audit events
 X, Y = uuid.uuid4(), uuid.uuid4()  # this module's agencies, gone with each rollback
@@ -367,26 +368,35 @@ def migrator_rolled_back() -> Iterator[Cursor]:
         yield cursor
 
 
+def revoke_writes(cursor: Cursor) -> None:
+    """accounts.0030's reverse, which `migrate` runs before any earlier roles reverse."""
+    for statement in WRITE_GRANTS.REVERSE:
+        cursor.execute(statement)
+
+
 GRANTS = [
     *((table, grant) for table in TABLES for grant in ("INSERT", "UPDATE", "DELETE", "TRUNCATE")),
-    ("role", "UPDATE (name)"),  # a column grant, as Decision 3's role UPDATE will be
+    ("role", "UPDATE (name)"),  # a column grant, as Decision 3's role UPDATE is
     ("role", "INSERT (name)"),
 ]
 
 
 @pytest.mark.parametrize(("table", "grant"), GRANTS)
 def test_the_reverse_refuses_while_skiw_app_holds_a_write_grant(table: str, grant: str) -> None:
-    """Decision 32 "Deployment sequence": the grant exists only in this rolled-back transaction."""
+    """Decision 32 "Deployment sequence": with 0030's grants revoked, the one grant exists only in
+    this rolled-back transaction."""
     with migrator_rolled_back() as cursor:
+        revoke_writes(cursor)
         cursor.execute(f"GRANT {grant} ON {table} TO skiw_app")
         assert refusal(cursor, MIGRATION.REVERSE[0]) == GUARD_REFUSED
 
 
 def test_without_a_write_grant_the_reverse_drops_every_trigger_and_both_functions() -> None:
-    """0029's, 0028's and 0027's reverses run first, as `migrate accounts 0025` would order them."""
+    """0030's, 0029's, 0028's and 0027's reverses run first, as `migrate accounts 0025` would."""
     later = [
         statement
         for name in (
+            "0030_roles_write_grants",
             "0029_org_unit_audit_trigger",
             "0028_role_audit_triggers",
             "0027_tree_system_role_guards",

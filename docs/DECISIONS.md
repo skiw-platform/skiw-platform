@@ -1813,3 +1813,20 @@
 - **Note:** `make lint`'s Semgrep scans only git-tracked files, so a new untracked file is not linted locally until it is added (`git add` first, or run Semgrep with `--no-git-ignore`).
 - **Exception to a rule?** no.
 - **Decided by:** owner (accepted both deviations, 2026-11-24); the rest builder within the approved spec.
+
+## 2026-11-24 — M4r-1g-i: write grants (migration) and its precondition tests
+- **Source:** slice spec v2.5 (hash bb262ec4), Decisions 3, 32, 33 and the M4r-1g row; the PR 183 review (deferred items).
+- **Decision (owner):** M4r-1g is built as three PRs: M4r-1g-i (this one: migration 0030 and the tests of the migration itself), M4r-1g-ii (the single-statement tests as `skiw_app`: commit with record, refusal, rollback, seed; TEN-08 write isolation) and M4r-1g-iii (the deferred small items: reverse of 0022 refuses while change rows exist, the event `at` assertion, the schema-check `tgqual IS NULL` rule, and the two optional PR 183 P3s). The owner wrote "3. split" on 2026-11-24 (read by the builder as a split into three; the spec names no split for 1g); the roles track is now 29 PRs.
+- **What this PR does (migration 0030):** the first statement is a precondition DO block that raises (55000, one fixed message naming no data) unless the 22 Decision 32 triggers all exist with `tgenabled = 'O'` and `security_event` has RLS enabled and forced and exactly its three policies in the expected shape; only then it grants Decision 3's writes to `skiw_app`: `role` SELECT, INSERT, UPDATE (`name`, column grant), DELETE; `role_permission` SELECT, INSERT, DELETE; `org_unit` SELECT, INSERT, UPDATE; `user_role` SELECT, INSERT, DELETE; `permission` SELECT only; no TRUNCATE. The reverse revokes exactly those and drops the added policies. The reverse guards of 0026 to 0029 refuse while a write grant exists, so Django unapplies 0030 first.
+- **Choices the spec does not dictate:**
+  1. `org_unit` gets table-level UPDATE: §4 lists no columns and `org_unit_audit` already refuses changes to `id`, `agency_id`, `kind` and `created_at`.
+  2. 0030 also creates the permissive `{table}_ins`, `_upd` and `_del` policies (tenant template shape) for each granted command; with FORCE RLS a granted command with no permissive policy is refused.
+  3. `DECISION_32` is a frozen copy of the 22 trigger names, pinned by a test against what 0025 to 0029 create (not read from them at run time).
+  4. ENABLE REPLICA and ENABLE ALWAYS both count as "not enabled" (`tgenabled = 'O'` required).
+  5. The precondition checks each `security_event` policy's exact shape (name, permissive or restrictive, command, deparsed USING and WITH CHECK, role `skiw_app`) and requires exactly three policies.
+  6. Error 55000 (object_not_in_prerequisite_state), one message for every failure.
+  7. The prefix walk (all 27 states from 0030 back to 0016 and forward) runs Django's MigrationExecutor inside one rolled-back transaction as `skiw_migrator` (NOCREATEDB); migration 0023 builds its index CONCURRENTLY and cannot run in a transaction, so the walk records it as applied (fake); a static test shows it grants nothing.
+  8. Existing tests adjusted, none weakened: the four earlier reverse-guard tests (0026 to 0029) call `revoke_writes` first; the "SELECT only" tests became exact-grant tests; `isolation_cases.py` `_audited` now sets only `skiw.operator` (no NO FORCE lift), so harness inserts run as `skiw_app` and any refusal comes from RLS; the queue-grants allow-list and column grant were updated.
+- **Open for M4r-1g-ii:** tenant isolation of the column-level `role` UPDATE(`name`) (the harness command set leaves it out); the TEN-08 harness now inserts as `skiw_app`, which already covers part of 1g-ii's write-isolation scope.
+- **Exception to a rule?** no.
+- **Decided by:** owner (split into three, 2026-11-24); the rest builder within the approved spec.

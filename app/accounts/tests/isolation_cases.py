@@ -109,16 +109,13 @@ type Insert = Callable[[Executes, uuid.UUID, Mapping[str, uuid.UUID]], uuid.UUID
 
 
 def _audited(insert: Insert) -> Insert:
-    """For the roles tables, written by the owner until M4r-1g: their audit triggers (0028, 0029)
-    need a skiw.operator and write security_event as the owner, so its FORCE is lifted around the
-    insert and set again before the harness commits."""
+    """For the roles tables, written as skiw_app from M4r-1g (accounts.0030): their audit triggers
+    (0028, 0029) need a transaction-local skiw.operator and write the event under the writer's own
+    security_event RLS, so a refused insert is refused by RLS, not by a missing operator."""
 
     def run(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]) -> uuid.UUID:
         cursor.execute("SELECT set_config('skiw.operator', 'test-operator', true)", [])
-        cursor.execute("ALTER TABLE public.security_event NO FORCE ROW LEVEL SECURITY", [])
-        row = insert(cursor, agency, parents)
-        cursor.execute("ALTER TABLE public.security_event FORCE ROW LEVEL SECURITY", [])
-        return row
+        return insert(cursor, agency, parents)
 
     return run
 
@@ -161,25 +158,26 @@ CASES = [
         frozenset({"SELECT", "INSERT"}),
         {**USER, "factor_id": "public.user_factor"},
     ),
-    # SELECT only until M4r-1g: the harness writes their rows as the owner (tenancy isolation.py).
-    # org_unit's self-FK: its parent is the agency root, made by `_org_unit` with no parents.
-    IsolationCase("public.role", _audited(_role), frozenset({"SELECT"})),
+    # Decision 3 (accounts.0030). role's UPDATE is a column grant on name; the harness's UPDATE
+    # checks write agency_id, so role is listed without it and its append_only check shows an
+    # agency_id UPDATE refused. org_unit's self-FK: its parent is the agency root (`_org_unit`).
+    IsolationCase("public.role", _audited(_role), frozenset({"SELECT", "INSERT", "DELETE"})),
     IsolationCase(
         "public.role_permission",
         _audited(_role_permission),
-        frozenset({"SELECT"}),
+        frozenset({"SELECT", "INSERT", "DELETE"}),
         {"role_id": "public.role"},
     ),
     IsolationCase(
         "public.org_unit",
         _audited(_org_unit),
-        frozenset({"SELECT"}),
+        frozenset({"SELECT", "INSERT", "UPDATE"}),
         {"parent_id": "public.org_unit"},
     ),
     IsolationCase(
         "public.user_role",
         _audited(_user_role),
-        frozenset({"SELECT"}),
+        frozenset({"SELECT", "INSERT", "DELETE"}),
         {**USER, "role_id": "public.role", "org_unit_id": "public.org_unit"},
     ),
     # Hand-registered (slice spec Decision 33, M4r-1c): security_event is a listed global, so the

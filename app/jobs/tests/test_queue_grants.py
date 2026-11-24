@@ -54,8 +54,9 @@ TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFEREN
 # django_session: D6 "Revocation is a row delete" (accounts.0001; flush and cycle_key delete).
 DELETE_ALLOW_LIST = {"procrastinate_periodic_defers", "procrastinate_workers", "django_session"}
 # Tenant tables skiw_app may DELETE from, inside its agency only (RLS). accounts.0007 (plan M3d):
-# a factor is removed, and a recovery code is used up, by a DELETE.
-TENANT_DELETE_ALLOW_LIST = {"user_factor"}
+# a factor is removed, and a recovery code is used up, by a DELETE. accounts.0030 (M4r-1g, slice
+# spec Decision 3): a role is deleted, a tick unticked and an assignment unassigned by a DELETE.
+TENANT_DELETE_ALLOW_LIST = {"user_factor", "role", "role_permission", "user_role"}
 # accounts.0002 (plan M3c): the global pre-tenant tables of spec §4.1; no DELETE, no TRUNCATE.
 AUTH_TABLES = {
     "auth_throttle": {"SELECT", "INSERT", "UPDATE"},
@@ -269,13 +270,14 @@ def test_app_role_cannot_create_in_the_queue_schema() -> None:
 
 # accounts.0009 (plan M3e-1b) and 0015 (M3g-1b): the owner of the guard.auth_lookup_* functions
 # reads exactly these columns of app_user and user_factor (BYPASSRLS, before the tenant is known);
-# every other column grant is refused.
+# skiw_app may rename a role (accounts.0030); every other column grant is refused.
 COLUMN_GRANTS = {
     ("app_user", "email", LOOKUP_ROLE, "SELECT"),
     ("app_user", "login_blob_ct", LOOKUP_ROLE, "SELECT"),
     ("user_factor", "credential_id", LOOKUP_ROLE, "SELECT"),
     ("user_factor", "lookup_blob_ct", LOOKUP_ROLE, "SELECT"),
     ("user_factor", "retired_at", LOOKUP_ROLE, "SELECT"),
+    ("role", "name", APP_ROLE, "UPDATE"),  # accounts.0030: Decision 3's rename, a column grant
 }
 
 
