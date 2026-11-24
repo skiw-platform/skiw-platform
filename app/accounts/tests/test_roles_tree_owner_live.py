@@ -19,9 +19,9 @@ from accounts.access.catalogue import PAIRS
 from accounts.tests.test_access_tables_live import add_role
 from accounts.tests.test_org_tables_live import add_root, add_unit, add_user, assign, assignment
 from accounts.tests.test_roles_guards_live import (
+    LIFTED,
     NOT_READ_COMMITTED,
     REFUSED,
-    TABLES,
     Cursor,
     X,
     Y,
@@ -182,7 +182,7 @@ def commit_refusal(build: Callable[[Cursor, uuid.UUID], None]) -> tuple[str, str
     COMMIT raises. If a COMMIT is accepted (a broken check), FORCE goes back on before the fail."""
     with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn, conn.cursor() as cursor:
         cursor.execute("SELECT set_config('skiw.operator', 'test-operator', true)")
-        for table in ("app_user", *TABLES):
+        for table in LIFTED:
             cursor.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
         agency = uuid.uuid4()
         seed.insert_agency(cursor, agency, "Commit test")
@@ -192,7 +192,7 @@ def commit_refusal(build: Callable[[Cursor, uuid.UUID], None]) -> tuple[str, str
         except psycopg.Error as error:
             return str(error.sqlstate), str(error.diag.message_primary)
         with conn.transaction():
-            for table in ("app_user", *TABLES):
+            for table in LIFTED:
                 cursor.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
         pytest.fail("the COMMIT was accepted")
 

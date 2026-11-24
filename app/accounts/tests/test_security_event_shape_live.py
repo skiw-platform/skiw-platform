@@ -176,15 +176,22 @@ NAMES_THE_TABLE = r"""
 """
 
 
-def test_only_the_two_lookup_definers_name_security_event_in_the_database() -> None:
-    """Decision 32: no other function can reach depth 2 with a change kind; the M4r-1e audit
-    functions join the list. The probe trigger is removed for the scan."""
+def test_only_the_lookup_definers_and_audit_functions_name_security_event() -> None:
+    """Decision 32: no other function can reach depth 2 with a change kind. Today the two lookup
+    definers and M4r-1e-i's three audit functions; M4r-1e-ii adds org_unit_audit (the six).
+    The probe trigger is removed for the scan."""
     event_probe.remove()
     try:
         found = sorted(name for (name,) in as_migrator(NAMES_THE_TABLE))
     finally:
         event_probe.install()
-    assert found == ["guard.auth_lookup_credential", "guard.auth_lookup_login"]
+    assert found == [
+        "guard.auth_lookup_credential",
+        "guard.auth_lookup_login",
+        "public.role_audit",
+        "public.role_permission_audit",
+        "public.user_role_audit",
+    ]
 
 
 def test_skiw_app_cannot_create_temporary_objects() -> None:

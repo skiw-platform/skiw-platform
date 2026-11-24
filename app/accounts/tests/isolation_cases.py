@@ -4,7 +4,7 @@ names only the columns the row needs."""
 
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 from accounts.factor_model import TOTP_SECRET_CT_LENGTH
 from accounts.stepup_model import EVIDENCE_LENGTH
@@ -105,6 +105,24 @@ def _org_unit(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UU
     return row
 
 
+type Insert = Callable[[Executes, uuid.UUID, Mapping[str, uuid.UUID]], uuid.UUID]
+
+
+def _audited(insert: Insert) -> Insert:
+    """For the roles tables, written by the owner until M4r-1g: their audit triggers (accounts.0028)
+    need a skiw.operator and write security_event as the owner, so its FORCE is lifted around the
+    insert and set again before the harness commits."""
+
+    def run(cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]) -> uuid.UUID:
+        cursor.execute("SELECT set_config('skiw.operator', 'test-operator', true)", [])
+        cursor.execute("ALTER TABLE public.security_event NO FORCE ROW LEVEL SECURITY", [])
+        row = insert(cursor, agency, parents)
+        cursor.execute("ALTER TABLE public.security_event FORCE ROW LEVEL SECURITY", [])
+        return row
+
+    return run
+
+
 def _change_event(
     cursor: Executes, agency: uuid.UUID, parents: Mapping[str, uuid.UUID]
 ) -> uuid.UUID:
@@ -145,10 +163,10 @@ CASES = [
     ),
     # SELECT only until M4r-1g: the harness writes their rows as the owner (tenancy isolation.py).
     # org_unit's self-FK: its parent is the agency root, made by `_org_unit` with no parents.
-    IsolationCase("public.role", _role, frozenset({"SELECT"})),
+    IsolationCase("public.role", _audited(_role), frozenset({"SELECT"})),
     IsolationCase(
         "public.role_permission",
-        _role_permission,
+        _audited(_role_permission),
         frozenset({"SELECT"}),
         {"role_id": "public.role"},
     ),
@@ -157,7 +175,7 @@ CASES = [
     ),
     IsolationCase(
         "public.user_role",
-        _user_role,
+        _audited(_user_role),
         frozenset({"SELECT"}),
         {**USER, "role_id": "public.role", "org_unit_id": "public.org_unit"},
     ),

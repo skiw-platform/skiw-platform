@@ -27,9 +27,11 @@ AGENCY = uuid.UUID(os.environ.get("SKIW_DEPLOYMENT_AGENCY_ID", str(uuid.UUID(int
 @pytest.fixture
 def owner(agency_b: uuid.UUID) -> Iterator["psycopg.Cursor[Any]"]:
     """The migrator fixture: the table owner in one transaction with FORCE lifted on the two tenant
-    tables, rolled back at the end (DDL is transactional, so FORCE is back too)."""
+    tables and security_event (their audit triggers write there) and a test skiw.operator, rolled
+    back at the end (DDL is transactional, so FORCE is back too)."""
     with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn, conn.cursor() as cursor:
-        for table in ("role", "role_permission"):
+        cursor.execute("SELECT set_config('skiw.operator', 'test-operator', true)")
+        for table in ("role", "role_permission", "security_event"):
             cursor.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
         yield cursor
         conn.rollback()

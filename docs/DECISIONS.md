@@ -1759,3 +1759,20 @@
 - **Open for M4r-1h:** a test of choice 4 as `skiw_app` (clear the token before commit); today it is simulated as the migrator with FORCE turned back on.
 - **Exception to a rule?** no.
 - **Decided by:** builder within the approved spec; choices 3 and 4 go beyond the spec text and need the reviewer's and owner's eye.
+
+## 2026-11-24 — M4r-1e-i: role, role_permission and user_role audit triggers
+- **Source:** slice spec v2.5 (hash bb262ec4), Decisions 30, 31, 32 and the M4r-1e row; first half of M4r-1e.
+- **Decision (owner):** M4r-1e is built as two PRs, M4r-1e-i (this one: the shared operator check and the audit triggers of `role`, `role_permission` and `user_role`, seven of the ten change kinds) and M4r-1e-ii (`org_unit_audit`, the org kinds, the final six-function scan). The owner chose "split" on 2026-11-24 when asked (the spec names no split for 1e); the roles track is now 27 PRs.
+- **What this PR does (migration 0028):** `role_audit`, `role_permission_audit`, `user_role_audit` (AFTER ROW, one function each, SECURITY INVOKER, pinned `search_path`, EXECUTE revoked from PUBLIC) write the `security_event` row of each change with the Decision 30 key list; reverse drops them and starts with 0026's write-grant guard. No write grants.
+- **Choices the spec does not dictate:**
+  1. The operator check is repeated inline in each audit function (constant `OPERATOR_CHECK`, reused by M4r-1e-ii), not a helper: a nested helper would need EXECUTE for `skiw_app` (the PR 180 choice 1 reason).
+  2. The operator is checked on every row the trigger fires for, before the kind is chosen, so a name-unchanged `role` UPDATE without an operator is also refused (stricter than the spec text).
+  3. Error 22023 "roles change refused: skiw.operator is missing or malformed"; names no data. NULL, `''` and malformed codes are all refused.
+  4. One trigger and function per table, generated from one table of kinds and keys.
+  5. Constraint errors (unique, foreign key) are reported before the operator refusal, because the audit trigger runs after the row is written and the internal FK triggers sort first; harmless, the write fails either way.
+  6. The `at` column is not asserted here; left to M4r-1g.
+  7. The function scan test now expects the five functions that exist (two lookup definers, three audit functions); M4r-1e-ii makes it six.
+  8. Test helpers: every migrator writer of the three tables now sets `skiw.operator = 'test-operator'` and lifts FORCE on `security_event` for the write (no policy there names the migrator); `isolation_cases.py` wraps its inserts the same way (the Semgrep rule `auth-tables-accounts-only` forbids it in `tenancy/tests`). The 0026 and 0027 reverse tests now run 0028's reverse first. No assertion weakened.
+- **For M4r-1f (note):** Decision 32 says the seed "writes as the migrator with every trigger on", but `security_event` is FORCE RLS with no migrator policy, so the seed must also lift FORCE on `security_event` around its writes, as the tests do. The spec does not say this.
+- **Exception to a rule?** no.
+- **Decided by:** owner (split, 2026-11-24); the rest builder within the approved spec.
