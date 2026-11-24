@@ -28,7 +28,9 @@ from tenancy.binding import with_agency
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 
 OPERATOR = "test-operator"
-type Event = tuple[str, uuid.UUID, dict[str, Any]]
+type Event = tuple[str, uuid.UUID, dict[str, str | None]]  # details_json: JSON strings and nulls
+# Any: the named-parameter mapping psycopg takes (UUIDs and the user's email); the tests index it
+# for the agency id in many places, which a union of the two would force them to cast.
 type Ids = dict[str, Any]
 EVENTS = "SELECT id, kind, agency_id, details_json::text FROM security_event WHERE agency_id = %s"
 USER = (
@@ -104,7 +106,7 @@ def holds(agency: uuid.UUID, condition: str, p: Ids) -> bool:
     return bool(row and row[0])
 
 
-def state(agency: uuid.UUID) -> Any:
+def state(agency: uuid.UUID) -> object:
     with app(agency, None) as cursor:
         return cursor.execute(STATE, {"a": agency}).fetchone()
 
@@ -114,7 +116,7 @@ class Events:
     call; each call is a transaction of its own, so only committed events are seen."""
 
     def __init__(self, agency: uuid.UUID) -> None:
-        self.agency, self.seen = agency, set[Any]()
+        self.agency, self.seen = agency, set[uuid.UUID]()
 
     def new(self) -> list[Event]:
         with app(self.agency, None) as cursor:
@@ -214,7 +216,9 @@ def test_each_granted_change_commits_with_exactly_its_events() -> None:
         assert (sql, log.new()) == (sql, ordered(expected))
         for kind, _, details in expected:
             if kind in SUBJECT:
-                present ^= {details[SUBJECT[kind]]}  # added, or (unset, unassigned, deleted) gone
+                present ^= {
+                    str(details[SUBJECT[kind]])
+                }  # added, or (unset, unassigned, deleted) gone
         with app(p["a"], None) as cursor:
             assert {str(row) for (row,) in cursor.execute(ROWS, p)} == present, sql
             assert not condition or cursor.execute(f"SELECT {condition}", p).fetchone() == (True,)
@@ -229,13 +233,15 @@ def build(p: Ids) -> None:
             cursor.execute(sql, p)
 
 
+MOVE_AND_RENAME = "UPDATE org_unit SET parent_id = %(root)s, name = 'New' WHERE id = %(team)s"
 BAD_OPERATORS = {"unset": None, "empty": "", "capitals": "Bob", "33-characters": "a" * 33}
 BAD_OPERATORS |= {"comma": "ops,1"}
 
 
 @pytest.mark.parametrize("bad", BAD_OPERATORS)
 def test_each_change_without_a_valid_operator_is_refused_with_nothing_written(bad: str) -> None:
-    """The twelve statements of test_roles_audit_live (every granted form), here as skiw_app."""
+    """The twelve statements of test_roles_audit_live (every granted form), the combined org move
+    and rename and a root insert in a rootless agency, here as skiw_app."""
     p = ids(fresh_agency())
     build(p)
     log, before = Events(p["a"]), state(p["a"])
@@ -246,9 +252,13 @@ def test_each_change_without_a_valid_operator_is_refused_with_nothing_written(ba
         assert cursor.execute("SELECT current_setting('skiw.operator', true)").fetchone() == (
             value,
         )
-    for name, sql in REFUSED_WRITES.items():
+    for name, sql in {**REFUSED_WRITES, "org move and rename": MOVE_AND_RENAME}.items():
         assert (name, refusal(p["a"], sql, p, operator=value)) == (name, NO_OPERATOR)
     assert state(p["a"]) == before and log.new() == []
+    rootless = ids(fresh_agency())  # no root yet, so a duplicate-root error cannot mask the refusal
+    before, empty = state(rootless["a"]), Events(rootless["a"])
+    assert refusal(rootless["a"], ROOT, rootless, operator=value) == NO_OPERATOR
+    assert state(rootless["a"]) == before and empty.new() == []
 
 
 DENIED = "42501"
