@@ -13,6 +13,7 @@ import os
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Any, cast
 
 import psycopg
@@ -32,7 +33,9 @@ type Event = tuple[str, uuid.UUID, dict[str, str | None]]  # details_json: JSON 
 # Any: the named-parameter mapping psycopg takes (UUIDs and the user's email); the tests index it
 # for the agency id in many places, which a union of the two would force them to cast.
 type Ids = dict[str, Any]
-EVENTS = "SELECT id, kind, agency_id, details_json::text FROM security_event WHERE agency_id = %s"
+EVENTS = (
+    "SELECT id, kind, agency_id, details_json::text, at FROM security_event WHERE agency_id = %s"
+)
 USER = (
     "INSERT INTO app_user (id, agency_id, email, display_name)"
     " VALUES (%(user_id)s, %(a)s, %(email)s, 'U')"
@@ -113,17 +116,19 @@ def state(agency: uuid.UUID) -> object:
 
 class Events:
     """skiw_app's view, under the agency's own token, of its change events new since the last
-    call; each call is a transaction of its own, so only committed events are seen."""
+    call (their `at` values in `at`); each call is a transaction of its own, so only committed
+    events are seen."""
 
     def __init__(self, agency: uuid.UUID) -> None:
-        self.agency, self.seen = agency, set[uuid.UUID]()
+        self.agency, self.seen, self.at = agency, set[uuid.UUID](), set[datetime]()
 
     def new(self) -> list[Event]:
         with app(self.agency, None) as cursor:
             rows = cursor.execute(EVENTS, [self.agency]).fetchall()
         fresh = [row for row in rows if row[0] not in self.seen]
         self.seen.update(row[0] for row in fresh)
-        return ordered([(k, a, json.loads(d)) for _, k, a, d in fresh])
+        self.at = {row[4] for row in fresh}
+        return ordered([(k, a, json.loads(d)) for _, k, a, d, _ in fresh])
 
 
 def ev(kind: str, p: Ids, **values: object) -> Event:
@@ -151,8 +156,9 @@ SUBJECT |= {"role.assigned": "user_role_id", "role.unassigned": "user_role_id"}
 
 def test_each_granted_change_commits_with_exactly_its_events() -> None:
     """One committed statement per step; then, each in a later transaction, its events (the one
-    event-count rule, Decision 32) and the change: the rows present, and the moved or renamed
-    row's new values."""
+    event-count rule, Decision 32), each with `at` = the statement_timestamp() of the change (read
+    by its own RETURNING, so the same statement; any other statement of the transaction has
+    another), and the change: the rows present, and the moved or renamed row's new values."""
     p = ids(fresh_agency())
     log = Events(p["a"])
     with app(p["a"]) as cursor:
@@ -211,9 +217,11 @@ def test_each_granted_change_commits_with_exactly_its_events() -> None:
     present: set[str] = set()
     for sql, expected, condition in steps:
         with app(p["a"]) as cursor:
-            cursor.execute(sql, p)
+            stamps = cursor.execute(f"{sql} RETURNING statement_timestamp()", p).fetchall()
             assert cursor.rowcount == 1, sql
+        [(stamp,)] = stamps
         assert (sql, log.new()) == (sql, ordered(expected))
+        assert (sql, log.at) == (sql, {stamp} if expected else set())
         for kind, _, details in expected:
             if kind in SUBJECT:
                 present ^= {

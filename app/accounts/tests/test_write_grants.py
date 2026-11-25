@@ -2,7 +2,9 @@
 33): the precondition is the first statement and names exactly the triggers accounts.0025 to 0029
 create, with the schema check's security_event predicate; the grants are Decision 3; and no earlier
 accounts migration grants a roles table more than SELECT, so no prefix of the deployment sequence
-has a write grant (the live prefix walk is test_write_grants_live)."""
+has a write grant (the live prefix walk is test_write_grants_live). The reverses of accounts.0025
+and 0024 start with the same retained-change-event refusal (PR 186 R1 P1) over the ten change
+kinds, before any statement that drops an isolation of security_event."""
 
 import importlib
 import re
@@ -11,6 +13,7 @@ from types import ModuleType
 from django.db import migrations
 from django.db.migrations.loader import MigrationLoader
 
+from accounts.auth.tables import CHANGE_KINDS
 from tenancy.check import EVENT_DEPARSED
 
 MIGRATION = importlib.import_module("accounts.migrations.0030_roles_write_grants")
@@ -91,3 +94,33 @@ def test_no_earlier_accounts_migration_grants_a_roles_table_more_than_select() -
         ("0021", "org_unit", "SELECT"),
         ("0021", "user_role", "SELECT"),
     ]
+
+
+def reverse_statements(name: str) -> list[str]:
+    """The reverse SQL of `name` in the order Django runs it (last operation first)."""
+    found: list[str] = []
+    operations = importlib.import_module(f"accounts.migrations.{name}").Migration.operations
+    for operation in reversed(operations):
+        if isinstance(operation, migrations.RunSQL):
+            sql = operation.reverse_sql
+            assert sql is not None
+            found += [sql] if isinstance(sql, str) else [str(s) for s in sql]
+    return found
+
+
+def test_the_reverses_of_0025_and_0024_refuse_retained_change_events_first() -> None:
+    shape = importlib.import_module("accounts.migrations.0025_security_event_shape")
+    rls = importlib.import_module("accounts.migrations.0024_security_event_rls")
+    agency = importlib.import_module("accounts.migrations.0022_security_event_agency")
+    assert shape.KINDS == rls.KINDS == agency.KINDS == CHANGE_KINDS
+    assert shape.REFUSE_RETAINED == rls.REFUSE_RETAINED
+    lift, guard, restore = shape.REFUSE_RETAINED
+    assert lift == "ALTER TABLE public.security_event NO FORCE ROW LEVEL SECURITY"
+    assert restore == "ALTER TABLE public.security_event FORCE ROW LEVEL SECURITY"
+    assert f"kind IN {CHANGE_KINDS}" in guard and "object_not_in_prerequisite_state" in guard
+    shape_reverse = reverse_statements("0025_security_event_shape")
+    assert shape_reverse[:3] == shape.REFUSE_RETAINED
+    assert shape_reverse[3].startswith("DROP TRIGGER security_event_shape ")
+    rls_reverse = reverse_statements("0024_security_event_rls")
+    assert rls_reverse[:3] == rls.REFUSE_RETAINED
+    assert rls_reverse[3].startswith("DROP POLICY security_event_")

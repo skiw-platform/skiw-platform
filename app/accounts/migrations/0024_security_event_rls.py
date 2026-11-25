@@ -7,11 +7,33 @@
 # skiw_auth_lookup (the guard.auth_lookup_* definers) and skiw_backup have BYPASSRLS
 # (infra/host/db/roles.sql), so RLS does not apply to them.
 # The schema check's named rule (tenancy.check) pins this exact set.
+# Reverse: refused while any change-kind row exists, before a policy is dropped, as accounts.0025's
+# reverse (which runs first from any later state; this one covers a database left at 0024). Same
+# statements, message and code (55000); a test pins the two copies and the kinds.
 
 from django.db import migrations
 
 P = "agency_id IS NULL OR agency_id = (SELECT guard.current_agency())"
 TABLE = "security_event"
+KINDS = (
+    "role.created",
+    "role.renamed",
+    "role.deleted",
+    "permission.set",
+    "permission.unset",
+    "role.assigned",
+    "role.unassigned",
+    "org.added",
+    "org.moved",
+    "org.renamed",
+)
+REFUSE_RETAINED = [
+    "ALTER TABLE public.security_event NO FORCE ROW LEVEL SECURITY",
+    f"DO $$ BEGIN IF EXISTS (SELECT FROM public.security_event WHERE kind IN {KINDS}) THEN"
+    " RAISE EXCEPTION 'reverse refused: security_event holds role or org change events'"
+    " USING ERRCODE = 'object_not_in_prerequisite_state'; END IF; END $$",
+    "ALTER TABLE public.security_event FORCE ROW LEVEL SECURITY",
+]
 
 
 class Migration(migrations.Migration):
@@ -35,6 +57,7 @@ class Migration(migrations.Migration):
                 f"CREATE POLICY {TABLE}_ins ON {TABLE} FOR INSERT TO skiw_app WITH CHECK ({P})",
             ],
             reverse_sql=[
+                *REFUSE_RETAINED,
                 f"DROP POLICY {TABLE}_ins ON {TABLE}",
                 f"DROP POLICY {TABLE}_sel ON {TABLE}",
                 f"DROP POLICY {TABLE}_tenant ON {TABLE}",

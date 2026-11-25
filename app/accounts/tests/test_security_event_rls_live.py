@@ -265,6 +265,12 @@ MUTANTS = {
         " FOR EACH ROW EXECUTE FUNCTION security_event_shape()",
         [SHAPE],
     ),
+    "shape trigger never fires (WHEN false)": (  # PR 178 P3: enabled, but tgqual is set
+        "DROP TRIGGER security_event_shape ON security_event;"
+        " CREATE TRIGGER security_event_shape BEFORE INSERT ON security_event"
+        " FOR EACH ROW WHEN (false) EXECUTE FUNCTION security_event_shape()",
+        [SHAPE],
+    ),
 }
 
 

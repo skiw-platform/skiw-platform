@@ -14,6 +14,14 @@
 # functions that write events finds only the writers. The schema check's security_event rule pins
 # the trigger (tenancy.check). Each statement is one line (the linter reads sqlmigrate output line
 # by line) with no `%`, as accounts.0009.
+# Reverse: refused (55000, a fixed message naming no data) while any change-kind row exists, before
+# the trigger is dropped (PR 186 R1 P1). This is the first reverse that removes an isolation of
+# security_event (0024's reverse runs after it), and each migration commits on its own, so a guard
+# any later would leave the rows kept but readable and writable by skiw_app without the tenant
+# policies or the shape and depth rule. Under FORCE the migrator, which no policy names, sees no
+# row, so the reverse lifts FORCE in its own transaction first (the tenancy.seed pattern) and puts
+# it back after the check: a refusal rolls back the whole reverse, FORCE included, and with no
+# change row 0024's reverse starts from the same ENABLE + FORCE state as before.
 
 from django.db import migrations
 
@@ -83,6 +91,15 @@ CREATE = (
     f"CREATE FUNCTION {FUNCTION} RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER"
     f" SET search_path = pg_catalog, pg_temp AS $fn${BODY}$fn$"
 )
+KINDS = tuple(KEYS)  # the ten change kinds (accounts.0022 KINDS; a test pins them)
+TABLE = "public.security_event"
+REFUSE_RETAINED = [
+    f"ALTER TABLE {TABLE} NO FORCE ROW LEVEL SECURITY",
+    f"DO $$ BEGIN IF EXISTS (SELECT FROM {TABLE} WHERE kind IN {KINDS}) THEN"
+    " RAISE EXCEPTION 'reverse refused: security_event holds role or org change events'"
+    " USING ERRCODE = 'object_not_in_prerequisite_state'; END IF; END $$",
+    f"ALTER TABLE {TABLE} FORCE ROW LEVEL SECURITY",
+]
 TRIGGER = (
     "CREATE TRIGGER security_event_shape BEFORE INSERT ON public.security_event"
     f" FOR EACH ROW EXECUTE FUNCTION {FUNCTION}"
@@ -98,6 +115,7 @@ class Migration(migrations.Migration):
         migrations.RunSQL(
             sql=[CREATE, f"REVOKE EXECUTE ON FUNCTION {FUNCTION} FROM PUBLIC", TRIGGER],
             reverse_sql=[
+                *REFUSE_RETAINED,
                 "DROP TRIGGER security_event_shape ON public.security_event",
                 f"DROP FUNCTION {FUNCTION}",
             ],

@@ -1,7 +1,7 @@
 """Fixtures shared by the app test packages."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -20,6 +20,13 @@ def security_event_probe(request: pytest.FixtureRequest) -> Iterator[None]:
     yield
     if live:
         event_probe.remove()
+
+
+@pytest.fixture
+def clear_change_events() -> Callable[[], None]:
+    """accounts.tests.event_probe.clear_change_events, for a package that may not import accounts
+    (tenancy) and migrates back past accounts.0022."""
+    return event_probe.clear_change_events
 
 
 @pytest.fixture

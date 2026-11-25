@@ -13,6 +13,8 @@ from typing import Any
 import psycopg
 from psycopg import sql
 
+from accounts.auth.tables import CHANGE_KINDS
+
 TABLE = "public.security_event_probe"
 FUNCTION = "public.security_event_probe_plant()"
 INSERT = (
@@ -50,6 +52,17 @@ def install() -> None:
 
 def remove() -> None:
     _run(REMOVE)
+
+
+def clear_change_events() -> None:
+    """Delete every change-kind row as the migrator (FORCE lifted for this one transaction), so a
+    real `migrate` back past accounts.0022 runs: its reverse refuses while one exists (PR 177 P2).
+    Test databases only; the rows are the ones the tests committed (the seed, the harness, the
+    audit tests). The migration itself never deletes them."""
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        conn.execute("ALTER TABLE security_event NO FORCE ROW LEVEL SECURITY")
+        conn.execute("DELETE FROM security_event WHERE kind = ANY(%s)", [list(CHANGE_KINDS)])
+        conn.execute("ALTER TABLE security_event FORCE ROW LEVEL SECURITY")
 
 
 def details(kind: str) -> dict[str, Any]:

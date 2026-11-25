@@ -69,24 +69,35 @@ def rolled_back() -> Iterator[Cursor]:
 
 
 class Recording:
-    """Stands in for the seed's cursor (it calls only execute) and keeps the statement log."""
+    """Stands in for the seed's cursor (it calls execute, and tenancy.seed reads .connection) and
+    keeps the statement log, with the lock_timeout in force when each ALTER TABLE ran."""
 
     def __init__(self, cursor: Cursor) -> None:
-        self.cursor, self.log = cursor, list[str]()
+        self.cursor, self.log, self.altered = cursor, list[str](), list[tuple[str, str]]()
+        self.connection = cursor.connection
 
     def execute(self, query: str, params: Sequence[object] = ()) -> Cursor:
         self.log.append(query)
+        if query.startswith("ALTER TABLE"):
+            (timeout,) = self.cursor.execute("SHOW lock_timeout").fetchone() or ("",)
+            self.altered.append((query, timeout))
         return self.cursor.execute(query, params)
 
 
 def test_a_fresh_agency_gets_the_owner_role_with_31_ticks_and_32_seed_events() -> None:
     """Committed: role_system_complete passed (the seed runs it before FORCE goes back on) and
-    nothing was left for COMMIT to refuse."""
+    nothing was left for COMMIT to refuse. Every ALTER TABLE of the seed step ran under the
+    transaction's non-zero lock_timeout (set by tenancy.seed; PR 183 P3)."""
     agency = uuid.uuid4()
     with migrator() as conn, conn.cursor() as cursor:
-        seed.insert_agency(cursor, agency, "Seed test", steps=True)
+        recording = Recording(cursor)
+        seed.insert_agency(cast(Cursor, recording), agency, "Seed test", steps=True)
         assert cursor.execute(OPERATOR).fetchone() == ("",)  # the caller's (unset) value is back
     assert forced()
+    step = [(q, t) for q, t in recording.altered if not q.startswith("ALTER TABLE agency")]
+    lifts = (f"ALTER TABLE {t} {no}FORCE ROW LEVEL SECURITY" for t in SEEDED for no in ("", "NO "))
+    assert sorted(q for q, _ in step) == sorted(lifts)
+    assert "0" not in {timeout for _, timeout in step}
     with rolled_back() as cursor:
         found = snapshot(cursor, agency)
     events = found["events"]

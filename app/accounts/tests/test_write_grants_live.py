@@ -4,22 +4,28 @@ precondition refuses, and grants nothing, with any Decision 32 trigger dropped, 
 fire on replicas only, and with security_event's RLS or a policy changed; it passes on the real
 schema; the reverse and the forward restore every grant and policy; the earlier reverses refuse
 while the grants exist; and skiw_app holds no write on the roles tables at any accounts prefix from
-0016 to 0029, and exactly Decision 3's at 0030, migrated back and then forward one at a time."""
+0016 to 0029, and exactly Decision 3's at 0030, migrated back and then forward one at a time; on
+the way back, the reverses of 0025 and 0024 refuse while a change row exists, before the shape
+trigger or a policy of security_event is dropped (PR 186 R1 P1), and so does 0022's."""
 
 import importlib
+import json
 import os
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 from urllib.parse import unquote, urlsplit
 
 import psycopg
 import pytest
-from django.db import connection, connections, transaction
+from django.db import DatabaseError, connection, connections, transaction
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.postgresql.base import DatabaseWrapper
+from django.db.backends.utils import CursorWrapper
 from django.db.migrations.executor import MigrationExecutor
 
+from accounts.tests import event_probe
 from accounts.tests.test_access_tables_live import COLUMN_GRANTS, DECISION_3
 from accounts.tests.test_roles_guards_live import GUARD_REFUSED, migrator_rolled_back, refusal
 
@@ -52,7 +58,7 @@ SNAPSHOT = (
 type Cursor = psycopg.Cursor[Any]
 
 
-def writes(cursor: Any) -> set[tuple[str, str]]:
+def writes(cursor: "Cursor | CursorWrapper") -> set[tuple[str, str]]:
     cursor.execute(HELD, [TABLES])
     return set(cursor.fetchall())
 
@@ -166,10 +172,110 @@ def migrator_connection() -> Iterator[BaseDatabaseWrapper]:
         del connections[ALIAS]
 
 
+CHANGE_KINDS = list(importlib.import_module("accounts.migrations.0022_security_event_agency").KINDS)
+KEPT = ("55000", "reverse refused: security_event holds role or org change events")
+BACK_TO_0021 = [("accounts", "0021_org_unit_user_role_rls")]
+# Each is true while security_event keeps its Decision 33 isolation: 0030's precondition parts.
+ISOLATED = f"SELECT NOT ({MIGRATION.RLS_OFF}) AND NOT ({MIGRATION.POLICIES_CHANGED})"
+SHAPE_TRIGGER = (
+    "SELECT tgenabled::text FROM pg_trigger WHERE tgrelid = 'security_event'::regclass"
+    " AND tgname = 'security_event_shape' AND NOT tgisinternal AND tgqual IS NULL"
+)
+
+
+def applied_head(executor: MigrationExecutor) -> str:
+    return max(name for app, name in executor.loader.applied_migrations or {} if app == "accounts")
+
+
+def count_change_rows(cursor: CursorWrapper, delete: bool = False) -> int:
+    """The change rows, as the migrator with FORCE lifted and put back; with `delete`, then
+    deleted (the test's, never the migration's: test databases only)."""
+    cursor.execute("ALTER TABLE security_event NO FORCE ROW LEVEL SECURITY")
+    cursor.execute("SELECT count(*) FROM security_event WHERE kind = ANY(%s)", [CHANGE_KINDS])
+    (count,) = cursor.fetchone()
+    if delete:
+        cursor.execute("DELETE FROM security_event WHERE kind = ANY(%s)", [CHANGE_KINDS])
+    cursor.execute("ALTER TABLE security_event FORCE ROW LEVEL SECURITY")
+    return int(count)
+
+
+def refused_before_isolation_dropped(executor: MigrationExecutor, cursor: CursorWrapper) -> None:
+    """At 0025 or 0024, with a change row planted through the probe trigger (as M4r-1e's audit
+    triggers write) and FORCE on, Django's real reverse to 0021 refuses in the first reverse that
+    would drop an isolation of security_event (PR 186 R1 P1): nothing more is unapplied, the row
+    is kept, RLS stays enabled and forced with exactly its three policies, the shape trigger (at
+    0025) stays enabled, and skiw_app's SELECT and INSERT are the ones those protect. Then the
+    test clears the change rows this database holds (the seed, the TEN-08 harness and the audit
+    tests commit them), so the walk's own reverse runs."""
+    head = applied_head(executor)
+    agency, planted = uuid.uuid4(), uuid.uuid4()
+    cursor.execute("ALTER TABLE agency NO FORCE ROW LEVEL SECURITY")
+    cursor.execute("INSERT INTO agency (id, name) VALUES (%s, 'Prefix walk')", [agency])
+    cursor.execute("ALTER TABLE agency FORCE ROW LEVEL SECURITY")
+    cursor.execute("ALTER TABLE security_event NO FORCE ROW LEVEL SECURITY")
+    details = json.dumps(event_probe.details("role.created"))
+    cursor.execute(event_probe.INSERT, [planted, "role.created", agency, None, None, details])
+    cursor.execute("ALTER TABLE security_event FORCE ROW LEVEL SECURITY")
+    cursor.execute("SELECT count(*) FROM security_event WHERE id = %s", [planted])
+    assert cursor.fetchone() == (0,)  # under FORCE the migrator sees none: the reverse lifts it
+    with pytest.raises(DatabaseError) as caught:
+        executor.migrate(BACK_TO_0021)
+    cause = caught.value.__cause__
+    assert isinstance(cause, psycopg.Error), caught.value  # not a later reverse's own error
+    assert (cause.sqlstate, cause.diag.message_primary) == KEPT
+    executor.loader.build_graph()
+    assert applied_head(executor) == head
+    cursor.execute(ISOLATED)
+    assert cursor.fetchone() == (True,)
+    cursor.execute(SHAPE_TRIGGER)
+    assert cursor.fetchall() == ([("O",)] if head.startswith("0025") else [])
+    privileges = "SELECT has_table_privilege('skiw_app', 'security_event', %s)"
+    for privilege in ("SELECT", "INSERT"):
+        cursor.execute(privileges, [privilege])
+        assert cursor.fetchone() == (True,)
+    cursor.execute("ALTER TABLE security_event NO FORCE ROW LEVEL SECURITY")
+    cursor.execute("SELECT count(*) FROM security_event WHERE id = %s", [planted])
+    assert cursor.fetchone() == (1,)
+    cursor.execute("ALTER TABLE security_event FORCE ROW LEVEL SECURITY")
+    count_change_rows(cursor, delete=True)
+    assert count_change_rows(cursor) == 0
+
+
+def unapply_0022_refused_while_change_rows(
+    executor: MigrationExecutor, cursor: CursorWrapper
+) -> None:
+    """0022's reverse refuses while a change row exists and keeps it (PR 177 P2; defence in depth
+    behind 0025's and 0024's, for a database at 0022 or 0023). Then the test deletes it."""
+    planted = uuid.uuid4()
+    cursor.execute(
+        "INSERT INTO security_event (id, at, kind, agency_id, details_json)"
+        " VALUES (%s, now(), 'role.created', %s, '{}')",
+        [planted, uuid.uuid4()],  # no shape trigger, RLS or agency FK at this prefix
+    )
+    with pytest.raises(DatabaseError) as caught:
+        executor.migrate(BACK_TO_0021)
+    cause = cast(psycopg.Error, caught.value.__cause__)
+    assert (cause.sqlstate, cause.diag.message_primary) == KEPT
+    executor.loader.build_graph()
+    assert applied_head(executor) == "0022_security_event_agency"
+    cursor.execute("SELECT count(*) FROM security_event WHERE id = %s", [planted])
+    assert cursor.fetchone() == (1,)
+    cursor.execute("DELETE FROM security_event WHERE kind = ANY(%s)", [CHANGE_KINDS])
+
+
+# The walk's target whose step runs the reverse that refuses while a change row exists.
+REFUSES = {
+    "0024_security_event_rls": refused_before_isolation_dropped,  # reverse of 0025
+    "0023_security_event_agency_index": refused_before_isolation_dropped,  # reverse of 0024
+    "0021_org_unit_user_role_rls": unapply_0022_refused_while_change_rows,
+}
+
+
 def test_no_write_grant_at_any_prefix_before_0030() -> None:
     """Back from 0030 to 0016, then forward to 0030, one migration at a time (Decision 32
     "Intermediate states"). 0023 is recorded only (fake): its index is built CONCURRENTLY, which
-    cannot run in a transaction, and grants nothing (test_write_grants pins every GRANT)."""
+    cannot run in a transaction, and grants nothing (test_write_grants pins every GRANT). Before
+    0025, 0024 and 0022 are reversed, each reverse is shown to refuse while a change row exists."""
     held: dict[tuple[str, str], set[tuple[str, str]]] = {}
     present: dict[str, int] = {}  # roles tables that exist at each prefix: the walk is not vacuous
     with migrator_connection() as wrapper, wrapper.cursor() as cursor:
@@ -182,6 +288,8 @@ def test_no_write_grant_at_any_prefix_before_0030() -> None:
             ("forward", names[1:], "0023"),
         ):
             for target in steps:
+                if direction == "back" and target in REFUSES:
+                    REFUSES[target](executor, cursor)
                 executor.migrate([("accounts", target)], fake=target.startswith(unindexed))
                 executor.loader.build_graph()
                 held[direction, target] = writes(cursor)
