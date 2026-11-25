@@ -12,13 +12,13 @@ import contextlib
 import threading
 import time
 import uuid
-from typing import Any
+from typing import cast
 
 import psycopg
 import pytest
 from django.db import DatabaseError, connection
 
-from accounts.tests.test_access_audit_live import Events, app, ev, fresh_agency, state
+from accounts.tests.test_access_audit_live import Events, Ids, app, ev, fresh_agency, state
 from accounts.tests.test_roles_audit_live import ordered
 from accounts.tests.test_roles_guards_live import FIRST_WRITE, LEVELS, NOT_READ_COMMITTED, Cursor
 from accounts.tests.test_roles_guards_live import MIGRATION as LOCKS
@@ -27,6 +27,12 @@ from accounts.tests.test_roles_tree_owner_live import CYCLE, NO_HOLDER
 pytestmark = [pytest.mark.live, pytest.mark.usefixtures("live_db")]
 
 BOUND_S = 10  # how long a session may take to start, wait or finish before the test fails
+# The second session's own connection: libpq gives up connecting before BOUND_S, and the server
+# timeouts apply from startup, so the queries with_agency() runs first are bounded too.
+STARTUP: dict[str, object] = {
+    "connect_timeout": 5,
+    "options": "-c lock_timeout=15s -c statement_timeout=20s",
+}
 TIMEOUTS = (
     "SELECT set_config('lock_timeout', '15s', true), set_config('statement_timeout', '20s', true)"
 )
@@ -51,19 +57,22 @@ type Outcome = tuple[str, str, str] | None  # None: committed; else (stage, SQLS
 class Second:
     """The second session: `statements` in one with_agency() transaction on a thread of its own,
     then COMMIT. `outcome`: None if committed, else where it was refused ("statement" or "commit")
-    with the SQLSTATE and message."""
+    with the SQLSTATE and message. The thread is a daemon: a connection that stalls past every
+    bound fails the test and cannot keep pytest alive."""
 
-    def __init__(self, p: dict[str, Any], statements: list[str]) -> None:
+    def __init__(self, p: Ids, statements: list[str]) -> None:
         self.pid, self.started, self.finished = 0, threading.Event(), False
         self.outcome: Outcome = ("unfinished", "", "")  # None only once its COMMIT returned
-        self.thread = threading.Thread(target=self.run, args=(p, statements))
+        self.thread = threading.Thread(target=self.run, args=(p, statements), daemon=True)
         self.thread.start()
 
-    def run(self, p: dict[str, Any], statements: list[str]) -> None:
+    def run(self, p: Ids, statements: list[str]) -> None:
         stage = "statement"
+        # `connection` is this thread's own wrapper; replacing its settings touches no other.
+        settings = connection.settings_dict
+        connection.settings_dict = {**settings, "OPTIONS": {**settings["OPTIONS"], **STARTUP}}
         try:
             with app(p["a"]) as cursor:
-                cursor.execute(TIMEOUTS)
                 [(self.pid,)] = cursor.execute("SELECT pg_backend_pid()").fetchall()
                 self.started.set()
                 for sql in statements:
@@ -97,9 +106,7 @@ class Rollback(Exception):
     pass
 
 
-def race(
-    p: dict[str, Any], first: list[str], second: list[str], commit: bool, lock: bool
-) -> Outcome:
+def race(p: Ids, first: list[str], second: list[str], commit: bool, lock: bool) -> Outcome:
     """`first` runs and stays open; `second` starts and must wait on the roles lock; then the first
     commits (or rolls back, `commit` false). The second session's outcome. `lock`: each session
     takes the operator commands' explicit roles lock as its first statement."""
@@ -121,21 +128,21 @@ def race(
     return other.outcome
 
 
-def rows(p: dict[str, Any], sql: str) -> Any:
+def rows(p: Ids, sql: str) -> list[tuple[object, ...]]:
     with app(p["a"], None) as cursor:
         return cursor.execute(sql, p).fetchall()
 
 
-def subtree(p: dict[str, Any], unit: str) -> set[uuid.UUID]:
+def subtree(p: Ids, unit: str) -> set[uuid.UUID]:
     """`unit` and every unit below it; UNION ends on a cycle too."""
     sql = (
         "WITH RECURSIVE s(id) AS (SELECT %(top)s::uuid UNION SELECT o.id FROM org_unit o"
         " JOIN s ON o.parent_id = s.id) SELECT id FROM s"
     )
-    return {row for (row,) in rows({**p, "top": p[unit]}, sql)}
+    return {cast(uuid.UUID, row) for (row,) in rows({**p, "top": p[unit]}, sql)}
 
 
-def tree(p: dict[str, Any]) -> dict[str, Any]:
+def tree(p: Ids) -> Ids:
     """A root with two units, ua and ub, under it; a user; with p's agency and operator."""
     p |= {k: uuid.uuid4() for k in ("root", "ua", "ub", "user_id")}
     with app(p["a"]) as cursor:
@@ -169,7 +176,7 @@ def test_opposing_moves_never_make_a_cycle(commit: bool, lock: bool) -> None:
     assert log.new() == [moved]
 
 
-def owners(p: dict[str, Any]) -> dict[str, Any]:
+def owners(p: Ids) -> Ids:
     """The seeded Owner role (M4r-1f) held by two users, u0 and u1 (assignments o0 and o1)."""
     tree(p)
     with app(p["a"]) as cursor:
@@ -182,7 +189,7 @@ def owners(p: dict[str, Any]) -> dict[str, Any]:
     return p
 
 
-def unassigned(p: dict[str, Any], n: int) -> object:
+def unassigned(p: Ids, n: int) -> object:
     held = {"user_role_id": p[f"o{n}"], "user_id": p[f"u{n}"], "role_id": p["r"]}
     return ev("role.unassigned", p, **held, org_unit_id=p["unit"], line="both")
 
@@ -204,7 +211,7 @@ def test_two_unassigners_never_remove_the_last_owner(commit: bool, lock: bool) -
     assert log.new() == [unassigned(p, 0 if commit else 1)]
 
 
-def a_role(p: dict[str, Any]) -> dict[str, Any]:
+def a_role(p: Ids) -> Ids:
     """tree() and a role r with one tick."""
     tree(p)
     p |= {"r": uuid.uuid4(), "tick": uuid.uuid4(), "ura": uuid.uuid4()}
