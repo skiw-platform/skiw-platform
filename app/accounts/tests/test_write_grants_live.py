@@ -4,18 +4,20 @@ precondition refuses, and grants nothing, with any Decision 32 trigger dropped, 
 fire on replicas only, and with security_event's RLS or a policy changed; it passes on the real
 schema; the reverse and the forward restore every grant and policy; the earlier reverses refuse
 while the grants exist; and skiw_app holds no write on the roles tables at any accounts prefix from
-0016 to 0029, and exactly Decision 3's at 0030, migrated back and then forward one at a time."""
+0016 to 0029, and exactly Decision 3's at 0030, migrated back and then forward one at a time; on
+the way back, 0022's reverse refuses while a change row exists."""
 
 import importlib
 import os
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 from urllib.parse import unquote, urlsplit
 
 import psycopg
 import pytest
-from django.db import connection, connections, transaction
+from django.db import DatabaseError, connection, connections, transaction
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.postgresql.base import DatabaseWrapper
 from django.db.migrations.executor import MigrationExecutor
@@ -166,10 +168,35 @@ def migrator_connection() -> Iterator[BaseDatabaseWrapper]:
         del connections[ALIAS]
 
 
+CHANGE_KINDS = list(importlib.import_module("accounts.migrations.0022_security_event_agency").KINDS)
+KEPT = ("55000", "reverse refused: security_event holds role or org change events")
+
+
+def unapply_0022_refused_while_change_rows(executor: MigrationExecutor, cursor: Any) -> None:
+    """0022's reverse refuses while a change row exists and keeps it (PR 177 P2). Then the test,
+    not the migration, clears the change rows this database holds (the seed, the TEN-08 harness
+    and the audit tests commit them), so the walk's own reverse of 0022 runs."""
+    planted = uuid.uuid4()
+    cursor.execute(
+        "INSERT INTO security_event (id, at, kind, agency_id, details_json)"
+        " VALUES (%s, now(), 'role.created', %s, '{}')",
+        [planted, uuid.uuid4()],  # no shape trigger, RLS or agency FK at this prefix
+    )
+    with pytest.raises(DatabaseError) as caught:
+        executor.migrate([("accounts", "0021_org_unit_user_role_rls")])
+    cause = cast(psycopg.Error, caught.value.__cause__)
+    assert (cause.sqlstate, cause.diag.message_primary) == KEPT
+    executor.loader.build_graph()
+    cursor.execute("SELECT count(*) FROM security_event WHERE id = %s", [planted])
+    assert cursor.fetchone() == (1,)
+    cursor.execute("DELETE FROM security_event WHERE kind = ANY(%s)", [CHANGE_KINDS])
+
+
 def test_no_write_grant_at_any_prefix_before_0030() -> None:
     """Back from 0030 to 0016, then forward to 0030, one migration at a time (Decision 32
     "Intermediate states"). 0023 is recorded only (fake): its index is built CONCURRENTLY, which
-    cannot run in a transaction, and grants nothing (test_write_grants pins every GRANT)."""
+    cannot run in a transaction, and grants nothing (test_write_grants pins every GRANT). Before
+    0022 is reversed, its reverse is shown to refuse while change rows exist."""
     held: dict[tuple[str, str], set[tuple[str, str]]] = {}
     present: dict[str, int] = {}  # roles tables that exist at each prefix: the walk is not vacuous
     with migrator_connection() as wrapper, wrapper.cursor() as cursor:
@@ -182,6 +209,8 @@ def test_no_write_grant_at_any_prefix_before_0030() -> None:
             ("forward", names[1:], "0023"),
         ):
             for target in steps:
+                if target == "0021_org_unit_user_role_rls" and direction == "back":
+                    unapply_0022_refused_while_change_rows(executor, cursor)
                 executor.migrate([("accounts", target)], fake=target.startswith(unindexed))
                 executor.loader.build_graph()
                 held[direction, target] = writes(cursor)

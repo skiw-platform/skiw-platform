@@ -5,6 +5,7 @@ check reads the catalogs, and the few that write run in one transaction they rol
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, LiteralString
 
@@ -178,7 +179,9 @@ def migrate(*target: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_the_unlinted_key_table_migration_reverses_and_reapplies_exactly() -> None:
+def test_the_unlinted_key_table_migration_reverses_and_reapplies_exactly(
+    clear_change_events: Callable[[], None],
+) -> None:
     # make migrate skips 0002 in lintmigrations (docs/DECISIONS.md "M4c-2a"), so its forward
     # and reverse are proven here: the reverse (0003 first) drops the function and both tables
     # as their owners and leaves the schema ACL as 0001 made it, without skiw_app's USAGE; the
@@ -191,6 +194,7 @@ def test_the_unlinted_key_table_migration_reverses_and_reapplies_exactly() -> No
         if name == "acl:guard"
     ]
     assert "skiw_app" not in acl_0001[0][2]
+    clear_change_events()  # tenancy 0001 unapplies every accounts migration, 0022 included
     try:
         migrate("tenancy", "0001")
         assert rows(

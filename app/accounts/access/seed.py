@@ -1,3 +1,5 @@
+# The docstring names security_event next to ALTER TABLE; the seed writes no security_event row.
+# nosemgrep: auth-tables-accounts-only
 """The starting-role seed (slice spec Decision 5, Flow 5.5; Decisions 28, 31, 32, 33).
 
 Every agency starts with one role, Owner: the system role (`is_system`) holding every catalogue

@@ -64,9 +64,12 @@ EVENT_CHECKS = {
     ),
 }
 # Decision 32 (M4r-1c-ii): the BEFORE INSERT row trigger security_event_shape, enabled ('O': fires
-# in the normal session_replication_role), on its SECURITY INVOKER function, as
-# (tgenabled, tgtype, function, prosecdef); tgtype 7 = ROW (1) | BEFORE (2) | INSERT (4).
-EVENT_TRIGGER = ("security_event_shape", ("O", 7, "public.security_event_shape", False))
+# in the normal session_replication_role), on its SECURITY INVOKER function, with no WHEN clause
+# (a WHEN (false) trigger is enabled and never fires; PR 178 P3), as
+# (tgenabled, tgtype, function, prosecdef, unconditional); tgtype 7 = ROW | BEFORE | INSERT.
+# Only this trigger is pinned here; one with a legitimate WHEN (role_system_complete, WHEN
+# NEW.is_system) is loaded and read by no rule.
+EVENT_TRIGGER = ("security_event_shape", ("O", 7, "public.security_event_shape", False, True))
 
 RELATIONS = """
     SELECT c.oid, n.nspname, n.nspname || '.' || c.relname, c.relkind::text,
@@ -96,7 +99,7 @@ CHECKS = """
 """
 TRIGGERS = """
     SELECT t.tgrelid, t.tgname::text, t.tgenabled::text, t.tgtype::int,
-           n.nspname || '.' || p.proname, p.prosecdef
+           n.nspname || '.' || p.proname, p.prosecdef, t.tgqual IS NULL
     FROM pg_trigger t JOIN pg_proc p ON p.oid = t.tgfoid
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE NOT t.tgisinternal
@@ -149,7 +152,8 @@ class _Relation:
     fks: list[_ForeignKey]
     policies: list[_Policy]
     checks: dict[str, str] = field(default_factory=dict)  # validated CHECKs, as deparsed
-    triggers: dict[str, tuple[str, int, str, bool]] = field(default_factory=dict)  # user triggers
+    # user (non-internal) triggers: (tgenabled, tgtype, function, prosecdef, no WHEN clause)
+    triggers: dict[str, tuple[str, int, str, bool, bool]] = field(default_factory=dict)
 
 
 def check(
@@ -219,9 +223,9 @@ def _load(conn: "psycopg.Connection[Any]") -> dict[int, _Relation]:
     for oid, name, definition in conn.execute(CHECKS).fetchall():
         if oid in relations:
             relations[oid].checks[name] = definition
-    for oid, name, enabled, kind, function, definer in conn.execute(TRIGGERS).fetchall():
+    for oid, name, enabled, kind, function, definer, bare in conn.execute(TRIGGERS).fetchall():
         if oid in relations:
-            relations[oid].triggers[name] = (enabled, kind, function, definer)
+            relations[oid].triggers[name] = (enabled, kind, function, definer, bare)
     for oid, name, permissive, command, roles, using, check_ in conn.execute(POLICIES).fetchall():
         if oid in relations:
             policy = _Policy(name, permissive, COMMANDS[command], roles, using, check_)

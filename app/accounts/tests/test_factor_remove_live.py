@@ -27,6 +27,7 @@ from accounts.user_model import AppUser
 from tenancy.binding import with_agency
 from tests.test_csrf_gate import CASES_URLCONF, ORIGIN
 
+from . import event_probe
 from . import test_second_factor_live as sign_in
 from .conftest import COOKIE, row_deadline
 from .logins import factor_count
@@ -309,6 +310,9 @@ def test_each_change_rotates_the_csrf_token_and_the_old_one_is_refused(kind: str
 
 
 def migrate(*target: str) -> None:
+    """`migrate` as the migrator; to a `target` (back), change rows cleared first."""
+    if target:
+        event_probe.clear_change_events()
     env = {**os.environ, "DATABASE_URL": os.environ["MIGRATION_DATABASE_URL"]}
     command = [sys.executable, str(MANAGE), "migrate", *target]
     result = subprocess.run(command, env=env, capture_output=True, text=True, check=False)
