@@ -37,9 +37,15 @@ an RLS policy is dropped. Django commits each migration on its own, so the rever
 before stay committed. From the head this means 0030 to 0026 (the `skiw_app` write grants on the
 roles tables and the Decision 32 triggers are gone, so roles changes fail), with accounts at 0025
 and `security_event` still isolated.
-- **Never delete change events to get past it.** Either roll forward (`deploy <digest>` of the
-  image that was serving; its `migrate` re-applies 0026 to 0030), or restore the pre-migration
-  dump ([restore.md](restore.md)).
+- **Never delete change events to get past it.** The recovery is to roll forward: `deploy <digest>`
+  of the image that was serving; its `migrate` re-applies 0026 to 0030 and every change event is
+  kept.
+- **Restore is exceptional, and loses data.** A pre-migration dump predates every role, permission,
+  assignment or org change made since, and restoring it discards those changes and their audit
+  events together. Do it only if roll-forward is impossible, and only with the owner's decision:
+  the owner names the exact dump, lists the changes and events made after it (compare
+  `security_event` change rows against the dump's) and records them as lost or re-enters them, then
+  follows [restore.md](restore.md). Do not clear the incident until that account is written down.
 - **Verify before serving**: `check_tenancy_schema` passes (deploy step 4 runs it), and as
   `skiw_migrator` or `postgres` (`psql` as in restore.md step 4):
   ```sql
