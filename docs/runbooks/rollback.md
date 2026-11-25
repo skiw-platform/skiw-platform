@@ -23,8 +23,34 @@ target is pulled by digest, then steps 5–7 of [deploy.md](deploy.md) apply, in
 switch-back. A rollback adds no accepted-digest line; the journal and deploy log record it.
 
 ## Migration rollback (reversible migrations only, UNI-15)
-Not automated. When a rollback is refused for a contract migration, the target code may not run on
-the current schema: restore the pre-migration dump instead ([restore.md](restore.md)).
+Not automated. The supported rollback is the application image (above): it never runs `migrate`
+and the previous digest runs on the newer schema. Reversing migrations (`manage.py migrate <app>
+<earlier migration>` as `skiw_migrator`) is a manual schema change outside that path. When a
+rollback is refused for a contract migration, the target code may not run on the current schema:
+restore the pre-migration dump instead ([restore.md](restore.md)).
+
+**Reversing accounts past 0025 is refused while role or org change events exist.** Those
+`security_event` rows are the append-only audit record (TEN-03). The reverses of accounts 0025, 0024
+and 0022 each stop with SQLSTATE 55000 and
+`reverse refused: security_event holds role or org change events`, before the shape trigger or
+an RLS policy is dropped. Django commits each migration on its own, so the reverses that ran
+before stay committed. From the head this means 0030 to 0026 (the `skiw_app` write grants on the
+roles tables and the Decision 32 triggers are gone, so roles changes fail), with accounts at 0025
+and `security_event` still isolated.
+- **Never delete change events to get past it.** Either roll forward (`deploy <digest>` of the
+  image that was serving; its `migrate` re-applies 0026 to 0030), or restore the pre-migration
+  dump ([restore.md](restore.md)).
+- **Verify before serving**: `check_tenancy_schema` passes (deploy step 4 runs it), and as
+  `skiw_migrator` or `postgres` (`psql` as in restore.md step 4):
+  ```sql
+  SELECT relrowsecurity, relforcerowsecurity FROM pg_class
+   WHERE oid = 'public.security_event'::regclass;              -- t | t
+  SELECT polname FROM pg_policy WHERE polrelid = 'public.security_event'::regclass
+   ORDER BY 1;          -- security_event_ins, security_event_sel, security_event_tenant
+  SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'public.security_event'::regclass
+   AND tgname = 'security_event_shape';                        -- O
+  SELECT max(name) FROM django_migrations WHERE app = 'accounts';  -- the image's head
+  ```
 
 ## When a rollback is not enough
 See [restore.md](restore.md).
