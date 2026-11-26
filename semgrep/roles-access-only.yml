@@ -38,6 +38,8 @@ rules:
           - pattern-either:
               - pattern: accounts.models.$MODEL.$M
               - pattern: accounts.access.tables.$MODEL.$M
+              - pattern: getattr(accounts.models.$MODEL, "$M", ...)
+              - pattern: getattr(accounts.access.tables.$MODEL, "$M", ...)
           - metavariable-regex:
               metavariable: $MODEL
               regex: ^(Role|RolePermission|UserRole|OrgUnit|Permission)$
@@ -117,15 +119,20 @@ rules:
               - pattern: $A.get_model("$N", ...)
               - pattern: $A.get_model("accounts", model_name="$N", ...)
               - pattern: $A.get_model(app_label="accounts", model_name="$N", ...)
+              - pattern: $A.get_model(app_label="$N", ...)
           - metavariable-regex:
               metavariable: $N
               regex: (?i)^(accounts\.)?(role|rolepermission|userrole|orgunit|permission)$
-      # SQL in a string: it must begin as SQL (after blanks, comments or brackets), with that first
+      # In the SQL regexes below, sep is a blank or a comment (block comments may nest once),
+      # gap is what may follow a word that names a table (sep, or straight into a quote) and pub is
+      # a `public.` qualifier.
+      # SQL in any string: it must begin as SQL (after blanks, comments or brackets), with that first
       # keyword all upper or all lower case, so prose that names a table ("Copy permission lists
       # ...") is not flagged. role_permission, user_role and org_unit are not
       # English words, so anywhere after that is enough. role and permission are: they must follow
       # a word that names a table (FROM, JOIN, INTO, UPDATE, TABLE, ONLY, TRUNCATE, COPY, LOCK,
-      # USING, ON, REFERENCES, or a comma in a FROM list). Each may be public.-qualified and quoted.
+      # USING, ON, REFERENCES, or a comma in a FROM list), with blanks, comments or just a quote
+      # between. Each may be public.-qualified and quoted.
       - patterns:
           - pattern: '"$SQL"'
           - metavariable-regex:
@@ -135,7 +142,7 @@ rules:
           - pattern: '"$SQL"'
           - metavariable-regex:
               metavariable: $SQL
-              regex: (?is)^(?=(\s|--[^\n]*\n|/\*.*?\*/|\()*(?-i:(SELECT|INSERT|UPDATE|DELETE|TRUNCATE|COPY|MERGE|LOCK|WITH|TABLE|EXPLAIN|ALTER|DROP|GRANT|REVOKE|CREATE|VALUES|FROM|JOIN|WHERE)|(select|insert|update|delete|truncate|copy|merge|lock|with|table|explain|alter|drop|grant|revoke|create|values|from|join|where))\b).*?(\b(from|join|into|update|table|only|truncate|copy|lock|using|on|references)\s+|\bfrom\s+[^;()]*?,\s*)("?public"?\s*\.\s*)?"?(role|permission)"?(?![\w$])
+              regex: (?is)(?(DEFINE)(?<sep>\s|--[^\n]*\n|/\*(?>[^*/]+|\*(?!/)|/(?!\*)|/\*(?>[^*]+|\*(?!/))*+\*/)*+\*/)(?<gap>(?&sep)+|(?="))(?<pub>"?public"?(?&sep)*\.(?&sep)*))^(?=(\s|--[^\n]*\n|/\*.*?\*/|\()*(?-i:(SELECT|INSERT|UPDATE|DELETE|TRUNCATE|COPY|MERGE|LOCK|WITH|TABLE|EXPLAIN|ALTER|DROP|GRANT|REVOKE|CREATE|VALUES|FROM|JOIN|WHERE)|(select|insert|update|delete|truncate|copy|merge|lock|with|table|explain|alter|drop|grant|revoke|create|values|from|join|where))\b).*?(\b(from|join|into|update|table|only|truncate|copy|lock|using|on|references)(?&gap)|\bfrom(?&gap)[^;()]*?,(?&sep)*)(?&pub)?"?(role|permission)"?(?![\w$])
       # Fragments that do not begin as SQL (extra(where=...), RawSQL): a distinctive name right
       # after FROM or JOIN anywhere; role or permission only after FROM or JOIN inside a
       # bracketed SELECT, so that "(select one) from role holders" stays quiet.
@@ -143,12 +150,31 @@ rules:
           - pattern: '"$SQL"'
           - metavariable-regex:
               metavariable: $SQL
-              regex: (?is)^.*?\b(from|join)\s+(only\s+)?("?public"?\s*\.\s*)?"?(role_permission|user_role|org_unit)"?(?![\w$])
+              regex: (?is)(?(DEFINE)(?<sep>\s|--[^\n]*\n|/\*(?>[^*/]+|\*(?!/)|/(?!\*)|/\*(?>[^*]+|\*(?!/))*+\*/)*+\*/)(?<gap>(?&sep)+|(?="))(?<pub>"?public"?(?&sep)*\.(?&sep)*))^.*?\b(from|join)(?&gap)(only(?&gap))?(?&pub)?"?(role_permission|user_role|org_unit)"?(?![\w$])
       - patterns:
           - pattern: '"$SQL"'
           - metavariable-regex:
               metavariable: $SQL
-              regex: (?is)^.*?\(\s*(?-i:SELECT|select)\b([^()]|\([^()]*\))*?\b(from|join)\s+(only\s+)?("?public"?\s*\.\s*)?"?(role|permission)"?(?![\w$])
+              regex: (?is)(?(DEFINE)(?<sep>\s|--[^\n]*\n|/\*(?>[^*/]+|\*(?!/)|/(?!\*)|/\*(?>[^*]+|\*(?!/))*+\*/)*+\*/)(?<gap>(?&sep)+|(?="))(?<pub>"?public"?(?&sep)*\.(?&sep)*))^.*?\((?&sep)*(?-i:SELECT|select)\b([^()]|\([^()]*\))*?\b(from|join)(?&gap)(only(?&gap))?(?&pub)?"?(role|permission)"?(?![\w$])
+      # A database call's literal argument is SQL whatever its case: a distinctive name anywhere,
+      # role or permission after a word that names a table.
+      - patterns:
+          - pattern-either:
+              - pattern: $C.execute("$SQL", ...)
+              - pattern: $C.execute(query="$SQL", ...)
+              - pattern: $C.execute(sql="$SQL", ...)
+              - pattern: $C.executemany("$SQL", ...)
+              - pattern: $C.stream("$SQL", ...)
+              - pattern: $C.copy("$SQL", ...)
+              - pattern: $C.raw("$SQL", ...)
+              - pattern: $C.raw(raw_query="$SQL", ...)
+              - pattern: $C.RawSQL("$SQL", ...)
+              - pattern: $C.SQL("$SQL")
+              - pattern: $Q.extra(..., where=[..., "$SQL", ...], ...)
+              - pattern: '$Q.extra(..., select={..., $K: "$SQL", ...}, ...)'
+          - metavariable-regex:
+              metavariable: $SQL
+              regex: (?is)(?(DEFINE)(?<sep>\s|--[^\n]*\n|/\*(?>[^*/]+|\*(?!/)|/(?!\*)|/\*(?>[^*]+|\*(?!/))*+\*/)*+\*/)(?<gap>(?&sep)+|(?="))(?<pub>"?public"?(?&sep)*\.(?&sep)*))^.*?((?<![\w$])"?(role_permission|user_role|org_unit)"?(?![\w$])|(\b(from|join|into|update|table|only|truncate|copy|lock|using|on|references)(?&gap)|\bfrom(?&gap)[^;()]*?,(?&sep)*)(?&pub)?"?(role|permission)"?(?![\w$]))
       # psycopg.sql identifiers and QuerySet.extra(tables=...) naming one of the tables.
       - patterns:
           - pattern-either:

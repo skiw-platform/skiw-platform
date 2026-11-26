@@ -2,6 +2,7 @@
 # ruff: noqa: B009 -- getattr with a constant name is the shape under test.
 from django.apps import apps
 from django.db import connection
+from django.db.models.expressions import RawSQL
 from django.shortcuts import get_list_or_404, get_object_or_404
 from psycopg import sql
 
@@ -12,6 +13,7 @@ from accounts.access import grants, tables
 from accounts.access import tables as access_tables
 from accounts.access.tables import OrgUnit, Permission, Role, RolePermission, UserRole
 from accounts.access.tables import OrgUnit as Unit
+from accounts.models import AppUser as Person
 from accounts.models import Role as Alias
 from accounts.models import UserRole as Assigned
 
@@ -96,6 +98,14 @@ def as_values(pk):
     apps.get_model(app_label="accounts", model_name="UserRole")
     # ruleid: roles-access-only
     apps.get_model("accounts", model_name="role")
+    # ruleid: roles-access-only
+    apps.get_model(app_label="accounts.UserRole")
+    # ruleid: roles-access-only
+    getattr(Assigned, "objects").all()
+    # ruleid: roles-access-only
+    getattr(Alias, "_meta")
+    # ruleid: roles-access-only
+    getattr(Unit, "_default_manager")
 
 
 # ruleid: roles-access-only
@@ -173,6 +183,7 @@ def raw():
         cursor.execute("  -- the roles\n  SELECT 1 FROM role")
         # ruleid: roles-access-only
         cursor.execute("/* c */ select 1 from org_unit")
+        # ruleid: roles-access-only
         cursor.execute(
             # ruleid: roles-access-only
             "SELECT 1 "  # one literal split over two lines; Semgrep also sees the second part
@@ -198,6 +209,83 @@ def raw():
     print("id IN (SELECT id FROM role)")
     # ruleid: roles-access-only
     print("x = ANY (select count(*) from public.permission)")
+
+
+def direct_calls(cursor):
+    # In a database call the string is SQL, whatever its case.
+    # ruleid: roles-access-only
+    cursor.execute("Select id From role")
+    # ruleid: roles-access-only
+    cursor.executemany("Update Permission Set code = %s", [])
+    # ruleid: roles-access-only
+    cursor.stream("Select * From Role")
+    # ruleid: roles-access-only
+    cursor.copy("Copy role To STDOUT")
+    # ruleid: roles-access-only
+    models.AppUser.objects.raw("Select * From app_user, role")
+    # ruleid: roles-access-only
+    models.AppUser.objects.raw(raw_query="Select * From permission")
+    # ruleid: roles-access-only
+    RawSQL("Select id From role", [])
+    # ruleid: roles-access-only
+    cursor.execute("Select id From User_Role")
+    # ruleid: roles-access-only
+    sql.SQL("Delete From permission")
+    # ruleid: roles-access-only
+    cursor.execute(query="Select id From role")
+    # ruleid: roles-access-only
+    cursor.execute(sql="Truncate role")
+    # ruleid: roles-access-only
+    cursor.execute(
+        "Select id "  # one literal split over two lines
+        "From role"
+    )
+    # ruleid: roles-access-only
+    models.AppUser.objects.extra(where=["id IN (Select id From role)"])
+    # ruleid: roles-access-only
+    models.AppUser.objects.extra(select={"n": "Select count(*) From permission"})
+    # Comments and quotes between the word that names a table and the name.
+    # ruleid: roles-access-only
+    cursor.execute("SELECT id FROM /* target */ role")
+    # ruleid: roles-access-only
+    cursor.execute("SELECT id FROM/* target */role")
+    # ruleid: roles-access-only
+    cursor.execute("SELECT id FROM -- target\n role")
+    # ruleid: roles-access-only
+    cursor.execute("SELECT id FROM /* a /* nested */ one */ role")
+    # ruleid: roles-access-only
+    cursor.execute('SELECT id FROM"role"')
+    # ruleid: roles-access-only
+    cursor.execute("SELECT id FROM public /* a */ . /* b */ role")
+    # ruleid: roles-access-only
+    cursor.execute("SELECT 1 FROM app_user u, /* c */ role r")
+    # ruleid: roles-access-only
+    cursor.execute("DELETE FROM ONLY /* c */ permission")
+    # Outside a database call too, when the string reads as SQL.
+    # ruleid: roles-access-only
+    print("SELECT id FROM /* target */ role")
+    # ruleid: roles-access-only
+    print("id IN (/* a */ SELECT id FROM /* b */ role)")
+    # ruleid: roles-access-only
+    print("id IN (SELECT user_id FROM/* c */user_role)")
+    # ok: roles-access-only
+    cursor.execute("Select 1 From /* the role */ app_user")
+    # ok: roles-access-only
+    cursor.execute("Select 1 From roles")
+    # ok: roles-access-only
+    cursor.execute("Set Role skiw_migrator")
+    # ok: roles-access-only
+    RawSQL("Select 1 From app_user", [])
+    # ok: roles-access-only
+    print("Select a value from role choices.")
+    # ok: roles-access-only
+    apps.get_model(app_label="auth.Permission")
+    # ok: roles-access-only
+    apps.get_model(app_label="accounts.AppUser")
+    # ok: roles-access-only
+    getattr(Person, "objects").all()
+    # ok: roles-access-only
+    getattr(Assigned, "__name__")
 
 
 def allowed(agency, user):
