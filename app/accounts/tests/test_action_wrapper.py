@@ -13,7 +13,7 @@ from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory
 
 from accounts.access.catalogue import ACTION_LINES, CATALOGUE, SELF_SERVICE, ActionLine
-from accounts.auth.wrapper import Signed, authorized_action
+from accounts.auth.wrapper import LINE_MATCHES, Signed, authorized_action
 
 
 class Equal:
@@ -118,6 +118,17 @@ def test_line_is_keyword_only_with_no_default() -> None:
 
 def test_the_three_lines_are_the_types_and_nothing_else() -> None:
     assert ACTION_LINES == get_args(ActionLine) == ("insurance", "investment", "any")
+
+
+# Decision 26 by hand, (assignment line, action line): action `any` matches every assignment line,
+# assignment `both` every action line, otherwise the two are equal.
+DECISION_26 = {("insurance", "insurance"), ("investment", "investment"), ("both", "any")}
+DECISION_26 |= {("insurance", "any"), ("investment", "any")}
+DECISION_26 |= {("both", "insurance"), ("both", "investment")}
+
+
+def test_the_line_table_is_exactly_the_seven_pairs_of_decision_26() -> None:
+    assert LINE_MATCHES == DECISION_26 and len(DECISION_26) == 7
 
 
 def test_an_async_handler_is_refused() -> None:

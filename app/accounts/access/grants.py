@@ -10,7 +10,7 @@ One grant per (assignment, tick) pair, never merged (Decision 8): the scope from
 org_unit_id and line from the assignment, step-up from the code catalogue for (code, scope). A
 stored pair the code catalogue lacks is dropped and logged (fail closed; the FK to `permission`
 and the live catalogue test make it unreachable). Matching the action's line and the step-up
-check are the wrapper's (M4r-3).
+check are the wrapper's role step.
 """
 
 import logging

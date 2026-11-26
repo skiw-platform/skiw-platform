@@ -250,7 +250,7 @@ def test_without_a_session_step_up_is_the_wrappers_no_store_401() -> None:
 def test_verify_refuses_an_unknown_purpose_before_judging_the_code() -> None:
     user, secret, _ = sign_in.signing_in()
     now = timezone.now()
-    who = wrapper.Signed(user.id, user.agency_id, "totp", now, now)
+    who = wrapper.Signed(user.id, user.agency_id, "totp", now, now, frozenset())
     request = sign_in.pending_login(user)
     for code in ("not a code", sign_in.code_at(secret, STEP)):
         with pytest.raises(ValueError, match="unknown step-up purpose"):

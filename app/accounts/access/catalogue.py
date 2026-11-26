@@ -52,6 +52,6 @@ SELF_SERVICE: Final[frozenset[str]] = frozenset(
 ROUTE_CODES: Final[frozenset[str]] = frozenset(CATALOGUE) | SELF_SERVICE
 
 # Decision 26: the business line an action declares. `any` = in no module the §6 line split
-# names. An assignment's line (tables.Line) is matched against it in the wrapper (M4r-3).
+# names. An assignment's line (tables.Line) is matched against it by the wrapper's LINE_MATCHES.
 ActionLine = Literal["insurance", "investment", "any"]
 ACTION_LINES: Final[tuple[ActionLine, ...]] = ("insurance", "investment", "any")
