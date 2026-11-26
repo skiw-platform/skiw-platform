@@ -1,0 +1,186 @@
+rules:
+  - id: roles-access-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only accounts.access reads or writes role, role_permission, user_role, org_unit and
+      permission (slice spec Decisions 3, 29; AUTH-12): the wrapper reads assignments and ticks on
+      every request through accounts.access.grants, and every change goes through the audited
+      paths there. Call accounts.access instead of the models or SQL. Allowed only in
+      accounts/access/, accounts/migrations/ and the tests.
+    paths:
+      exclude:
+        - /app/accounts/access/
+        - /app/accounts/migrations/
+        - /app/accounts/tests/
+        - /app/tenancy/tests/
+        - /app/jobs/tests/
+        - /app/tests/
+    pattern-either:
+      # The models: a manager, _meta, a constructor call, by name or module path. The fully
+      # qualified forms also catch an aliased import (`from accounts.models import Role as R`).
+      - patterns:
+          - pattern-either:
+              - pattern: $MODEL.$M
+              - pattern: getattr($MODEL, "$M", ...)
+          - metavariable-regex:
+              metavariable: $MODEL
+              regex: ^(\w+\.)*(Role|RolePermission|UserRole|OrgUnit|Permission)$
+          - metavariable-regex:
+              metavariable: $M
+              regex: ^(objects|_default_manager|_base_manager|_meta)$
+      - patterns:
+          - pattern: $MODEL(...)
+          - metavariable-regex:
+              metavariable: $MODEL
+              regex: ^(\w+\.)*(Role|RolePermission|UserRole|OrgUnit|Permission)$
+      - patterns:
+          - pattern-either:
+              - pattern: accounts.models.$MODEL.$M
+              - pattern: accounts.access.tables.$MODEL.$M
+              - pattern: getattr(accounts.models.$MODEL, "$M", ...)
+              - pattern: getattr(accounts.access.tables.$MODEL, "$M", ...)
+          - metavariable-regex:
+              metavariable: $MODEL
+              regex: ^(Role|RolePermission|UserRole|OrgUnit|Permission)$
+          - metavariable-regex:
+              metavariable: $M
+              regex: ^(objects|_default_manager|_base_manager|_meta)$
+      - patterns:
+          - pattern-either:
+              - pattern: accounts.models.$MODEL(...)
+              - pattern: accounts.access.tables.$MODEL(...)
+          - metavariable-regex:
+              metavariable: $MODEL
+              regex: ^(Role|RolePermission|UserRole|OrgUnit|Permission)$
+      # The model as a value: the get_*_or_404 shortcuts, a subclass or proxy, `model = Role` in
+      # a class body (generic views, ModelForm Meta).
+      - patterns:
+          - pattern-either:
+              - patterns:
+                  - pattern: $F($MODEL, ...)
+                  - metavariable-regex:
+                      metavariable: $F
+                      regex: ^(\w+\.)*(get_object_or_404|get_list_or_404)$
+              - pattern: |
+                  class $C(..., $MODEL, ...):
+                      ...
+              - pattern: |
+                  class $C(...):
+                      ...
+                      model = $MODEL
+          - metavariable-regex:
+              metavariable: $MODEL
+              regex: ^(\w+\.)*(Role|RolePermission|UserRole|OrgUnit|Permission)$
+      - patterns:
+          - pattern-either:
+              - patterns:
+                  - pattern-either:
+                      - pattern: $F(accounts.models.$NAME, ...)
+                      - pattern: $F(accounts.access.tables.$NAME, ...)
+                  - metavariable-regex:
+                      metavariable: $F
+                      regex: ^(\w+\.)*(get_object_or_404|get_list_or_404)$
+              - pattern: |
+                  class $C(..., accounts.models.$NAME, ...):
+                      ...
+              - pattern: |
+                  class $C(..., accounts.access.tables.$NAME, ...):
+                      ...
+              - pattern: |
+                  class $C(...):
+                      ...
+                      model = accounts.models.$NAME
+              - pattern: |
+                  class $C(...):
+                      ...
+                      model = accounts.access.tables.$NAME
+          - metavariable-regex:
+              metavariable: $NAME
+              regex: ^(Role|RolePermission|UserRole|OrgUnit|Permission)$
+      # getattr on the models modules (by name, or through any import of them).
+      - patterns:
+          - pattern-either:
+              - patterns:
+                  - pattern: getattr($MOD, "$N", ...)
+                  - metavariable-regex:
+                      metavariable: $MOD
+                      regex: ^((accounts\.)?models|(accounts\.access\.)?tables)$
+              - pattern: getattr(accounts.models, "$N", ...)
+              - pattern: getattr(accounts.access.tables, "$N", ...)
+          - metavariable-regex:
+              metavariable: $N
+              regex: ^(Role|RolePermission|UserRole|OrgUnit|Permission)$
+      # apps.get_model("accounts", "role"), get_model("accounts.Role") and the keyword forms:
+      # names are case-insensitive there.
+      - patterns:
+          - pattern-either:
+              - pattern: $A.get_model("accounts", "$N", ...)
+              - pattern: $A.get_model("$N", ...)
+              - pattern: $A.get_model("accounts", model_name="$N", ...)
+              - pattern: $A.get_model(app_label="accounts", model_name="$N", ...)
+              - pattern: $A.get_model(app_label="$N", ...)
+          - metavariable-regex:
+              metavariable: $N
+              regex: (?i)^(accounts\.)?(role|rolepermission|userrole|orgunit|permission)$
+      # In the SQL regexes below, sep is a blank or a comment (block comments may nest once),
+      # gap is what may follow a word that names a table (sep, or straight into a quote) and pub is
+      # a `public.` qualifier.
+      # SQL in any string: it must begin as SQL (after blanks, comments or brackets), with that first
+      # keyword all upper or all lower case, so prose that names a table ("Copy permission lists
+      # ...") is not flagged. role_permission, user_role and org_unit are not
+      # English words, so anywhere after that is enough. role and permission are: they must follow
+      # a word that names a table (FROM, JOIN, INTO, UPDATE, TABLE, ONLY, TRUNCATE, COPY, LOCK,
+      # USING, ON, REFERENCES, or a comma in a FROM list), with blanks, comments or just a quote
+      # between. Each may be public.-qualified and quoted.
+      - patterns:
+          - pattern: '"$SQL"'
+          - metavariable-regex:
+              metavariable: $SQL
+              regex: (?is)^(?=(\s|--[^\n]*\n|/\*.*?\*/|\()*(?-i:(SELECT|INSERT|UPDATE|DELETE|TRUNCATE|COPY|MERGE|LOCK|WITH|TABLE|EXPLAIN|ALTER|DROP|GRANT|REVOKE|CREATE|VALUES|FROM|JOIN|WHERE)|(select|insert|update|delete|truncate|copy|merge|lock|with|table|explain|alter|drop|grant|revoke|create|values|from|join|where))\b).*?(?<![\w$])"?(role_permission|user_role|org_unit)"?(?![\w$])
+      - patterns:
+          - pattern: '"$SQL"'
+          - metavariable-regex:
+              metavariable: $SQL
+              regex: (?is)(?(DEFINE)(?<sep>\s|--[^\n]*\n|/\*(?>[^*/]+|\*(?!/)|/(?!\*)|/\*(?>[^*]+|\*(?!/))*+\*/)*+\*/)(?<gap>(?&sep)+|(?="))(?<pub>"?public"?(?&sep)*\.(?&sep)*))^(?=(\s|--[^\n]*\n|/\*.*?\*/|\()*(?-i:(SELECT|INSERT|UPDATE|DELETE|TRUNCATE|COPY|MERGE|LOCK|WITH|TABLE|EXPLAIN|ALTER|DROP|GRANT|REVOKE|CREATE|VALUES|FROM|JOIN|WHERE)|(select|insert|update|delete|truncate|copy|merge|lock|with|table|explain|alter|drop|grant|revoke|create|values|from|join|where))\b).*?(\b(from|join|into|update|table|only|truncate|copy|lock|using|on|references)(?&gap)|\bfrom(?&gap)[^;()]*?,(?&sep)*)(?&pub)?"?(role|permission)"?(?![\w$])
+      # Fragments that do not begin as SQL (extra(where=...), RawSQL): a distinctive name right
+      # after FROM or JOIN anywhere; role or permission only after FROM or JOIN inside a
+      # bracketed SELECT, so that "(select one) from role holders" stays quiet.
+      - patterns:
+          - pattern: '"$SQL"'
+          - metavariable-regex:
+              metavariable: $SQL
+              regex: (?is)(?(DEFINE)(?<sep>\s|--[^\n]*\n|/\*(?>[^*/]+|\*(?!/)|/(?!\*)|/\*(?>[^*]+|\*(?!/))*+\*/)*+\*/)(?<gap>(?&sep)+|(?="))(?<pub>"?public"?(?&sep)*\.(?&sep)*))^.*?\b(from|join)(?&gap)(only(?&gap))?(?&pub)?"?(role_permission|user_role|org_unit)"?(?![\w$])
+      - patterns:
+          - pattern: '"$SQL"'
+          - metavariable-regex:
+              metavariable: $SQL
+              regex: (?is)(?(DEFINE)(?<sep>\s|--[^\n]*\n|/\*(?>[^*/]+|\*(?!/)|/(?!\*)|/\*(?>[^*]+|\*(?!/))*+\*/)*+\*/)(?<gap>(?&sep)+|(?="))(?<pub>"?public"?(?&sep)*\.(?&sep)*))^.*?\((?&sep)*(?-i:SELECT|select)\b([^()]|\([^()]*\))*?\b(from|join)(?&gap)(only(?&gap))?(?&pub)?"?(role|permission)"?(?![\w$])
+      # A database call's literal argument is SQL whatever its case: a distinctive name anywhere,
+      # role or permission after a word that names a table.
+      - patterns:
+          - pattern-either:
+              - pattern: $C.execute("$SQL", ...)
+              - pattern: $C.execute(query="$SQL", ...)
+              - pattern: $C.execute(sql="$SQL", ...)
+              - pattern: $C.executemany("$SQL", ...)
+              - pattern: $C.stream("$SQL", ...)
+              - pattern: $C.copy("$SQL", ...)
+              - pattern: $C.raw("$SQL", ...)
+              - pattern: $C.raw(raw_query="$SQL", ...)
+              - pattern: $C.RawSQL("$SQL", ...)
+              - pattern: $C.SQL("$SQL")
+              - pattern: $Q.extra(..., where=[..., "$SQL", ...], ...)
+              - pattern: '$Q.extra(..., select={..., $K: "$SQL", ...}, ...)'
+          - metavariable-regex:
+              metavariable: $SQL
+              regex: (?is)(?(DEFINE)(?<sep>\s|--[^\n]*\n|/\*(?>[^*/]+|\*(?!/)|/(?!\*)|/\*(?>[^*]+|\*(?!/))*+\*/)*+\*/)(?<gap>(?&sep)+|(?="))(?<pub>"?public"?(?&sep)*\.(?&sep)*))^.*?((?<![\w$])"?(role_permission|user_role|org_unit)"?(?![\w$])|(\b(from|join|into|update|table|only|truncate|copy|lock|using|on|references)(?&gap)|\bfrom(?&gap)[^;()]*?,(?&sep)*)(?&pub)?"?(role|permission)"?(?![\w$]))
+      # psycopg.sql identifiers and QuerySet.extra(tables=...) naming one of the tables.
+      - patterns:
+          - pattern-either:
+              - pattern: $S.Identifier(..., "$T")
+              - pattern: Identifier(..., "$T")
+              - pattern: $Q.extra(..., tables=[..., "$T", ...], ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^(role|role_permission|user_role|org_unit|permission)$
