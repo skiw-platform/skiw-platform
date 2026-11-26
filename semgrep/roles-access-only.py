@@ -1,12 +1,17 @@
 # Fixture for `semgrep --test semgrep/` (rule roles-access-only).
+# ruff: noqa: B009 -- getattr with a constant name is the shape under test.
 from django.apps import apps
 from django.db import connection
+from django.shortcuts import get_list_or_404, get_object_or_404
 from psycopg import sql
 
 import accounts.access.tables
 from accounts import models
+from accounts import models as account_models
 from accounts.access import grants, tables
+from accounts.access import tables as access_tables
 from accounts.access.tables import OrgUnit, Permission, Role, RolePermission, UserRole
+from accounts.access.tables import OrgUnit as Unit
 from accounts.models import Role as Alias
 from accounts.models import UserRole as Assigned
 
@@ -35,7 +40,7 @@ def orm(agency, user):
     # ruleid: roles-access-only
     Assigned.objects.bulk_create([])
     # ruleid: roles-access-only
-    getattr(Role, "objects").all()  # noqa: B009
+    getattr(Role, "objects").all()
     # ruleid: roles-access-only
     Role(agency_id=agency, name="x").save()
     # ruleid: roles-access-only
@@ -52,7 +57,7 @@ def orm(agency, user):
     apps.get_model("accounts.OrgUnit")
 
 
-def passed_in(Role, Permission, RolePermission):
+def passed_in(Role, Permission, RolePermission, models):
     # A model handed in (from apps.get_model, say) shadows the import: matched by its name.
     # ruleid: roles-access-only
     Role.objects.all()
@@ -60,6 +65,68 @@ def passed_in(Role, Permission, RolePermission):
     print(Permission._meta.db_table)
     # ruleid: roles-access-only
     RolePermission(role_id=1)
+    # ruleid: roles-access-only
+    get_object_or_404(Role, pk=1)
+    # ruleid: roles-access-only
+    getattr(models, "UserRole")
+
+    # ruleid: roles-access-only
+    class Local(Permission):
+        pass
+
+
+def as_values(pk):
+    # ruleid: roles-access-only
+    get_object_or_404(Role, pk=pk)
+    # ruleid: roles-access-only
+    get_list_or_404(UserRole, user_id=pk)
+    # ruleid: roles-access-only
+    get_object_or_404(models.Role, pk=pk)
+    # ruleid: roles-access-only
+    get_object_or_404(Alias, pk=pk)
+    # ruleid: roles-access-only
+    getattr(models, "Role")
+    # ruleid: roles-access-only
+    getattr(tables, "OrgUnit")
+    # ruleid: roles-access-only
+    getattr(access_tables, "Permission")
+    # ruleid: roles-access-only
+    getattr(account_models, "RolePermission")
+    # ruleid: roles-access-only
+    apps.get_model(app_label="accounts", model_name="UserRole")
+    # ruleid: roles-access-only
+    apps.get_model("accounts", model_name="role")
+
+
+# ruleid: roles-access-only
+class Proxy(Role):
+    class Meta:
+        proxy = True
+
+
+# ruleid: roles-access-only
+class Through(models.UserRole):
+    pass
+
+
+# ruleid: roles-access-only
+class Aliased(Alias):
+    pass
+
+
+# ruleid: roles-access-only
+class RoleView:
+    model = Role
+
+
+# ruleid: roles-access-only
+class AliasedView:
+    model = Alias
+
+
+# ruleid: roles-access-only
+class UnitView:
+    model = Unit
 
 
 def raw():
@@ -124,6 +191,13 @@ def raw():
     sql.SQL("SELECT 1 FROM {}").format(sql.Identifier("role"))
     # ruleid: roles-access-only
     sql.Identifier("public", "user_role")
+    # Fragments that do not begin with an SQL word.
+    # ruleid: roles-access-only
+    models.AppUser.objects.extra(where=["id IN (SELECT user_id FROM user_role)"])
+    # ruleid: roles-access-only
+    print("id IN (SELECT id FROM role)")
+    # ruleid: roles-access-only
+    print("x = ANY (select count(*) from public.permission)")
 
 
 def allowed(agency, user):
@@ -136,11 +210,23 @@ def allowed(agency, user):
     # ok: roles-access-only
     isinstance(agency, Role)
     # ok: roles-access-only
+    print(issubclass(Role, object), Alias)
+    # ok: roles-access-only
     print(Role.__name__)
     # ok: roles-access-only
     Roles.objects.all()  # noqa: F821
     # ok: roles-access-only
     apps.get_model("accounts", "AppUser")
+    # ok: roles-access-only
+    apps.get_model(app_label="accounts", model_name="AppUser")
+    # ok: roles-access-only
+    get_object_or_404(models.AppUser, pk=user)
+    # ok: roles-access-only
+    getattr(models, "AppUser")
+    # ok: roles-access-only
+    getattr(agency, "Role")
+    # ok: roles-access-only
+    print(getattr(user, "role"), getattr(tables, "Line"))
     with connection.cursor() as cursor:
         # Another table whose name contains a role table's.
         # ok: roles-access-only
@@ -169,3 +255,19 @@ def allowed(agency, user):
     print("Update role names from the M5 screen.")
     # ok: roles-access-only
     print("Delete user_role rows only through accounts.access.")
+    # ok: roles-access-only
+    print("Pick a role (select one) from role holders, or one (SELECT a) from permission ticks.")
+    # ok: roles-access-only
+    print("ids (SELECT them) and the role FROM the list")
+    # ok: roles-access-only
+    print("Please select one from role holders (Select the row from permission ticks).")
+
+
+# ok: roles-access-only
+class Model(models.TenantModel):
+    model = models.AppUser
+
+
+# ok: roles-access-only
+class Shadow(tables.Line):
+    pass
