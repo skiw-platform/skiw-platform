@@ -3,7 +3,7 @@ from django.db import connection, models
 from django.db.models import F, Q
 
 from accounts.access.grants import grants
-from accounts.access.tables import Role, UserRole
+from accounts.access.tables import OrgUnit, Role, UserRole
 
 
 def banned(role, assignment, user, name, kind):
@@ -30,6 +30,9 @@ def banned(role, assignment, user, name, kind):
         # ruleid: no-role-name-branching
         case "x" | "adviser":
             seen.append(True)
+        # ruleid: no-role-name-branching
+        case {"role": "Owner"}:
+            seen.append(True)
     # ruleid: no-role-name-branching
     seen.append(role.name)
     # ruleid: no-role-name-branching
@@ -38,6 +41,28 @@ def banned(role, assignment, user, name, kind):
     seen.append(user.owner_role.name)
     # ruleid: no-role-name-branching
     seen.append(getattr(role, "name", None))
+    # ruleid: no-role-name-branching
+    seen.append(Role.objects.get(id=kind).name)
+    # ruleid: no-role-name-branching
+    seen.append(Role.objects.filter(id=kind).first().name)
+    # ruleid: no-role-name-branching
+    seen.append(Role._default_manager.get(id=kind).name)
+    # ruleid: no-role-name-branching
+    seen.append(Role._base_manager.all()[0].name)
+    # ruleid: no-role-name-branching
+    seen.append([r.name for r in Role.objects.all()])
+    # ruleid: no-role-name-branching
+    seen.append({r.name for r in Role._default_manager.filter(agency_id=kind)})
+    # ruleid: no-role-name-branching
+    seen.append({r.id: r.name for r in Role.objects.all()})
+    # ruleid: no-role-name-branching
+    seen.extend(r.name for r in Role._base_manager.all())
+    for r in Role.objects.filter(agency_id=kind):
+        # ruleid: no-role-name-branching
+        seen.append(r.name)
+    r = Role.objects.get(id=kind)
+    # ruleid: no-role-name-branching
+    seen.append(r.name)
     # ruleid: no-role-name-branching
     seen.append(role.is_system)
     # ruleid: no-role-name-branching
@@ -85,6 +110,19 @@ def allowed(user, code, name, unit):
     seen = [code == "staff.manage", code in ("staff.view", "client.view"), name == "owners"]
     # ok: no-role-name-branching
     seen.append(unit.name == name)
+    # ok: no-role-name-branching
+    seen.append(OrgUnit.objects.get(id=code).name)
+    # ok: no-role-name-branching
+    seen.append([u.name for u in OrgUnit.objects.all()])
+    for u in OrgUnit._default_manager.all():
+        # ok: no-role-name-branching
+        seen.append(u.name)
+    r = Role.objects.get(id=code)
+    r = unit
+    # ok: no-role-name-branching
+    seen.append(r.name)
+    # ok: no-role-name-branching
+    seen.append([r.id for r in Role.objects.all()])
     # ok: no-role-name-branching
     Role.objects.filter(agency_id=unit.agency_id).values("id")
     # ok: no-role-name-branching

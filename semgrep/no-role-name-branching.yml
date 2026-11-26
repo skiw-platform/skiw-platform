@@ -38,7 +38,7 @@ rules:
               metavariable: $S
               regex: (?i)^(owner|general|unit_manager|unit manager|adviser|staff)$
       - patterns:
-          - pattern-regex: (?im)^\s*case\s+[^:\n]*["'](owner|general|unit_manager|unit manager|adviser|staff)["']
+          - pattern-regex: (?im)^\s*case\s+.*["'](owner|general|unit_manager|unit manager|adviser|staff)["']
       # Role.name: on a role-named variable or attribute (role, owner_role, x.role, Role).
       - patterns:
           - pattern: $ROLE.name
@@ -46,6 +46,28 @@ rules:
               metavariable: $ROLE
               regex: (?i)^(.*\.)?\w*role$
       - pattern: getattr($ROLE, "name", ...)
+      # Role.name on a Role query's result: directly, through a loop or comprehension variable,
+      # or through a variable assigned from the query and not reassigned before the read.
+      - pattern: Role.$MGR. ... .$F(...).name
+      - pattern: Role.$MGR. ... .$F(...)[$I].name
+      - patterns:
+          - pattern-either:
+              - pattern-inside: |
+                  for $R in Role.$MGR. ... .$F(...):
+                    ...
+              - pattern-inside: "[$E for $R in Role.$MGR. ... .$F(...)]"
+              - pattern-inside: "{$E for $R in Role.$MGR. ... .$F(...)}"  # set and dict
+              - pattern-inside: ($E for $R in Role.$MGR. ... .$F(...))
+              - patterns:
+                  - pattern-inside: |
+                      $R = Role.$MGR. ... .$F(...)
+                      ...
+                  - pattern-not-inside: |
+                      $R = Role.$MGR. ... .$F(...)
+                      ...
+                      $R = $OTHER
+                      ...
+          - pattern: $R.name
       # Role.is_system: any attribute read, and getattr.
       - pattern: $X.is_system
       - pattern: getattr($X, "is_system", ...)
