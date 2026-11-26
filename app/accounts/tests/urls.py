@@ -46,7 +46,7 @@ def note_only(body: Mapping[str, Any]) -> Mapping[str, Any]:
     return body
 
 
-@authorized_action(schema=note_only, permission="test.action")
+@authorized_action(schema=note_only, permission="auth.factors", line="any")
 def action(request: HttpRequest, signed: Signed, data: Mapping[str, Any]) -> HttpResponse:
     with connection.cursor() as cursor:
         cursor.execute("SELECT guard.current_agency()")

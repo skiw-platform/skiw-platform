@@ -228,13 +228,13 @@ def test_an_own_transaction_handler_runs_after_the_checks_outside_any_transactio
 ) -> None:
     seen: list[tuple[bool, uuid.UUID]] = []
 
-    @authorized_action(schema=dict, permission="test.own", own_transaction=own)
+    @authorized_action(schema=dict, permission="auth.password", line="any", own_transaction=own)
     def handler(request: HttpRequest, signed: wrapper.Signed, data: object) -> HttpResponse:
         seen.append((connection.in_atomic_block, signed.user_id))
         return HttpResponse()
 
     user, _, _ = sign_in.signing_in()
-    assert vars(handler)["skiw_action"] == "test.own"
+    assert vars(handler)["skiw_action"] == "auth.password"
     assert handler(signed_request(user)).status_code == 200
     assert seen == [(not own, user.id)]
     with with_agency(user.agency_id):

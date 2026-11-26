@@ -153,3 +153,13 @@ type = "forbidden"
 source_modules = ["config", "health", "shell", "jobs", "documents", "tenancy", "skiw_host"]
 forbidden_modules = ["accounts.session", "accounts.session_model", "accounts.models"]
 ignore_imports = ["config.urls -> accounts.views"]
+
+# One import door (slice spec Decision 11; DECISIONS 2026-11-26 M4r-2 B): no module outside
+# accounts imports accounts.auth or a submodule of it. The public re-exports from accounts.access
+# and their Semgrep rule land before the first route outside accounts. `protected` checks direct
+# imports, so config.urls -> accounts.views -> accounts.auth stays allowed.
+[[tool.importlinter.contracts]]
+name = "Only accounts may import accounts.auth (slice spec Decision 11)"
+type = "protected"
+protected_modules = ["accounts.auth"]
+allowed_importers = ["accounts"]

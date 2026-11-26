@@ -213,7 +213,7 @@ def test_a_user_without_an_enrolled_factor_is_not_active_and_reaches_no_data() -
         isinstance(store, SessionStore) and wrapper._signed(store) is None
     )  # a pending state is not a session
 
-    @wrapper.authorized_action(schema=lambda body: body, permission="test.read")
+    @wrapper.authorized_action(schema=lambda body: body, permission="auth.factors", line="any")
     def data(request: HttpRequest, signed: wrapper.Signed, body: object) -> HttpResponse:
         return HttpResponse("client data")
 

@@ -6,8 +6,9 @@ reviewed as public. The steps run in AUTH-01 order and a failing step stops the 
 1. session: a completed login (the `_skiw_*` keys of accounts.auth.login), else 401;
 2. tenant: `with_agency(_skiw_agency)`, inside which the idle timeout (a marker and a logout),
    the revocation markers and `status = 'active'` are checked; a failure logs out, 401;
-3. role/permission: until M4-rest, "signed in with a second factor" (AUTH-03 is not checked yet;
-   `permission` names the §6 matrix entry M4-rest will check), else 403;
+3. role/permission: until M4r-3, "signed in with a second factor" (AUTH-03 is not checked yet),
+   else 403. `permission` (a catalogue or self-service code) and `line` (slice spec Decision 26)
+   are checked at registration and recorded for the route registry and M4r-3's role step;
 4. input: `schema` parses the JSON object body (UNI-03); InvalidInput gives 400;
 5. idempotency: no M3 action needs it;
 6. the handler, in the same tenant transaction; or, with `own_transaction=True`, after steps 1-4
@@ -35,6 +36,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 
+from accounts.access.catalogue import ACTION_LINES, ROUTE_CODES, ActionLine
 from accounts.auth.login import AGENCY, AUTH_AT, FACTOR, SEEN_AT, USER
 from accounts.auth.revoke import mark, revoked
 from accounts.factor_model import KINDS
@@ -128,10 +130,18 @@ def _refused(status: int, code: str) -> HttpResponse:
 
 
 def authorized_action[T](
-    *, schema: Callable[[Mapping[str, Any]], T], permission: str, own_transaction: bool = False
+    *,
+    schema: Callable[[Mapping[str, Any]], T],
+    permission: str,
+    line: ActionLine,
+    own_transaction: bool = False,
 ) -> Callable[[Callable[[HttpRequest, Signed, T], HttpResponse]], Callable[..., HttpResponse]]:
-    if not permission:
-        raise ImproperlyConfigured("authorized_action needs the permission it checks")
+    # `line` has no default (Decision 26): leaving it out is Python's TypeError (DECISIONS M4r-2 A).
+    # isinstance first: an unhashable value would raise TypeError in the set lookup.
+    if not isinstance(permission, str) or permission not in ROUTE_CODES:
+        raise ImproperlyConfigured(f"authorized_action: unknown permission {permission!r}")
+    if not isinstance(line, str) or line not in ACTION_LINES:
+        raise ImproperlyConfigured(f"authorized_action: line must be one of {ACTION_LINES}")
 
     def decorate(
         handler: Callable[[HttpRequest, Signed, T], HttpResponse],
@@ -170,7 +180,7 @@ def authorized_action[T](
                     return handler(request, signed, data)
             return handler(request, signed, data)  # own_transaction: the checks have committed
 
-        vars(view).update(skiw_action=permission)  # the route registry reads it
+        vars(view).update(skiw_action=permission, skiw_line=line)  # the route registry reads them
         return view
 
     return decorate

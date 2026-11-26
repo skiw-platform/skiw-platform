@@ -47,3 +47,11 @@ PAIRS: Final[frozenset[tuple[str, Scope]]] = frozenset(
 SELF_SERVICE: Final[frozenset[str]] = frozenset(
     {"auth.logout", "auth.password", "auth.factors", "auth.factor-change", "auth.stepup"}
 )
+
+# What `authorized_action(permission=...)` accepts: a catalogue code or a self-service one.
+ROUTE_CODES: Final[frozenset[str]] = frozenset(CATALOGUE) | SELF_SERVICE
+
+# Decision 26: the business line an action declares. `any` = in no module the §6 line split
+# names. An assignment's line (tables.Line) is matched against it in the wrapper (M4r-3).
+ActionLine = Literal["insurance", "investment", "any"]
+ACTION_LINES: Final[tuple[ActionLine, ...]] = ("insurance", "investment", "any")
