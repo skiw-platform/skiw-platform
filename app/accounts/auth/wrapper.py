@@ -6,15 +6,20 @@ reviewed as public. The steps run in AUTH-01 order and a failing step stops the 
 1. session: a completed login (the `_skiw_*` keys of accounts.auth.login), else 401;
 2. tenant: `with_agency(_skiw_agency)`, inside which the idle timeout (a marker and a logout),
    the revocation markers and `status = 'active'` are checked; a failure logs out, 401;
-3. role/permission: until M4r-3, "signed in with a second factor" (AUTH-03 is not checked yet),
-   else 403. `permission` (a catalogue or self-service code) and `line` (slice spec Decision 26)
-   are checked at registration and recorded for the route registry and M4r-3's role step;
+3. role/permission (slice spec Decisions 6, 7, 8, 26), in the same with_agency(): a second
+   factor, else 403 `forbidden`. A self-service `permission` reads no grant and gives empty
+   access. A catalogue code reads the user's grants once (accounts.access.grants) and keeps each
+   grant whose assignment line matches the route's `line` in LINE_MATCHES; none: 403 `forbidden`.
+   Of those, a grant that needs a step-up is dropped (the step-up check is not built yet, so every
+   such grant fails closed); none left: 403 `stepup-required`, never for a line refusal. No 403
+   logs out. The kept grants are `Signed.access`, the handler's only grants;
 4. input: `schema` parses the JSON object body (UNI-03); InvalidInput gives 400;
 5. idempotency: no M3 action needs it;
 6. the handler, in the same tenant transaction; or, with `own_transaction=True`, after steps 1-4
    have committed and outside any transaction, for a handler that counts attempts (the factor
    counters refuse an open transaction). Such a handler opens with_agency(signed.agency_id) itself
-   for every tenant query (TEN-09); steps 1-4 and their order are the same in both modes.
+   for every tenant query (TEN-09); steps 1-4 and their order are the same in both modes, and its
+   `access` is what step 3 read before that commit.
 
 Every refusal is `Cache-Control: no-store` (AUTH-05).
 
@@ -27,16 +32,18 @@ import inspect
 import json
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 
-from accounts.access.catalogue import ACTION_LINES, ROUTE_CODES, ActionLine
+from accounts.access.catalogue import ACTION_LINES, ROUTE_CODES, SELF_SERVICE, ActionLine
+from accounts.access.grants import Grant, grants
+from accounts.access.tables import Line
 from accounts.auth.login import AGENCY, AUTH_AT, FACTOR, SEEN_AT, USER
 from accounts.auth.revoke import mark, revoked
 from accounts.factor_model import KINDS
@@ -47,6 +54,19 @@ from tenancy.binding import with_agency
 SEEN_STEP = timedelta(minutes=1)
 # config.routes.SAFE_METHODS, which accounts may not import (import-linter): these carry no body.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# Decision 26: (assignment line, action line) pairs that match, listed one by one. Any other pair,
+# a value outside the types included, matches nothing.
+LINE_MATCHES: Final[frozenset[tuple[Line, ActionLine]]] = frozenset(
+    {
+        ("insurance", "insurance"),
+        ("insurance", "any"),
+        ("investment", "investment"),
+        ("investment", "any"),
+        ("both", "insurance"),
+        ("both", "investment"),
+        ("both", "any"),
+    }
+)
 
 
 class InvalidInput(Exception):
@@ -62,6 +82,7 @@ class Signed:
     factor: str | None
     auth_at: datetime
     seen_at: datetime
+    access: frozenset[Grant]  # step 3's kept grants; empty for a self-service action
 
 
 def nothing(body: Mapping[str, Any]) -> None:
@@ -81,6 +102,7 @@ def _signed(session: SessionStore) -> Signed | None:
             factor=session.get(FACTOR),
             auth_at=datetime.fromisoformat(session[AUTH_AT]),
             seen_at=datetime.fromisoformat(session[SEEN_AT]),
+            access=frozenset(),
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -97,8 +119,23 @@ def _tenant_step(signed: Signed, key: str, now: datetime) -> Literal["live", "id
     return "live"
 
 
+def _role_step(
+    signed: Signed, permission: str, line: ActionLine
+) -> frozenset[Grant] | Literal["forbidden", "stepup-required"]:
+    """Step 3 after the factor check, inside the caller's with_agency(): the kept grants, or the
+    403 code. One grant read per request, never cached (AUTH-12)."""
+    if permission in SELF_SERVICE:
+        return frozenset()
+    matching = [g for g in grants(signed.user_id, permission) if (g.line, line) in LINE_MATCHES]
+    if not matching:
+        return "forbidden"
+    kept = frozenset(g for g in matching if g.stepup is None)
+    return kept or "stepup-required"
+
+
 def signed_in(session: SessionStore) -> bool:
-    """Whether the wrapper would let this session past steps 1-3, for GET /api/auth/session
+    """Whether the wrapper would let this session past steps 1-2 and the factor check of step 3
+    (no permission is named, so no grant is read), for GET /api/auth/session
     (DECISIONS M3i-0). The absolute deadline and the row's MAC are the store's (a row past either
     loads empty). Changes nothing: no marker, no flush and no idle clock write, so a poll never
     keeps a session alive; a refused session stays refused and the next wrapped call ends it."""
@@ -170,6 +207,10 @@ def authorized_action[T](
                     return _refused(401, "signed-out")
                 if signed.factor not in KINDS:
                     return _refused(403, "forbidden")
+                access = _role_step(signed, permission, line)
+                if isinstance(access, str):
+                    return _refused(403, access)
+                signed = replace(signed, access=access)
                 try:
                     data = schema(_body(request))
                 except InvalidInput:

@@ -328,7 +328,7 @@ def test_a_body_that_is_not_one_credential_is_400_and_leaves_the_challenge(raw: 
 
 def test_another_integrity_error_is_raised_not_refused() -> None:
     user, now = committed_user(), timezone.now()
-    signed = Signed(user.id, user.agency_id, "totp", now, now)
+    signed = Signed(user.id, user.agency_id, "totp", now, now, frozenset())
     bad = passkey.Registered(os.urandom(16), b"\1", SIGN_COUNT_MAX + 1)
     with pytest.raises(IntegrityError), with_agency(user.agency_id):
         factor_change._stored(signed, uuid.uuid4(), bad)

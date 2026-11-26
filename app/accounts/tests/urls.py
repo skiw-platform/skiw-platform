@@ -11,6 +11,7 @@ from django.db import connection
 from django.http import HttpRequest, HttpResponse
 from django.urls import path
 
+from accounts.access.catalogue import ROUTE_CODES, ActionLine
 from accounts.auth.wrapper import InvalidInput, Signed, authorized_action
 
 
@@ -46,8 +47,7 @@ def note_only(body: Mapping[str, Any]) -> Mapping[str, Any]:
     return body
 
 
-@authorized_action(schema=note_only, permission="auth.factors", line="any")
-def action(request: HttpRequest, signed: Signed, data: Mapping[str, Any]) -> HttpResponse:
+def handle(request: HttpRequest, signed: Signed, data: Mapping[str, Any]) -> HttpResponse:
     with connection.cursor() as cursor:
         cursor.execute("SELECT guard.current_agency()")
         (bound,) = cursor.fetchone()
@@ -55,9 +55,22 @@ def action(request: HttpRequest, signed: Signed, data: Mapping[str, Any]) -> Htt
     return HttpResponse(b"done")
 
 
+action = authorized_action(schema=note_only, permission="auth.factors", line="any")(handle)
+# The role step's routes: every route code on line `any`, and three on a business line.
+LINED: list[tuple[str, ActionLine]] = [(code, "any") for code in sorted(ROUTE_CODES)]
+LINED += [("client.view", "insurance"), ("client.view", "investment")]
+LINED += [("outbox.approve", "insurance")]
+
 urlpatterns = [
     path("write", write),
     path("awrite", awrite),
     path("read", read),
     path("action", action),
+    *(
+        path(
+            f"to/{code}/{line}",
+            authorized_action(schema=note_only, permission=code, line=line)(handle),
+        )
+        for code, line in LINED
+    ),
 ]

@@ -240,7 +240,8 @@ SESSION_PENDING = {False: "second_factor", True: "enrol_factor"}  # by Pending.e
 
 def session_state(request: HttpRequest) -> HttpResponse:
     """GET /api/auth/session: which screen the page shows after a load (DECISIONS M3i-0).
-    `signed_in` is exactly the wrapper's checks; `second_factor` and `enrol_factor` are a live
+    `signed_in` is the wrapper's checks up to the second factor (no grant: no action is named);
+    `second_factor` and `enrol_factor` are a live
     pending state (`factors.pending`, which clears a stale one, as the routes that use it do);
     anything else is `signed_out`, with one body and status whatever the reason (AUTH-05).
     Apart from that clearing it writes nothing, counts nothing and leaves the idle clock alone.
