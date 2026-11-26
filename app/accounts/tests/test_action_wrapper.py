@@ -72,6 +72,7 @@ def test_a_code_outside_the_catalogue_and_self_service_is_refused(code: str) -> 
     "value", [None, 1, ("auth.logout",), ["auth.logout"], {"auth.logout"}, Equal("auth.logout")]
 )
 def test_a_permission_that_is_not_text_is_refused(value: object) -> None:
+    # ignore[arg-type]: a non-`str` permission the types forbid; the runtime check is the subject.
     with pytest.raises(ImproperlyConfigured, match="unknown permission"):
         authorized_action(schema=anything, permission=value, line="any")  # type: ignore[arg-type]
 
@@ -94,6 +95,7 @@ def test_a_permission_that_is_not_text_is_refused(value: object) -> None:
     ],
 )
 def test_a_line_outside_the_three_is_refused(line: object) -> None:
+    # ignore[arg-type]: a value outside `ActionLine`; the runtime check is the subject.
     with pytest.raises(ImproperlyConfigured, match="line must be one of"):
         authorized_action(
             schema=anything,
@@ -103,6 +105,7 @@ def test_a_line_outside_the_three_is_refused(line: object) -> None:
 
 
 def test_a_missing_line_is_a_type_error() -> None:
+    # ignore[call-arg]: the omission mypy refuses, made anyway to pin what happens at run time.
     with pytest.raises(TypeError, match="line"):
         authorized_action(schema=anything, permission="auth.logout")  # type: ignore[call-arg]
 

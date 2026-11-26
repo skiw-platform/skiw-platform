@@ -11,7 +11,7 @@ route of the real URLconf: a missing, extra or changed route fails, and no route
 `staff.manage` while M4-rest has no in-app role writer (Decision 29)."""
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from importlib import import_module
 from typing import Any
 
@@ -136,7 +136,9 @@ def anything(body: Mapping[str, Any]) -> Mapping[str, Any]:
     return body
 
 
-def added(monkeypatch: pytest.MonkeyPatch, view: Any, name: str = "added") -> None:
+def added(
+    monkeypatch: pytest.MonkeyPatch, view: Callable[..., HttpResponse], name: str = "added"
+) -> None:
     urls = import_module(URLCONF)
     entry = route(name, view, name=name, methods=("POST",), auth="cookie")
     monkeypatch.setattr(urls, "urlpatterns", [*urls.urlpatterns, entry])
