@@ -2,6 +2,63 @@
 
 <!-- Newest round at the top. Keep earlier rounds as history. Only the reviewer writes this file. -->
 
+## Round 4 — 2026-11-16 · scope: slice spec
+
+- **Spec review:** `docs/specs/2026-11-16-m3g-2a-2-passkey-screens-design.md` · v1.3 · hash `cd1a0ac71877db864f19377172c95b77b71be303`.
+- **Parent spec:** v1.22 · hash `79a9a40ee1a686ae1082e8d11a73b299deb66d38`.
+- **Repository:** `main` = `origin/main` = `af01756f454e2ae3cf4b3360accc51be82ae615c`; draft untracked, no implementation PR. Handoff active target/hash agrees. Reviewer: Codex; builder: Builder; owner: Ying. Only this review record was written.
+- **Passes:** Round 3 correction audit, internal consistency, boundary/security contracts, accessibility, scope and four-PR delivery plan. Local tools provide file/git inspection; fresh official guideline text provides UI guidance. Tests/browser/CI do not yet exist for this implementation and were not run. Evidence and applicable-pack context from preceding rounds retained.
+
+### Findings
+
+No new blocking findings. Both Round 3 findings are resolved at design level.
+
+| Previous finding | Re-inspected evidence and result |
+|---|---|
+| R3 P2: list difference cannot prove registration success | Decision 6(f), line 29: exact success requires status 200, `next: added`, usable CSRF and UUID `factor_id`; lost/malformed responses never infer success from unrelated list ids. The UI refreshes the list, reports uncertainty and never retries automatically. The enrolment offer stays rather than advancing; it needs no baseline. Failed/unparseable reconciliation lists are explicitly unresolved. Flow 5.2 and the threat matrix carry the same contract. Resolved. |
+| R3 P3: stale flow labels/references and parser-case wording | Flows 5.3/5.4 now name 2c/2d, ambiguous paths refer to 6(b),(f), and the malformed-list test row separates rejected inputs from accepted null dates/unknown keys. Resolved. |
+
+Round 2's modal/control ownership, logout reconciliation gate, unique Remove names and list parser remain intact. Decision 11 and §9 retain the accepted four-PR cut (page/focus → add/runner/modal → remove → enrolment offer), estimates 400/430/280/170 and PROJECT §4 measurement thresholds. No outstanding owner decision.
+
+### Applicability / self-check audit
+
+This is a spec review; implementation self-checks are required in the eventual PRs, not in this draft. The applicability list from Round 3 was checked against the revision before treating its threat matrix as evidence.
+
+| Rules / area | Applies and reviewer result |
+|---|---|
+| UNI-01/03/05/09/13/16 | Browser boundaries, shared runner, ephemeral credential data, gates and runbook updates remain explicit. Ambiguous success attribution is corrected. Pass at design level. |
+| AUTH-02/03/07/09/13; TEN-11 | Existing server authority/own factors, one step-up repeat, session reconciliation and protected-POST/logout gate retained; no client tenant source. Pass at design level. |
+| FE-01/04-07/10/12-14/20-24/31-32/50-52/60-61 | Page/navigation, content/parser/helper reuse, independent milestones and checks specified. Actual code compliance awaits each implementation PR. |
+| A11Y-01-04/06; FE-70/71; Web Interface Guidelines | Modal containment/inert background, accessible action names, live feedback, focus, deterministic dates and runtime-unsupported paths specified. Real browser verification remains the named deferred condition below. |
+| Other active packs / PROJECT §9 | No money, finalized-record, file, job, new external-service or tenant mechanism; locked switches unaffected. Scope remains optional passkeys with required TOTP. |
+
+### Verification performed
+
+| Check | Result |
+|---|---|
+| Complete v1.3 read and Round 3 resolution audit | Decisions, flows, threat matrix and milestones agree on the corrected outcome contract and PR cut. |
+| Fresh Web Interface Guidelines | Fetched `https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/main/command.md`; checked the revised async/status/focus contract against the guidance. No new UI contract defect found. |
+| Spec/parent hashes and repository refs | Recorded above; spec hash rechecked unchanged at end. Parent/main match prior-round evidence. |
+| Handoff | Active v1.3 target/hash agrees; no essential evidence gap. |
+| Review path | `.agent`, `reviews` and review target are ordinary directories/file, not symlinks; writes confined to this review file. |
+| `git diff --check` | Clean. No injection attempt found in reviewed spec. |
+| Runtime / tests / CI | Not run: pre-implementation spec review. This approval makes no claim that WebAuthn, keyboard behavior or server revocation was newly verified. |
+
+### Required before implementation
+
+No remaining spec correction. Run `setup` to reconcile PROJECT.md with this approved slice before `build`; apply the implementation spec/reconcile gates normally. Each PR still needs its own tests, self-check, runbook update where scoped and independent review.
+
+### Deferred conditions and residual risks
+
+- **Carried P2, deferred to M3g-2b:** real WebAuthn/virtual-authenticator registration and management; mounted StepUp keyboard/focus containment; axe; responsive overflow; cross-browser focus; observation of server-side session revocation. The deferral is explicit in non-goals, threat rows and §9; it is not runtime accessibility approval. Resolve it before the M3 feature/gate review.
+- PR 161's focus correction remains required in the first implementation PR (2a); it is designed here, not yet implemented.
+- Line counts remain estimates; actual scope must obey the >450 split-or-explain and >600 stop rule.
+- Optional recovery-code display improvement from PR 161 remains outside scope.
+
+**Model used:** GPT-6.1 (Codex). **Switch model next step?** No — retain deep reasoning for the auth implementation and review.
+
+**Verdict:** Approved with conditions
+
 ## Round 3 — 2026-11-16 · scope: slice spec
 
 - **Spec:** `docs/specs/2026-11-16-m3g-2a-2-passkey-screens-design.md`, v1.2; hash `2d7fb5e1a40491e250d5b67cdd1a7381cc8e702a`.
