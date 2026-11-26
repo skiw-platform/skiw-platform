@@ -19,7 +19,7 @@ dependencies = [
 dev = [
     "django-stubs==5.2.9",
     "django-stubs-ext==5.2.9",
-    "mypy==1.19.1",
+    "mypy==2.4.0",
     "ruff==0.16.10",
     "import-linter==2.15",
     "pytest==9.1.1",
