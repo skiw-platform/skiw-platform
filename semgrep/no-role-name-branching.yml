@@ -1,0 +1,90 @@
+rules:
+  - id: no-role-name-branching
+    languages: [python]
+    severity: ERROR
+    message: >-
+      No authorization logic may branch on a role's name or identity (slice spec Decision 36,
+      OD-1): role names are admin data, so code that checks "is Owner" would bypass the agency's
+      ticks. Decide from grants (accounts.access.grants), never from a role-name literal,
+      Role.name or Role.is_system. Allowed only in accounts/access/seed.py,
+      accounts/access/changes.py, the accounts_role and accounts_org commands, migrations and
+      tests.
+    paths:
+      exclude:
+        - /app/accounts/access/seed.py
+        - /app/accounts/access/changes.py
+        - /app/accounts/management/commands/accounts_role.py
+        - /app/accounts/management/commands/accounts_org.py
+        - /app/*/migrations/
+        - /app/*/tests/
+        - /app/tests/
+    pattern-either:
+      # A role-name literal, whole string, any case, in a comparison, membership test or case.
+      - patterns:
+          - pattern-either:
+              - pattern: $X == "$S"
+              - pattern: '"$S" == $X'
+              - pattern: $X != "$S"
+              - pattern: '"$S" != $X'
+              - pattern: '"$S" in $X'
+              - pattern: '"$S" not in $X'
+              - pattern: $X in [..., "$S", ...]
+              - pattern: $X in (..., "$S", ...)
+              - pattern: $X in {..., "$S", ...}
+              - pattern: $X not in [..., "$S", ...]
+              - pattern: $X not in (..., "$S", ...)
+              - pattern: $X not in {..., "$S", ...}
+          - metavariable-regex:
+              metavariable: $S
+              regex: (?i)^(owner|general|unit_manager|unit manager|adviser|staff)$
+      - patterns:
+          - pattern-regex: (?im)^\s*case\s+[^:\n]*["'](owner|general|unit_manager|unit manager|adviser|staff)["']
+      # Role.name: on a role-named variable or attribute (role, owner_role, x.role, Role).
+      - patterns:
+          - pattern: $ROLE.name
+          - metavariable-regex:
+              metavariable: $ROLE
+              regex: (?i)^(.*\.)?\w*role$
+      - pattern: getattr($ROLE, "name", ...)
+      # Role.is_system: any attribute read, and getattr.
+      - pattern: $X.is_system
+      - pattern: getattr($X, "is_system", ...)
+      # ORM lookups through the relation (filter, Q, F, values, values_list, order_by, ...).
+      - patterns:
+          - pattern: $F(..., $K=$V, ...)
+          - metavariable-regex:
+              metavariable: $K
+              regex: ^(\w+__)?role__(name|is_system)(__\w+)?$
+      - patterns:
+          - pattern: '"$K"'
+          - metavariable-regex:
+              metavariable: $K
+              regex: ^-?(\w+__)?role__(name|is_system)(__\w+)?$
+      # is_system as a lookup anywhere but a model constraint (tables.py's one-system-role index).
+      - patterns:
+          - pattern: $F(..., $K=$V, ...)
+          - metavariable-regex:
+              metavariable: $K
+              regex: ^is_system(__\w+)?$
+          - pattern-not-inside: models.UniqueConstraint(...)
+          - pattern-not-inside: models.CheckConstraint(...)
+      # Lookups and column reads of name on a Role queryset.
+      - patterns:
+          - pattern: Role.$MGR. ... .$F(..., $K=$V, ...)
+          - metavariable-regex:
+              metavariable: $K
+              regex: ^name(__\w+)?$
+      - patterns:
+          - pattern: Role.$MGR. ... .$F(..., "$K", ...)
+          - metavariable-regex:
+              metavariable: $F
+              regex: ^(values|values_list|only|defer|order_by|distinct|in_bulk|aggregate|annotate)$
+          - metavariable-regex:
+              metavariable: $K
+              regex: ^-?(name|is_system)(__\w+)?$
+      # SQL that selects is_system.
+      - patterns:
+          - pattern: '"$SQL"'
+          - metavariable-regex:
+              metavariable: $SQL
+              regex: (?is)^.*?\bselect\b.*?\bis_system\b
