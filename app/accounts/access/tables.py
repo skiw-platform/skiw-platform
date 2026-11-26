@@ -13,6 +13,7 @@ code does not allow. Both FKs are SQL only: Django models no FK to a composite k
 `app_user` is composite on agency_id and ON DELETE RESTRICT, written in that migration."""
 
 import uuid
+from typing import Final, Literal
 
 from django.db import models
 from django.db.models.functions import Length, Lower, Now
@@ -26,7 +27,8 @@ NAME_LENGTH = (1, 64)
 # No C0 or C1 control character (Unicode Cc). Postgres regex escapes, not Python ones.
 NAME_NO_CONTROL = r"^[^\x01-\x1f\x7f-\x9f]*$"
 UNIT_KINDS = ("agency", "unit", "team")
-LINES = ("insurance", "investment", "both")
+Line = Literal["insurance", "investment", "both"]
+LINES: Final[tuple[Line, ...]] = ("insurance", "investment", "both")
 
 
 class Permission(models.Model):
