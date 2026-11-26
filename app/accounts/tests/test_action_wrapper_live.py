@@ -108,7 +108,8 @@ def test_a_signed_in_request_reaches_the_handler_as_the_session_says(seen: list[
         user.agency_id,
     ) * 2
     assert (only.signed.factor, only.data) == ("totp", {"note": "x"})
-    assert vars(action)["skiw_action"] == "test.action"  # the permission the view names
+    assert vars(action)["skiw_action"] == "auth.factors"  # the permission the view names
+    assert vars(action)["skiw_line"] == "any"
 
 
 @pytest.mark.parametrize("session", ["none", "no-login"])

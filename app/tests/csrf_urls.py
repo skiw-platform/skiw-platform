@@ -24,12 +24,12 @@ def any_object(body: Mapping[str, Any]) -> Mapping[str, Any]:
     return body
 
 
-@authorized_action(schema=any_object, permission="test.action-probe")
+@authorized_action(schema=any_object, permission="auth.factors", line="any")
 def action_probe(request: HttpRequest, signed: Signed, data: Mapping[str, Any]) -> HttpResponse:
     return HttpResponse(b"done")
 
 
-@authorized_action(schema=any_object, permission="test.stepup-probe")
+@authorized_action(schema=any_object, permission="auth.factor-change", line="any")
 def stepup_probe(request: HttpRequest, signed: Signed, data: Mapping[str, Any]) -> HttpResponse:
     if recent(request, FACTOR_CHANGE) is None:
         return JsonResponse({"error": "stepup-required"}, status=403)

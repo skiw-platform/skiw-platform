@@ -275,7 +275,7 @@ STEPUP_REFUSED = {
 }
 
 
-@authorized_action(schema=_stepup_body, permission="auth.stepup", own_transaction=True)
+@authorized_action(schema=_stepup_body, permission="auth.stepup", line="any", own_transaction=True)
 def stepup(request: HttpRequest, signed: Signed, data: tuple[str, str]) -> HttpResponse:
     """POST /api/auth/stepup: a TOTP code proves the signed-in user for `purpose` (spec D7,
     AUTH-09; DECISIONS M3h-3). Wrong codes are counted on the user's one second-factor budget and
@@ -287,7 +287,7 @@ def stepup(request: HttpRequest, signed: Signed, data: tuple[str, str]) -> HttpR
     return _stepped_up(outcome)
 
 
-@authorized_action(schema=nothing, permission="auth.stepup")
+@authorized_action(schema=nothing, permission="auth.stepup", line="any")
 def stepup_passkey_begin(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
     """POST /api/auth/stepup/passkey, body `{}` (DECISIONS M3g-1d-2): the options for
     navigator.credentials.get() over the user's passkeys in use, with a `stepup` challenge
@@ -311,7 +311,9 @@ def _stepup_passkey_body(body: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
 STEPUP_PASSKEY_REFUSED = {**STEPUP_REFUSED, "wrong_code": ({"error": "passkey-wrong"}, 401)}
 
 
-@authorized_action(schema=_stepup_passkey_body, permission="auth.stepup", own_transaction=True)
+@authorized_action(
+    schema=_stepup_passkey_body, permission="auth.stepup", line="any", own_transaction=True
+)
 def stepup_passkey(
     request: HttpRequest, signed: Signed, data: tuple[str, dict[str, Any]]
 ) -> HttpResponse:
@@ -330,7 +332,7 @@ def _stepped_up(outcome: StepUp) -> HttpResponse:
     return _answer({"next": "verified", "until": until.isoformat()}, 200)
 
 
-@authorized_action(schema=nothing, permission="auth.logout")
+@authorized_action(schema=nothing, permission="auth.logout", line="any")
 def logout(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
     """POST /api/auth/logout, body `{}` (AUTH-13, server half): a marker for this session and the
     row delete commit together in the wrapper's transaction, so the old cookie, and the old row put
@@ -359,7 +361,9 @@ PASSWORD_ANSWERS: dict[password_change.Outcome, tuple[dict[str, str], int]] = {
 }
 
 
-@authorized_action(schema=_password_body, permission="auth.password", own_transaction=True)
+@authorized_action(
+    schema=_password_body, permission="auth.password", line="any", own_transaction=True
+)
 def password(request: HttpRequest, signed: Signed, data: tuple[str, str]) -> HttpResponse:
     """POST /api/auth/password: the current password and a new one (DECISIONS M3h-4). Right: every
     other session of the user ends (AUTH-07) and this one gets a new key, so a new CSRF token."""
@@ -373,7 +377,7 @@ def _utc(at: datetime | None) -> str | None:
     return None if at is None else at.astimezone(UTC).isoformat(timespec="microseconds")
 
 
-@authorized_action(schema=nothing, permission="auth.factors")
+@authorized_action(schema=nothing, permission="auth.factors", line="any")
 def factor_list(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
     """GET /api/auth/factors: the signed-in user's own TOTP and passkey factor ids in use (M3i
     names the one to retire), each passkey with its `created_at` (ISO 8601 UTC, or null for one
@@ -388,7 +392,7 @@ def factor_list(request: HttpRequest, signed: Signed, data: None) -> HttpRespons
 STEPUP_REQUIRED = ({"error": "stepup-required"}, 403)
 
 
-@authorized_action(schema=nothing, permission="auth.factor-change")
+@authorized_action(schema=nothing, permission="auth.factor-change", line="any")
 def factor_totp_begin(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
     """POST /api/auth/factors/totp, body `{}`: after a `factor.change` step-up of this session, a
     new TOTP secret to add, as text and as an otpauth:// link, shown once; nothing is stored until
@@ -417,7 +421,9 @@ ADD_REFUSED: dict[factor_change.Refused, tuple[dict[str, str], int]] = {
 }
 
 
-@authorized_action(schema=_code_body, permission="auth.factor-change", own_transaction=True)
+@authorized_action(
+    schema=_code_body, permission="auth.factor-change", line="any", own_transaction=True
+)
 def factor_totp_confirm(request: HttpRequest, signed: Signed, data: str) -> HttpResponse:
     """POST /api/auth/factors/totp/confirm: the first code of the begun secret (DECISIONS M3h-5).
     Right: the factor is added, every other session of the user ends (AUTH-07) and this one gets a
@@ -447,7 +453,7 @@ CHANGE_REFUSED = {
 }
 
 
-@authorized_action(schema=_id_body, permission="auth.factor-change")
+@authorized_action(schema=_id_body, permission="auth.factor-change", line="any")
 def factor_totp_remove(request: HttpRequest, signed: Signed, data: uuid.UUID) -> HttpResponse:
     """POST /api/auth/factors/totp/remove, body `{"id"}` (DECISIONS M3h-6): after a
     `factor.change` step-up, retires one of the user's TOTP factors, never the last. Every other
@@ -461,7 +467,7 @@ def _removed(request: HttpRequest, outcome: str) -> HttpResponse:
     return _answer({"next": "removed", "csrf": get_token(request)}, 200)
 
 
-@authorized_action(schema=nothing, permission="auth.factor-change")
+@authorized_action(schema=nothing, permission="auth.factor-change", line="any")
 def recovery_regenerate(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
     """POST /api/auth/factors/recovery, body `{}` (DECISIONS M3h-6): after a `factor.change`
     step-up, new recovery codes replace the old ones and are in this answer, the only time they
@@ -473,7 +479,7 @@ def recovery_regenerate(request: HttpRequest, signed: Signed, data: None) -> Htt
     return _answer(body, 200)
 
 
-@authorized_action(schema=nothing, permission="auth.factor-change")
+@authorized_action(schema=nothing, permission="auth.factor-change", line="any")
 def factor_passkey_begin(request: HttpRequest, signed: Signed, data: None) -> HttpResponse:
     """POST /api/auth/factors/passkey, body `{}` (DECISIONS M3g-1c): after a `factor.change`
     step-up of this session, the options for navigator.credentials.create(), the user's passkeys
@@ -500,7 +506,9 @@ PASSKEY_REFUSED: dict[str, tuple[dict[str, str], int]] = {
 }
 
 
-@authorized_action(schema=_credential_body, permission="auth.factor-change", own_transaction=True)
+@authorized_action(
+    schema=_credential_body, permission="auth.factor-change", line="any", own_transaction=True
+)
 def factor_passkey_confirm(
     request: HttpRequest, signed: Signed, data: dict[str, Any]
 ) -> HttpResponse:
@@ -514,7 +522,7 @@ def factor_passkey_confirm(
     return _answer({"next": "added", "factor_id": str(outcome), "csrf": get_token(request)}, 200)
 
 
-@authorized_action(schema=_id_body, permission="auth.factor-change")
+@authorized_action(schema=_id_body, permission="auth.factor-change", line="any")
 def factor_passkey_remove(request: HttpRequest, signed: Signed, data: uuid.UUID) -> HttpResponse:
     """POST /api/auth/factors/passkey/remove, body `{"id"}` (DECISIONS M3g-1c): after a
     `factor.change` step-up, retires one of the user's passkeys while a TOTP stays. Every other
