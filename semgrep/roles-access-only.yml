@@ -1,0 +1,87 @@
+rules:
+  - id: roles-access-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only accounts.access reads or writes role, role_permission, user_role, org_unit and
+      permission (slice spec Decisions 3, 29; AUTH-12): the wrapper reads assignments and ticks on
+      every request through accounts.access.grants, and every change goes through the audited
+      paths there. Call accounts.access instead of the models or SQL. Allowed only in
+      accounts/access/, accounts/migrations/ and the tests.
+    paths:
+      exclude:
+        - /app/accounts/access/
+        - /app/accounts/migrations/
+        - /app/accounts/tests/
+        - /app/tenancy/tests/
+        - /app/jobs/tests/
+        - /app/tests/
+    pattern-either:
+      # The models: a manager, _meta, a constructor call, by name or module path. The fully
+      # qualified forms also catch an aliased import (`from accounts.models import Role as R`).
+      - patterns:
+          - pattern-either:
+              - pattern: $MODEL.$M
+              - pattern: getattr($MODEL, "$M", ...)
+          - metavariable-regex:
+              metavariable: $MODEL
+              regex: ^(\w+\.)*(Role|RolePermission|UserRole|OrgUnit|Permission)$
+          - metavariable-regex:
+              metavariable: $M
+              regex: ^(objects|_default_manager|_base_manager|_meta)$
+      - patterns:
+          - pattern: $MODEL(...)
+          - metavariable-regex:
+              metavariable: $MODEL
+              regex: ^(\w+\.)*(Role|RolePermission|UserRole|OrgUnit|Permission)$
+      - patterns:
+          - pattern-either:
+              - pattern: accounts.models.$MODEL.$M
+              - pattern: accounts.access.tables.$MODEL.$M
+          - metavariable-regex:
+              metavariable: $MODEL
+              regex: ^(Role|RolePermission|UserRole|OrgUnit|Permission)$
+          - metavariable-regex:
+              metavariable: $M
+              regex: ^(objects|_default_manager|_base_manager|_meta)$
+      - patterns:
+          - pattern-either:
+              - pattern: accounts.models.$MODEL(...)
+              - pattern: accounts.access.tables.$MODEL(...)
+          - metavariable-regex:
+              metavariable: $MODEL
+              regex: ^(Role|RolePermission|UserRole|OrgUnit|Permission)$
+      # apps.get_model("accounts", "role") and get_model("accounts.Role"): names are
+      # case-insensitive there.
+      - patterns:
+          - pattern-either:
+              - pattern: $A.get_model("accounts", "$N", ...)
+              - pattern: $A.get_model("$N", ...)
+          - metavariable-regex:
+              metavariable: $N
+              regex: (?i)^(accounts\.)?(role|rolepermission|userrole|orgunit|permission)$
+      # SQL in a string: it must begin as SQL (after blanks, comments or brackets), with that first
+      # keyword all upper or all lower case, so prose that names a table ("Copy permission lists
+      # ...") is not flagged. role_permission, user_role and org_unit are not
+      # English words, so anywhere after that is enough. role and permission are: they must follow
+      # a word that names a table (FROM, JOIN, INTO, UPDATE, TABLE, ONLY, TRUNCATE, COPY, LOCK,
+      # USING, ON, REFERENCES, or a comma in a FROM list). Each may be public.-qualified and quoted.
+      - patterns:
+          - pattern: '"$SQL"'
+          - metavariable-regex:
+              metavariable: $SQL
+              regex: (?is)^(?=(\s|--[^\n]*\n|/\*.*?\*/|\()*(?-i:(SELECT|INSERT|UPDATE|DELETE|TRUNCATE|COPY|MERGE|LOCK|WITH|TABLE|EXPLAIN|ALTER|DROP|GRANT|REVOKE|CREATE|VALUES|FROM|JOIN|WHERE)|(select|insert|update|delete|truncate|copy|merge|lock|with|table|explain|alter|drop|grant|revoke|create|values|from|join|where))\b).*?(?<![\w$])"?(role_permission|user_role|org_unit)"?(?![\w$])
+      - patterns:
+          - pattern: '"$SQL"'
+          - metavariable-regex:
+              metavariable: $SQL
+              regex: (?is)^(?=(\s|--[^\n]*\n|/\*.*?\*/|\()*(?-i:(SELECT|INSERT|UPDATE|DELETE|TRUNCATE|COPY|MERGE|LOCK|WITH|TABLE|EXPLAIN|ALTER|DROP|GRANT|REVOKE|CREATE|VALUES|FROM|JOIN|WHERE)|(select|insert|update|delete|truncate|copy|merge|lock|with|table|explain|alter|drop|grant|revoke|create|values|from|join|where))\b).*?(\b(from|join|into|update|table|only|truncate|copy|lock|using|on|references)\s+|\bfrom\s+[^;()]*?,\s*)("?public"?\s*\.\s*)?"?(role|permission)"?(?![\w$])
+      # psycopg.sql identifiers and QuerySet.extra(tables=...) naming one of the tables.
+      - patterns:
+          - pattern-either:
+              - pattern: $S.Identifier(..., "$T")
+              - pattern: Identifier(..., "$T")
+              - pattern: $Q.extra(..., tables=[..., "$T", ...], ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^(role|role_permission|user_role|org_unit|permission)$
