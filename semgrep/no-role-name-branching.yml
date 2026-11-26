@@ -39,35 +39,18 @@ rules:
               regex: (?i)^(owner|general|unit_manager|unit manager|adviser|staff)$
       - patterns:
           - pattern-regex: (?im)^\s*case\s+.*["'](owner|general|unit_manager|unit manager|adviser|staff)["']
-      # Role.name: on a role-named variable or attribute (role, owner_role, x.role, Role).
+      # Role.name: on a role-named variable or attribute (role, owner_role, x.role, Role), or
+      # directly on a Role query's result. Variables fed by a query: the -flow rule below.
       - patterns:
-          - pattern: $ROLE.name
+          - pattern-either:
+              - pattern: $ROLE.name
+              - pattern: getattr($ROLE, "name", ...)
           - metavariable-regex:
               metavariable: $ROLE
               regex: (?i)^(.*\.)?\w*role$
-      - pattern: getattr($ROLE, "name", ...)
-      # Role.name on a Role query's result: directly, through a loop or comprehension variable,
-      # or through a variable assigned from the query and not reassigned before the read.
       - pattern: Role.$MGR. ... .$F(...).name
       - pattern: Role.$MGR. ... .$F(...)[$I].name
-      - patterns:
-          - pattern-either:
-              - pattern-inside: |
-                  for $R in Role.$MGR. ... .$F(...):
-                    ...
-              - pattern-inside: "[$E for $R in Role.$MGR. ... .$F(...)]"
-              - pattern-inside: "{$E for $R in Role.$MGR. ... .$F(...)}"  # set and dict
-              - pattern-inside: ($E for $R in Role.$MGR. ... .$F(...))
-              - patterns:
-                  - pattern-inside: |
-                      $R = Role.$MGR. ... .$F(...)
-                      ...
-                  - pattern-not-inside: |
-                      $R = Role.$MGR. ... .$F(...)
-                      ...
-                      $R = $OTHER
-                      ...
-          - pattern: $R.name
+      - pattern: getattr(Role.$MGR. ... .$F(...), "name", ...)
       # Role.is_system: any attribute read, and getattr.
       - pattern: $X.is_system
       - pattern: getattr($X, "is_system", ...)
@@ -90,12 +73,16 @@ rules:
               regex: ^is_system(__\w+)?$
           - pattern-not-inside: models.UniqueConstraint(...)
           - pattern-not-inside: models.CheckConstraint(...)
-      # Lookups and column reads of name on a Role queryset.
+      # Lookups and column reads of name in a Role queryset call: its own keywords and any call
+      # within its arguments (Q, ~Q, Q | Q, When), and F("name").
       - patterns:
-          - pattern: Role.$MGR. ... .$F(..., $K=$V, ...)
+          - pattern-inside: Role.$MGR. ... .$F(...)
+          - pattern-either:
+              - pattern: $C(..., $K=$V, ...)
+              - pattern: F("$K")
           - metavariable-regex:
               metavariable: $K
-              regex: ^name(__\w+)?$
+              regex: ^-?name(__\w+)?$
       - patterns:
           - pattern: Role.$MGR. ... .$F(..., "$K", ...)
           - metavariable-regex:
@@ -110,3 +97,37 @@ rules:
           - metavariable-regex:
               metavariable: $SQL
               regex: (?is)^.*?\bselect\b.*?\bis_system\b
+
+  # Flow-sensitive: a variable fed by a Role query (assignment, for loop, comprehension) and read
+  # with .name before it is reassigned; a reassignment in one branch only leaves it tainted.
+  # Calls are taken as safe, so a query argument does not taint another model's result.
+  - id: no-role-name-branching-flow
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A Role read through a variable: no authorization logic may branch on a role's name (slice
+      spec Decision 36). Decide from grants (accounts.access.grants).
+    mode: taint
+    options:
+      taint_assume_safe_functions: true
+    paths:
+      exclude:
+        - /app/accounts/access/seed.py
+        - /app/accounts/access/changes.py
+        - /app/accounts/management/commands/accounts_role.py
+        - /app/accounts/management/commands/accounts_org.py
+        - /app/*/migrations/
+        - /app/*/tests/
+        - /app/tests/
+    pattern-sources:
+      - pattern: Role.$MGR. ... .$F(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $R.name
+              - pattern: getattr($R, "name", ...)
+          - focus-metavariable: $R
+          # Plain variables only: role-named ones and query results are the rule above's.
+          - metavariable-regex:
+              metavariable: $R
+              regex: (?i)^(?!\w*role$)\w+$

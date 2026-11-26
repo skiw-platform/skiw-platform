@@ -1,6 +1,6 @@
-# Fixture for `semgrep --test semgrep/` (rule no-role-name-branching).
+# Fixture for `semgrep --test semgrep/` (rules no-role-name-branching and -flow).
 from django.db import connection, models
-from django.db.models import F, Q
+from django.db.models import Case, F, Q, When
 
 from accounts.access.grants import grants
 from accounts.access.tables import OrgUnit, Role, UserRole
@@ -49,20 +49,30 @@ def banned(role, assignment, user, name, kind):
     seen.append(Role._default_manager.get(id=kind).name)
     # ruleid: no-role-name-branching
     seen.append(Role._base_manager.all()[0].name)
-    # ruleid: no-role-name-branching
+    # ruleid: no-role-name-branching-flow
     seen.append([r.name for r in Role.objects.all()])
-    # ruleid: no-role-name-branching
+    # ruleid: no-role-name-branching-flow
     seen.append({r.name for r in Role._default_manager.filter(agency_id=kind)})
-    # ruleid: no-role-name-branching
+    # ruleid: no-role-name-branching-flow
     seen.append({r.id: r.name for r in Role.objects.all()})
-    # ruleid: no-role-name-branching
+    # ruleid: no-role-name-branching-flow
     seen.extend(r.name for r in Role._base_manager.all())
     for r in Role.objects.filter(agency_id=kind):
-        # ruleid: no-role-name-branching
+        # ruleid: no-role-name-branching-flow
         seen.append(r.name)
     r = Role.objects.get(id=kind)
-    # ruleid: no-role-name-branching
+    # ruleid: no-role-name-branching-flow
     seen.append(r.name)
+    # ruleid: no-role-name-branching-flow
+    seen.append(getattr(r, "name", None))
+    r = role  # reassigned after the read: the read stays flagged
+    found = Role._default_manager.filter(agency_id=kind).first()
+    if kind:
+        found = user
+    # ruleid: no-role-name-branching-flow
+    seen.append(found.name)
+    # ruleid: no-role-name-branching
+    seen.append(getattr(Role.objects.get(id=kind), "name", None))
     # ruleid: no-role-name-branching
     seen.append(role.is_system)
     # ruleid: no-role-name-branching
@@ -73,6 +83,16 @@ def banned(role, assignment, user, name, kind):
     Role.objects.filter(name=name)
     # ruleid: no-role-name-branching
     Role.objects.get(name__iexact=name)
+    # ruleid: no-role-name-branching
+    Role.objects.filter(Q(name=name))
+    # ruleid: no-role-name-branching
+    Role._default_manager.all().exclude(~Q(name__iexact=name))
+    # ruleid: no-role-name-branching
+    Role.objects.filter(Q(agency_id=kind) | Q(name__in=[name])).values("id")
+    # ruleid: no-role-name-branching
+    Role.objects.annotate(c=Case(When(name=name, then=1)))
+    # ruleid: no-role-name-branching
+    Role.objects.annotate(label=F("name"))
     # ruleid: no-role-name-branching
     Role.objects.all().exclude(name__in=[name])
     # ruleid: no-role-name-branching
@@ -119,8 +139,17 @@ def allowed(user, code, name, unit):
         seen.append(u.name)
     r = Role.objects.get(id=code)
     r = unit
-    # ok: no-role-name-branching
+    # ok: no-role-name-branching, no-role-name-branching-flow
     seen.append(r.name)
+    # ok: no-role-name-branching, no-role-name-branching-flow
+    seen.append(getattr(unit, "name", None))
+    # ok: no-role-name-branching
+    seen.append(getattr(OrgUnit.objects.get(id=code), "name", None))
+    u = OrgUnit.objects.get(id=Role.objects.get(id=code).id)
+    # ok: no-role-name-branching-flow
+    seen.append(u.name)
+    # ok: no-role-name-branching
+    OrgUnit.objects.filter(Q(name=name) | ~Q(name=code), id__in=Role.objects.values("id"))
     # ok: no-role-name-branching
     seen.append([r.id for r in Role.objects.all()])
     # ok: no-role-name-branching

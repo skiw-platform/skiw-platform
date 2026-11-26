@@ -9,17 +9,17 @@ from tests.test_semgrep_tenancy_paths import _excludes
 RULE = Path(__file__).resolve().parents[2] / "semgrep" / "no-role-name-branching.yml"
 
 # Decision 36: seed.py, changes.py, the two operator commands, migrations and tests.
-EXPECTED = {
-    "no-role-name-branching": [
-        "/app/accounts/access/seed.py",
-        "/app/accounts/access/changes.py",
-        "/app/accounts/management/commands/accounts_role.py",
-        "/app/accounts/management/commands/accounts_org.py",
-        "/app/*/migrations/",
-        "/app/*/tests/",
-        "/app/tests/",
-    ]
-}
+# Both rules (the plain and the -flow one) carry the same list.
+ALLOWED = [
+    "/app/accounts/access/seed.py",
+    "/app/accounts/access/changes.py",
+    "/app/accounts/management/commands/accounts_role.py",
+    "/app/accounts/management/commands/accounts_org.py",
+    "/app/*/migrations/",
+    "/app/*/tests/",
+    "/app/tests/",
+]
+EXPECTED = {"no-role-name-branching": ALLOWED, "no-role-name-branching-flow": ALLOWED}
 
 
 def test_the_excludes_are_exactly_decision_36s() -> None:
