@@ -1,5 +1,76 @@
 # Review — 2026-10-05-skiw-platform-stack-design
 
+## Round 27 — 2026-11-23 · scope: spec-change slice (v1.22 → v1.24: M4-rest governing changes v1.23, one agency per deployment / SKIW replaces TechVision v1.24)
+- **Spec review:** spec path `docs/specs/2026-10-05-skiw-platform-stack-design.md` · version 1.24 · hash (`git hash-object`) e47de4ed0b16445d93548de1f1278c22679f39c2 (= `origin/main` d089188, PR 172 merged 2026-11-23T00:13:24Z; local checkout identical)
+- **Previous approved version:** v1.22, hash 79a9a40ee1a686ae1082e8d11a73b299deb66d38 (Round 26). Intermediate v1.23 (c1a08dab) was never spec-reviewed on its own.
+- **Sources of the change:** v1.23 = slice spec `docs/specs/2026-11-20-m4-rest-roles-jobs-design.md` v2.3 §10.2 (SPEC review Round 10 Approved) + owner statement PR 170 issuecomment-7063756554 (confirmed by the owner to the reviewer 2026-11-22). v1.24 = owner statement PR 172 issuecomment-7087756355 (confirmed by the owner to the reviewer 2026-11-23). DECISIONS 2026-11-21 "M4-rest: owner decisions …" and 2026-11-22 "Main spec v1.24 …" quote both verbatim (checked byte-equal in PR 170 R3 and PR 172 R1).
+- **Evidence reused:** PR 170 Rounds 1–3 (all 16 §10.2 items present in v1.23, nothing extra); PR 172 Rounds 1–2 (full read of the v1.24 word diff, 95 + 28 change groups). This round adds a whole-document consistency sweep of the v1.24 blob.
+
+**Verdict:** Approved
+**Model used:** Claude Opus 5.5 (deep) · **Switch model next step?** No — `setup` reconcile is deep tier anyway.
+
+### Findings
+No blocking findings.
+
+### [P3] AUTH-03 test wording still says "per role"
+- Evidence: T20 row (l.606) "Permission matrix tests per role (AUTH-03)"; §9 M4 done-when (l.1230) "per-role matrix tests (§6)". From v1.23 roles are agency data and the only seeded role is Owner; AUTH-03's matrix is the fixed catalogue (§6 heading paragraph).
+- Correction: "permission tests per catalogue pair and scope against the agency's stored ticks (AUTH-03; slice spec M4-rest)". Optional, next spec touch.
+
+### [P3] One stale milestone pointer and one stale fallback note
+- Evidence: changelog-adjacent header note l.29 lists "M9, M13" (M13 dropped in v1.24); Appendix B.9 "Kept as a fallback only if Q7 shows CRM sessions are too short" (Q7 closed). Both read as history but carry no v1.24 marker.
+- Correction: add "(M13 dropped, v1.24)" / "(moot from v1.24)". Optional.
+
+### Consistency sweep (v1.24 blob, excluding the changelog)
+| Check | Result |
+|---|---|
+| `M7`, `M12` references | all annotated dropped / replaced by M20 |
+| `task_mirror`, `connector_session`, `crm_option_map`, `connector.crm`, `crm_client_ref`, `draft_crm_task`, `outbox.executor.crm`, `crm.*` settings, `sync` queue | none unannotated |
+| "second agency" | only in the annotated §4.2 (b) retirement text, Q2 (answered) and Q32 (annotated) |
+| TechVision / CRM in §4.3 and the outbox tables | covered by the §4.3 "v1.24 note" (kept as the design for a future outward action, Q45) |
+| Q5, Q6, Q7, Q27, Q30 | closed or annotated |
+| `crm_jar_kek` | marked no-consumer; removal chore PR named as a precondition of the M20 plan |
+| Roles: `role_code`, fixed role columns, "General"/"Unit manager" | none left; §6 is the catalogue with Owner-only seed |
+| "admin" | names no fixed role except the action name "admin retry" and the unchanged 2026-11-06 residual (as v1.23 #11 states) |
+| Invented values | none: TechVision columns, asset and cash-flow fields, ids are [O] Q47; "~146" re-labelled [O] |
+| Milestones "done when" | M20 (rehearsal reconciliation with counts and checksums, idempotent re-run, no network client), M10, M15, M18 testable |
+| Security controls | export-file handling required in the M20 plan before any M20 PR, with deletion, access, encryption and backup exclusion and a test; real data still behind the H12 gates |
+| Scope vs `PROJECT.md` | conflicts — expected, setup reconciles them (below) |
+
+### For the `setup` reconcile (PROJECT.md values the approved spec no longer supports)
+- §1 "What it is" (l.17) and §5 out of scope (l.176 "CRM replacement (TechVision stays system of record)", l.177 "create-client in CRM").
+- §5 parked items l.180 (`create_client` draft, Q5), l.181 (fake CRM / M13).
+- §9 rule l.199 (CRM cookie jar), l.188 outbox invariant (now: not built until an outward action exists, Q45).
+- §8 locked switches: l.210 and l.238 "M7 import" → M20 cutover; l.214 `outbox.executor.crm` (M13 dropped); l.219 "Second agency onboarding" (gate retired; one agency per deployment); l.240 step-2 trigger "a second agency".
+- §10 never-commit l.230: add TechVision CSV exports (real client PII) next to "Supabase exports or dumps".
+- §9 AUTH-03 note (from PR 170, Decision 34 reading).
+- §2 spec hash → e47de4ed…; the slice spec listing (§2 "Other standards") should mention that slice v2.4 is pending.
+- Secret-scan pattern: keep `crm_jar_kek` until the chore PR removes the key.
+
+### Dependent document
+- The M4-rest slice spec v2.3 still cites M7, the second-agency gate and "connect own CRM" (PR 172 R1 P2, deferred). It needs v2.4 + `review spec` before M4r-1a; the `build` gate for M4r PRs reads the slice spec too.
+
+### Verification performed
+| Command / check | Result |
+|---|---|
+| `git fetch`; `git rev-parse origin/main:<spec>`; `git hash-object <spec>` | both e47de4ed |
+| `gh pr view 172` | MERGED 2026-11-23T00:13:24Z, merge d089188 |
+| regex sweep of v1.24 for stale terms (table above) | 2 P3 hits, rest annotated |
+| grep `agents/PROJECT.md` for affected values | list above |
+
+### Residual risks and test gaps
+- Complete TechVision cutover has no return path after the owner accepts the import; H6 backups are the only rollback.
+- Q47 (export shape) may force the one-off-script route; M20 cannot be planned until the owner's sample export arrives.
+- All [A] items of v1.23 remain to be proven in their M4r PRs.
+
+### Required before merge
+- n/a (spec review; already merged)
+
+### Deferred conditions
+- none on this spec. Dependent: slice spec v2.4 before M4r-1a.
+
+### Optional improvements
+- The two P3s.
+
 ## Round 26 — 2026-11-07 · scope: spec-change slice (v1.22: ASK-1 TOTP required, passkeys optional)
 - **Spec:** `docs/specs/2026-10-05-skiw-platform-stack-design.md` · v1.22 · hash
   `79a9a40ee1a686ae1082e8d11a73b299deb66d38`, reviewed at commit
