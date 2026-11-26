@@ -126,7 +126,10 @@ def _role_step(
     403 code. One grant read per request, never cached (AUTH-12)."""
     if permission in SELF_SERVICE:
         return frozenset()
-    matching = [g for g in grants(signed.user_id, permission) if (g.line, line) in LINE_MATCHES]
+    held = grants(signed.user_id, permission)
+    # isinstance first, as at registration: an unhashable line would raise TypeError in the lookup
+    # (a 500); a line that is not a str matches nothing (Decision 26).
+    matching = [g for g in held if isinstance(line, str) and (g.line, line) in LINE_MATCHES]
     if not matching:
         return "forbidden"
     kept = frozenset(g for g in matching if g.stepup is None)

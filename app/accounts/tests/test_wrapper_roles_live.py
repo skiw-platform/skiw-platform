@@ -209,11 +209,12 @@ def test_the_role_step_answers_before_the_input_is_read() -> None:
     assert not SEEN
 
 
-@pytest.mark.parametrize("value", ["Insurance", "both", "", None, "any"])
+@pytest.mark.parametrize("value", ["Insurance", "both", "", None, ["any"], {"any": "any"}, "any"])
 def test_a_line_tampered_after_registration_matches_nothing(value: object) -> None:
-    """The route's line changed in the view's closure at run time: outside the table, no grant
-    matches (Decision 26). `any` is the control. A permission changed to a code outside the
-    catalogue reaches grants(), which raises: no access is given."""
+    """The route's line changed in the view's closure at run time: outside the table, or not a
+    str (an unhashable list or dict included), no grant matches (Decision 26). `any` is the
+    control. A permission changed to a code outside the catalogue reaches grants(), which
+    raises: no access is given."""
     p = agency()
     cookie = member(p, "both")
     write(p, tick("client.view", "own"))
