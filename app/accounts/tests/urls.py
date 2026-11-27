@@ -14,6 +14,7 @@ from django.urls import path
 from accounts.access.catalogue import ROUTE_CODES, ActionLine
 from accounts.auth.wrapper import InvalidInput, Signed, authorized_action
 from accounts.views import stepup
+from tenancy.binding import with_agency
 
 
 def write(request: HttpRequest) -> HttpResponse:
@@ -56,11 +57,21 @@ def handle(request: HttpRequest, signed: Signed, data: Mapping[str, Any]) -> Htt
     return HttpResponse(b"done")
 
 
+def handle_own(request: HttpRequest, signed: Signed, data: Mapping[str, Any]) -> HttpResponse:
+    """`handle` for `own_transaction=True`: steps 1-4 have committed, so it runs in no transaction
+    and binds the agency itself (TEN-09)."""
+    if connection.in_atomic_block:
+        raise AssertionError("an own_transaction handler ran inside a transaction")
+    with with_agency(signed.agency_id):
+        return handle(request, signed, data)
+
+
 action = authorized_action(schema=note_only, permission="auth.factors", line="any")(handle)
-# The role step's routes: every route code on line `any`, and three on a business line.
+# The role step's routes: every route code on line `any`, and four on a business line; each also
+# under own/ with `own_transaction=True`.
 LINED: list[tuple[str, ActionLine]] = [(code, "any") for code in sorted(ROUTE_CODES)]
 LINED += [("client.view", "insurance"), ("client.view", "investment")]
-LINED += [("outbox.approve", "insurance")]
+LINED += [("outbox.approve", "insurance"), ("device.revoke", "insurance")]
 
 urlpatterns = [
     path("write", write),
@@ -70,9 +81,12 @@ urlpatterns = [
     path("stepup", stepup),  # the real POST /api/auth/stepup view
     *(
         path(
-            f"to/{code}/{line}",
-            authorized_action(schema=note_only, permission=code, line=line)(handle),
+            f"{route}/{code}/{line}",
+            authorized_action(schema=note_only, permission=code, line=line, own_transaction=own)(
+                handle_own if own else handle
+            ),
         )
         for code, line in LINED
+        for route, own in (("to", False), ("own", True))
     ),
 ]

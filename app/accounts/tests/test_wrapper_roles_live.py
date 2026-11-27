@@ -4,9 +4,13 @@ action the agency's ticks do not grant" and "Line split bypassed on an action").
 as test_access_grants_live writes them, committed in a fresh agency whose user signs in there.
 Split M4r-3b: a grant that needs a step-up is kept only with fresh evidence of this session for its
 purpose (Decision 7 (iv); §7 row "S action without fresh re-verification"), written by the real
-POST /api/auth/stepup route or, for evidence that must be stale, by `stepup.record`."""
+POST /api/auth/stepup route or, for evidence that must be stale, by `stepup.record`.
+Split M4r-3c: rename invariance (Decision 36, §7 row "Authorization branches on a role name"; the
+`scoped()` half is M4r-4's) and the step-up read on a mixed-line case; the AUTH-01 order cases are
+in test_wrapper_roles_order_live."""
 
 import json
+import secrets
 import types
 import uuid
 from collections.abc import Collection
@@ -37,7 +41,7 @@ from .conftest import committed_user
 from .test_action_wrapper import DECISION_26
 from .test_action_wrapper_live import call, signed_in
 from .test_second_factor_live import STEP
-from .urls import SEEN, handle, note_only
+from .urls import LINED, SEEN, handle, note_only
 
 pytestmark = [
     pytest.mark.live,
@@ -51,6 +55,7 @@ CODES = sorted(ROUTE_CODES)
 FORBIDDEN, STEPUP = (403, "forbidden"), (403, "stepup-required")
 S_PAIRS = [(code, scope) for code, scope in PAIRS if SPEC[code][scope]]
 STALE = timedelta(minutes=settings.SKIW_STEPUP_MAX_AGE_MIN, seconds=1)
+SPARE = ROLE.replace("%(r)s", "%(spare)s").replace("'Adviser'", "'Spare'")
 
 
 def agency(steps: bool = False) -> Ids:
@@ -110,9 +115,11 @@ def ok(*access: Grant) -> Outcome:
     return 200, frozenset(access)
 
 
-def outcome(cookie: str, code: str, line: str = "any", body: bytes = b"{}") -> Outcome:
+def outcome(
+    cookie: str | None, code: str, line: str = "any", body: bytes = b"{}", route: str = "to"
+) -> Outcome:
     SEEN.clear()
-    response = call(cookie, path=f"/to/{code}/{line}", body=body)
+    response = call(cookie, path=f"/{route}/{code}/{line}", body=body)
     if response.status_code != 200:
         return response.status_code, json.loads(response.content)["error"]
     [seen] = SEEN
@@ -121,6 +128,17 @@ def outcome(cookie: str, code: str, line: str = "any", body: bytes = b"{}") -> O
 
 def outcomes(cookie: str) -> dict[str, Outcome]:
     return {code: outcome(cookie, code) for code in CODES}
+
+
+def counted(
+    cookie: str | None, code: str, line: str = "any", body: bytes = b"{}"
+) -> tuple[Outcome, tuple[int, int]]:
+    """The outcome, and how many grant reads and step-up reads the request ran."""
+    with CaptureQueriesContext(connection) as captured:
+        found = outcome(cookie, code, line, body)
+    sql = [q["sql"] for q in captured.captured_queries]
+    grant_reads = sum(q.startswith(QUERY.split(" WHERE")[0]) for q in sql)
+    return found, (grant_reads, sum('FROM "auth_stepup"' in q for q in sql))
 
 
 def expected(
@@ -244,7 +262,7 @@ def test_mixed_assignments_keep_only_the_grants_on_the_actions_line() -> None:
     spare = {"r": p["spare"]}
     write(
         p,
-        (ROLE.replace("%(r)s", "%(spare)s").replace("'Adviser'", "'Spare'"), {}),
+        (SPARE, {}),
         tick("client.view", "team"),
         (HOLD, {"org_unit_id": p["team"], "line": "insurance"}),
         tick("client.view", "own", **spare),
@@ -283,14 +301,29 @@ def test_a_route_reads_grants_once_and_step_up_once_per_purpose_and_self_service
     view = ok(Grant("own", p["org_unit_id"], "investment", None))
     calls = [("client.view", "any", view)] * 2 + [("outbox.approve", "any", STEPUP)] * 2
     calls += [("outbox.approve", "insurance", FORBIDDEN), ("auth.factors", "any", ok())]
-    reads = []
-    for code, line, answer in calls:
-        with CaptureQueriesContext(connection) as captured:
-            assert outcome(cookie, code, line) == answer
-        sql = [q["sql"] for q in captured.captured_queries]
-        grant_reads = sum(q.startswith(QUERY.split(" WHERE")[0]) for q in sql)
-        reads.append((grant_reads, sum('FROM "auth_stepup"' in q for q in sql)))
-    assert reads == [(1, 0), (1, 0), (1, 1), (1, 1), (1, 0), (0, 0)]
+    found = [counted(cookie, code, line) for code, line, _ in calls]
+    assert [answer for answer, _ in found] == [answer for _, _, answer in calls]
+    assert [reads for _, reads in found] == [(1, 0), (1, 0), (1, 1), (1, 1), (1, 0), (0, 0)]
+
+
+def test_a_step_up_grant_on_another_line_is_not_read_beside_a_grant_that_matches() -> None:
+    """PR 194's gap (purposes taken from every held grant, not the matching ones): device.revoke
+    `agency` (step-up) through r on investment, device.revoke `own` through the spare role on
+    insurance. On the insurance route only `own` matches: 200 with it, no step-up read. On `any`
+    both match: the one purpose is read, `agency` is dropped and `own` kept."""
+    p = agency()
+    cookie = member(p, "investment")
+    spare = {"r": p["spare"]}
+    write(
+        p,
+        (SPARE, {}),
+        tick("device.revoke", "agency"),
+        tick("device.revoke", "own", **spare),
+        (HOLD, {**spare, "line": "insurance"}),
+    )
+    own = ok(Grant("own", p["org_unit_id"], "insurance", None))
+    found = [counted(cookie, "device.revoke", line) for line in ("insurance", "any")]
+    assert found == [(own, (1, 0)), (own, (1, 1))]
 
 
 def test_the_role_step_answers_before_the_input_is_read() -> None:
@@ -327,3 +360,70 @@ def test_a_line_tampered_after_registration_matches_nothing(value: object) -> No
     cells["line"].cell_contents, cells["permission"].cell_contents = "any", "auth.other"
     with pytest.raises(ValueError, match="catalogue code"):
         view(request)
+
+
+RENAME = "UPDATE role SET name = %(name)s WHERE id = %(role)s"
+
+
+def role_names(p: Ids) -> dict[uuid.UUID, str]:
+    with app(p["a"], None) as cursor:
+        return dict(cursor.execute("SELECT id, name FROM role").fetchall())
+
+
+def every_route(cookie: str) -> dict[str, Outcome]:
+    return {f"{code}/{line}": outcome(cookie, code, line) for code, line in LINED}
+
+
+def test_renaming_every_role_changes_no_wrapper_outcome() -> None:
+    """Decision 36 (the wrapper half; `scoped()` is M4r-4's). A seeded agency's Owner role, role r
+    and the spare role; three users: the Owner (both lines, `device.revoke` stepped up), a user of
+    r on insurance at the unit and of the spare role on investment at the team, and a user with no
+    role. Every test route gives the same exact outcome under the seeded names, under random
+    names, and with r named Owner and the system role named staff (a privileged-looking name
+    gained and lost)."""
+    p = agency(steps=True)
+    spare = {"r": p["spare"]}
+    write(
+        p,
+        (SPARE, {}),
+        tick("client.view", "own"),
+        tick("outbox.approve", "own"),
+        tick("client.edit", "team", **spare),
+        tick("device.revoke", "own", **spare),
+    )
+    (owner,) = set(role_names(p)) - {p["r"], p["spare"]}
+    cookies = {"owner": member(p)}
+    write(p, (HOLD, {"r": owner, "line": "both"}))
+    recorded(p, cookies["owner"], with_totp(p)[0], "device.revoke", timedelta())
+    cookies["mixed"] = member(p, "insurance")
+    write(p, (HOLD, {**spare, "org_unit_id": p["team"], "line": "investment"}))
+    cookies["none"] = member(p)
+
+    by_owner = expected(set(PAIRS), p, "both", {"device.revoke"})
+    of_r = expected({("client.view", "own"), ("outbox.approve", "own")}, p, "insurance")
+    held: set[tuple[str, Scope]] = {("client.edit", "team"), ("device.revoke", "own")}
+    of_spare = expected(held, {**p, "org_unit_id": p["team"]}, "investment")
+    by_mixed = {code: of_r[code] if of_r[code] != FORBIDDEN else of_spare[code] for code in CODES}
+    view = ok(Grant("own", p["org_unit_id"], "insurance", None))
+    lined = ["client.view/insurance", "client.view/investment"]
+    lined += ["outbox.approve/insurance", "device.revoke/insurance"]
+    want: dict[str, dict[str, Outcome]] = {
+        "owner": {route: by_owner[route.split("/")[0]] for route in lined},  # both: every line
+        "mixed": dict(zip(lined, [view, FORBIDDEN, STEPUP, FORBIDDEN], strict=True)),
+        "none": dict.fromkeys(lined, FORBIDDEN),
+    }
+    nobody = expected(set(), p, "both")
+    for user, codes in {"owner": by_owner, "mixed": by_mixed, "none": nobody}.items():
+        want[user] |= {f"{code}/any": codes[code] for code in CODES}
+    assert by_mixed["client.edit"] == ok(Grant("team", p["team"], "investment", None))
+
+    names = {owner: "Owner", p["r"]: "Adviser", p["spare"]: "Spare"}
+    random = {role: secrets.token_urlsafe(24) for role in names}
+    swapped = {owner: "staff", p["r"]: "Owner", p["spare"]: "Unit manager"}
+    for phase, new in (("seeded", {}), ("random", random), ("swapped", swapped)):
+        write(p, *((RENAME, {"role": role, "name": name}) for role, name in new.items()))
+        names |= new
+        assert role_names(p) == names
+        found = {user: every_route(cookie) for user, cookie in cookies.items()}
+        assert (phase, found) == (phase, want)
+    assert len(LINED) == 24
