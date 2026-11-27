@@ -28,6 +28,7 @@ Readings and limits are in docs/DECISIONS.md, "2026-11-27 — M4r-3c": the swapp
 - `test_with_own_transaction_every_outcome_and_the_order_are_the_same`: the closing `assert not SEEN` observes only the last request (noted in the PR body and by the reviewer); not changed.
 - The reviewer did not repeat the mutation runs.
 - CI on `main`: image paths still name `ghcr.io/skiw-dev1` (see the PR 193 and 194 logs); their own deploy-path PR is not made.
+- Post-merge run 45927305003 on ab17074 (repository public until it finished): checks, security, image and host passed (2084 unit, 254 web, 2047 live database, 60 end-to-end; 855 host tooling, 39 live host stack); `publish` failed in "Push by digest" with `denied: permission_denied: The requested installation does not exist`, as on b557f7d; deploy-staging skipped.
 
 ## Appendix — final review round
 
