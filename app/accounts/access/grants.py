@@ -37,7 +37,7 @@ class Grant:
     scope: Scope
     org_unit_id: UUID
     line: Line
-    stepup: str | None  # the step-up purpose the wrapper will require, or None
+    stepup: str | None  # the step-up purpose the wrapper requires, or None
 
 
 def grants(user_id: UUID, code: str) -> frozenset[Grant]:

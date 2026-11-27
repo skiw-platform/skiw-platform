@@ -13,6 +13,7 @@ from django.urls import path
 
 from accounts.access.catalogue import ROUTE_CODES, ActionLine
 from accounts.auth.wrapper import InvalidInput, Signed, authorized_action
+from accounts.views import stepup
 
 
 def write(request: HttpRequest) -> HttpResponse:
@@ -66,6 +67,7 @@ urlpatterns = [
     path("awrite", awrite),
     path("read", read),
     path("action", action),
+    path("stepup", stepup),  # the real POST /api/auth/stepup view
     *(
         path(
             f"to/{code}/{line}",

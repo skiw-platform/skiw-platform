@@ -1,7 +1,7 @@
 """The permission catalogue (slice spec §6.1 v2.5 = main spec §6 v1.23; Decisions 4, 6, 34).
 
 Fixed in code: an admin ticks a `(code, scope)` pair on a role, never invents one. Each code maps
-its allowed scopes to the step-up purpose the wrapper will require for that pair, or None.
+its allowed scopes to the step-up purpose the wrapper requires for that pair, or None.
 Step-up is per pair, not per code: `device.revoke` needs it at `agency` only (Decision 4).
 `drive.file` has none here because D25 checks it at the Drive writer, not the wrapper.
 

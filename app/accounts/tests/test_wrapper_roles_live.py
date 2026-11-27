@@ -2,31 +2,41 @@
 split M4r-3a; slice spec Decisions 6, 7, 8, 26, flow 5.1; §7 rows "A signed-in user reaches an
 action the agency's ticks do not grant" and "Line split bypassed on an action"). Grants are written
 as test_access_grants_live writes them, committed in a fresh agency whose user signs in there.
-Until M4r-3b checks step-up, every grant that needs one is dropped, so a code held only through
-such grants is 403 `stepup-required` here."""
+Split M4r-3b: a grant that needs a step-up is kept only with fresh evidence of this session for its
+purpose (Decision 7 (iv); §7 row "S action without fresh re-verification"), written by the real
+POST /api/auth/stepup route or, for evidence that must be stale, by `stepup.record`."""
 
 import json
 import types
+import uuid
+from collections.abc import Collection
+from datetime import timedelta
 from typing import cast
 
 import pytest
+from django.conf import settings
 from django.db import connection
 from django.test import RequestFactory
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 
 from accounts.access.catalogue import ACTION_LINES, ROUTE_CODES, SELF_SERVICE, Scope
 from accounts.access.grants import QUERY, Grant
 from accounts.access.tables import LINES, Line
+from accounts.auth import blob, stepup, totp
 from accounts.auth.wrapper import authorized_action
+from accounts.factor_model import UserFactor
 from accounts.session import SessionStore
 from accounts.tests.test_access_audit_live import CHILD, ROLE, ROOT, TEAM, Ids, app, fresh_agency
 from accounts.tests.test_access_audit_live import ids as new_ids
 from accounts.tests.test_access_catalogue import SPEC_6_1
 from accounts.tests.test_access_grants_live import HOLD, PAIR, UNTICK, write
+from tenancy.binding import with_agency
 
 from .conftest import committed_user
 from .test_action_wrapper import DECISION_26
 from .test_action_wrapper_live import call, signed_in
+from .test_second_factor_live import STEP
 from .urls import SEEN, handle, note_only
 
 pytestmark = [
@@ -39,6 +49,8 @@ SPEC = cast(dict[str, dict[Scope, str | None]], SPEC_6_1)
 PAIRS = sorted((code, scope) for code, scopes in SPEC.items() for scope in scopes)
 CODES = sorted(ROUTE_CODES)
 FORBIDDEN, STEPUP = (403, "forbidden"), (403, "stepup-required")
+S_PAIRS = [(code, scope) for code, scope in PAIRS if SPEC[code][scope]]
+STALE = timedelta(minutes=settings.SKIW_STEPUP_MAX_AGE_MIN, seconds=1)
 
 
 def agency(steps: bool = False) -> Ids:
@@ -52,10 +64,42 @@ def member(p: Ids, line: Line | None = None) -> str:
     """A new active user of p's agency, p's user from now on, signed in; assigned role r at the
     unit on `line` unless None. The session cookie."""
     user = committed_user(agency=p["a"])
-    p["user_id"] = user.id
+    p["user"], p["user_id"], p["step"] = user, user.id, STEP
     if line is not None:
         write(p, (HOLD, {"line": line}))
     return signed_in(user)
+
+
+def with_totp(p: Ids) -> tuple[uuid.UUID, bytes]:
+    """A TOTP factor for p's user: its id and secret."""
+    factor, secret = uuid.uuid4(), totp.new_secret()
+    sealed = blob.seal_factor_secret(secret, factor, p["user_id"], p["a"])
+    with with_agency(p["a"]):
+        UserFactor.objects.create(
+            id=factor, agency_id=p["a"], user_id=p["user_id"], kind="totp", secret_ct=sealed
+        )
+    return factor, secret
+
+
+def step_up(p: Ids, cookie: str, secret: bytes, purpose: str) -> None:
+    """POST /stepup (the real POST /api/auth/stepup view) with the code of the next unused step."""
+    p["step"] += 1
+    body = json.dumps({"purpose": purpose, "code": totp.code(secret, p["step"])}).encode()
+    with pytest.MonkeyPatch.context() as clock:
+        clock.setattr(
+            totp, "time", types.SimpleNamespace(time=lambda: (p["step"] + 0.5) * totp.PERIOD)
+        )
+        assert call(cookie, path="/stepup", body=body).status_code == 200
+
+
+def recorded(p: Ids, cookie: str, factor: uuid.UUID, purpose: str, ago: timedelta) -> None:
+    """Evidence written by `stepup.record` for this session, `ago` before now."""
+    request = RequestFactory().post("/")
+    request.session = SessionStore(cookie)
+    then = types.SimpleNamespace(now=lambda: timezone.now() - ago)
+    with pytest.MonkeyPatch.context() as clock, with_agency(p["a"]):
+        clock.setattr(stepup, "timezone", then)
+        stepup.record(request, factor, purpose)
 
 
 def tick(code: str, scope: Scope, **extra: object) -> tuple[str, dict[str, object]]:
@@ -79,13 +123,18 @@ def outcomes(cookie: str) -> dict[str, Outcome]:
     return {code: outcome(cookie, code) for code in CODES}
 
 
-def expected(held: set[tuple[str, Scope]], p: Ids, line: Line) -> dict[str, Outcome]:
-    """Decision 7 by hand from SPEC_6_1, for one assignment at p's unit on a line that matches."""
+def expected(
+    held: set[tuple[str, Scope]], p: Ids, line: Line, fresh: Collection[str] = ()
+) -> dict[str, Outcome]:
+    """Decision 7 by hand from SPEC_6_1, for one assignment at p's unit on a line that matches,
+    with fresh step-up evidence for the purposes in `fresh`."""
     found: dict[str, Outcome] = {}
     for code in CODES:
         scopes = {scope for c, scope in held if c == code}
         kept = frozenset(
-            Grant(s, p["org_unit_id"], line, None) for s in scopes if not SPEC[code][s]
+            Grant(s, p["org_unit_id"], line, SPEC[code][s])
+            for s in scopes
+            if SPEC[code][s] in {None, *fresh}
         )
         found[code] = (
             (200, kept) if kept or code in SELF_SERVICE else STEPUP if scopes else FORBIDDEN
@@ -116,16 +165,55 @@ def test_no_role_and_an_empty_role_give_only_self_service() -> None:
     assert outcomes(cookie) == nothing
 
 
-def test_the_seeded_owner_role_without_step_up_keeps_every_grant_that_needs_none() -> None:
+def test_the_seeded_owner_role_keeps_a_step_up_grant_only_for_a_freshly_stepped_up_purpose() -> (
+    None
+):
+    """Without step-up the owner revokes their own device only; with a `device.revoke` step-up,
+    any device too; with every purpose, every grant."""
     p = agency(steps=True)
     cookie = member(p)
+    factor, _ = with_totp(p)
     with app(p["a"], None) as cursor:
         (owner,) = cursor.execute("SELECT id FROM role WHERE is_system").fetchone() or (None,)
     write(p, (HOLD, {"r": owner, "line": "both"}))
+    own = Grant("own", p["org_unit_id"], "both", None)
     found = outcomes(cookie)
     assert found == expected(set(PAIRS), p, "both")
-    assert found["device.revoke"] == ok(Grant("own", p["org_unit_id"], "both", None))
-    assert found["outbox.approve"] == STEPUP
+    assert (found["device.revoke"], found["outbox.approve"]) == (ok(own), STEPUP)
+    recorded(p, cookie, factor, "device.revoke", timedelta())
+    found = outcomes(cookie)
+    assert found == expected(set(PAIRS), p, "both", {"device.revoke"})
+    assert found["device.revoke"] == ok(
+        own, Grant("agency", own.org_unit_id, "both", "device.revoke")
+    )
+    for purpose in stepup.PURPOSES - {"device.revoke"}:
+        recorded(p, cookie, factor, purpose, timedelta())
+    assert outcomes(cookie) == expected(set(PAIRS), p, "both", stepup.PURPOSES)
+
+
+def test_each_step_up_pair_needs_fresh_evidence_of_this_session_for_its_own_purpose() -> None:
+    """Per pair, in order: none, stale (max age + 1 s), another purpose and the right purpose in
+    another session of the same user are 403 `stepup-required`; then fresh is 200 with exactly
+    the grant."""
+    p = agency()
+    for code, scope in S_PAIRS:
+        purpose = SPEC[code][scope]
+        assert purpose is not None
+        write(p, (UNTICK, {}), tick(code, scope))
+        cookie = member(p, "insurance")
+        factor, secret = with_totp(p)
+        refused = [outcome(cookie, code)]
+        recorded(p, cookie, factor, purpose, STALE)
+        refused.append(outcome(cookie, code))
+        step_up(p, cookie, secret, stepup.FACTOR_CHANGE)
+        refused.append(outcome(cookie, code))
+        step_up(p, signed_in(p["user"]), secret, purpose)  # another session
+        refused.append(outcome(cookie, code))
+        step_up(p, cookie, secret, purpose)
+        grant = Grant(scope, p["org_unit_id"], "insurance", purpose)
+        found = (code, scope, refused, outcome(cookie, code))
+        assert found == (code, scope, [STEPUP] * 4, ok(grant))
+    assert len(S_PAIRS) == 11
 
 
 def test_the_nine_line_pairs_and_a_step_up_grant_on_another_line() -> None:
@@ -184,17 +272,25 @@ def test_an_assignment_a_scope_change_and_an_unassignment_hold_from_the_next_req
     assert outcome(cookie, "client.view") == FORBIDDEN
 
 
-def test_a_catalogue_route_reads_grants_once_per_request_and_self_service_never() -> None:
+def test_a_route_reads_grants_once_and_step_up_once_per_purpose_and_self_service_neither() -> None:
+    """Grant and step-up reads per request: outbox.approve is held at two scopes (one purpose);
+    on another line it is refused before any step-up read."""
     p = agency()
-    cookie = member(p, "insurance")
-    write(p, tick("client.view", "own"))
+    cookie = member(p, "investment")
+    write(
+        p, tick("client.view", "own"), tick("outbox.approve", "own"), tick("outbox.approve", "team")
+    )
+    view = ok(Grant("own", p["org_unit_id"], "investment", None))
+    calls = [("client.view", "any", view)] * 2 + [("outbox.approve", "any", STEPUP)] * 2
+    calls += [("outbox.approve", "insurance", FORBIDDEN), ("auth.factors", "any", ok())]
     reads = []
-    for code in ("client.view", "client.view", "auth.factors"):
+    for code, line, answer in calls:
         with CaptureQueriesContext(connection) as captured:
-            assert outcome(cookie, code)[0] == 200
-        query = QUERY.split(" WHERE")[0]
-        reads.append(sum(q["sql"].startswith(query) for q in captured.captured_queries))
-    assert reads == [1, 1, 0]
+            assert outcome(cookie, code, line) == answer
+        sql = [q["sql"] for q in captured.captured_queries]
+        grant_reads = sum(q.startswith(QUERY.split(" WHERE")[0]) for q in sql)
+        reads.append((grant_reads, sum('FROM "auth_stepup"' in q for q in sql)))
+    assert reads == [(1, 0), (1, 0), (1, 1), (1, 1), (1, 0), (0, 0)]
 
 
 def test_the_role_step_answers_before_the_input_is_read() -> None:
