@@ -29,6 +29,7 @@ The owner split M4r-3 into 3a (this PR), 3b (the step-up check, with `stepup.PUR
 - Once the wrapper imports `stepup`, it reaches `webauthn`; the first module outside `accounts` that imports `authorized_action` would break an import contract (DECISIONS M4r-3a).
 - The reviewer did not rerun the builder's mutation runs.
 - CI on `main` (found during `merged 193`): the latest successful run of the last 60 is 2026-11-13. Of the 13 failed runs from 1058766 to cee2d98, 11 failed only in `publish`, each with the GitHub billing message (the job starts after the checks, when the repository is already private again); 53c2bd7 failed in the end-to-end tests; cee2d98 failed in one web unit test (App.test.tsx, code step) and in the clamav image pull of the live host tests. The earlier failures were not opened.
+- Post-merge run 45913870474 on d18862f (repository still public): checks, security, image and host passed (2084 unit, 254 web, 2034 live database, 60 end-to-end); `publish` failed in "Push by digest" with `denied: permission_denied: The requested installation does not exist`, pushing to `ghcr.io/skiw-dev1/skiw-platform` as ci.yml names it. DECISIONS 2026-11-14 records those paths as a separate deploy-path PR, not yet made.
 - Local only: the dev database was initialised with another superuser name, so 5 role-set live tests fail on it.
 
 ## Appendix — final review round
