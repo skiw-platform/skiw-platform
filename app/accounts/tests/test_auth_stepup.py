@@ -150,7 +150,10 @@ def test_the_label_is_apart_from_every_other_use_of_the_source_key() -> None:
 
 
 def test_every_purpose_fits_the_table_check_and_a_totp_or_a_passkey_proves_one() -> None:
-    assert {"factor.change"} == stepup.PURPOSES
+    """factor.change and the step-up column of slice spec §6.1; drive.write is D25's (M16)."""
+    listed = ["factor.change", "outbox.approve", "connector.connect", "settings.change"]
+    listed += ["role_change", "export", "device.revoke", "jobs.admin"]
+    assert set(listed) == stepup.PURPOSES
     assert all(re.fullmatch(PURPOSE, purpose) for purpose in stepup.PURPOSES)
     assert {"totp", "passkey"} == stepup.FACTOR_KINDS  # spec D7 (M3g-1d); never a recovery code
 
@@ -168,7 +171,7 @@ CALLS: dict[str, Callable[[str], object]] = {
 @pytest.mark.parametrize("call", sorted(CALLS))
 def test_both_refuse_an_unknown_purpose(call: str) -> None:
     with pytest.raises(ValueError, match="unknown step-up purpose"):
-        CALLS[call]("export")
+        CALLS[call]("drive.write")
 
 
 @pytest.mark.parametrize("call", sorted(CALLS))

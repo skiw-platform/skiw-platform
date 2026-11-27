@@ -155,7 +155,7 @@ def test_a_right_step_up_ends_the_run_of_wrong_codes() -> None:
         {"code": "12345"},
         {"code": "1234567"},
         {"code": "١٢٣٤٥٦"},  # six digits, not ASCII
-        {"purpose": "export"},  # the right code, a purpose PURPOSES does not list
+        {"purpose": "drive.write"},  # the right code, a purpose PURPOSES does not list
         {"purpose": ["factor.change"]},
         {"code": 123456},
         {"code": None},
@@ -254,7 +254,7 @@ def test_verify_refuses_an_unknown_purpose_before_judging_the_code() -> None:
     request = sign_in.pending_login(user)
     for code in ("not a code", sign_in.code_at(secret, STEP)):
         with pytest.raises(ValueError, match="unknown step-up purpose"):
-            stepup.verify(request, who, "export", code)
+            stepup.verify(request, who, "drive.write", code)
     assert factor_count(user.id) == 0 and sign_in.stored_step(user) == 0
 
 

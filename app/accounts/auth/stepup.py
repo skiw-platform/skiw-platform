@@ -5,8 +5,8 @@
 challenge. Finishing enrolment (`POST /api/auth/enrol/totp/confirm`) calls `record` for
 `factor.change` only, naming the new TOTP, in the transaction that saves it and after login() gave
 the session its new key (DECISIONS M3g-2s-1); a plain sign-in records nothing. The factor changes
-(M3h-5, M3h-6) and later consumers call `recent`, which takes evidence of either kind for every
-purpose (spec D7; owner, 2026-11-13).
+(M3h-5, M3h-6) and the wrapper's role step (slice spec Decision 7 (iv)) call `recent`, which takes
+evidence of either kind for every purpose (spec D7; owner, 2026-11-13).
 
 `evidence_mac` is the newest `tenant_source_key` version in RECOVERY_VERSION_BYTES big-endian
 bytes, then HMAC-SHA-256 under that version over LABEL, then every other column in a fixed order,
@@ -32,27 +32,33 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from django.conf import settings
 from django.http import HttpRequest
 from django.utils import timezone
 
 from accounts import source_key
+from accounts.access.catalogue import CATALOGUE
 from accounts.auth import assertion, passkey, second_factor
 from accounts.auth.login import AGENCY, USER
 from accounts.auth.transactions import require_open
-from accounts.auth.wrapper import Signed
 from accounts.factor_model import RECOVERY_VERSION_BYTES, UserFactor
 from accounts.session import SessionStore, stored_key
 from accounts.stepup_model import AuthStepup
 from accounts.user_model import AppUser
 
+if TYPE_CHECKING:  # wrapper imports this module
+    from accounts.auth.wrapper import Signed
+
 LABEL = b"skiw-stepup-v1"  # apart from the session, recovery and throttle uses of the key
 VERSION_BYTES = RECOVERY_VERSION_BYTES  # the same 4-byte prefix as a recovery code's secret_ct
 FACTOR_CHANGE = "factor.change"  # add or remove a TOTP or a passkey, new recovery codes (M3h, M3g)
-# Closed list; a consumer adds its purpose when it is built (outbox.approve M9, drive.write M16).
-PURPOSES = frozenset({FACTOR_CHANGE})
+# Closed list: factor.change and the catalogue's step-up purposes (slice spec Decision 4), which the
+# wrapper checks. drive.write is not here: D25 checks it at the Drive writer (M16).
+PURPOSES = frozenset({FACTOR_CHANGE}) | {
+    purpose for scopes in CATALOGUE.values() for purpose in scopes.values() if purpose is not None
+}
 FACTOR_KINDS = frozenset({"totp", "passkey"})  # spec D7 (M3g-1d-2); never a recovery code
 Refused = Literal["invalid", "unavailable", "limited", "wrong_code"]
 log = logging.getLogger("django.security.SuspiciousStepUp")
@@ -177,7 +183,9 @@ def recent(request: HttpRequest, purpose: str) -> StepUp | None:
     return None
 
 
-def verify(request: HttpRequest, signed: Signed, purpose: str, candidate: str) -> StepUp | Refused:
+def verify(
+    request: HttpRequest, signed: "Signed", purpose: str, candidate: str
+) -> StepUp | Refused:
     """Steps the session's user up for `purpose` with a TOTP code (DECISIONS M3h-3). Outside any
     transaction: the attempt is counted like a sign-in code (`second_factor.counted`, feeding the
     lock), on the same budget, run and `sign_count`, so a code used at sign-in is refused here in
@@ -204,7 +212,7 @@ def verify(request: HttpRequest, signed: Signed, purpose: str, candidate: str) -
     return result
 
 
-def begin_passkey(request: HttpRequest, signed: Signed) -> dict[str, Any] | assertion.NoPasskey:
+def begin_passkey(request: HttpRequest, signed: "Signed") -> dict[str, Any] | assertion.NoPasskey:
     """In the wrapper's with_agency(): assertion options and a `stepup` challenge (replacing any
     other) for the session user's passkeys in use; "no-passkey" issues none (DECISIONS M3g-1b)."""
     ids = assertion.credential_ids(signed.user_id)
@@ -214,7 +222,7 @@ def begin_passkey(request: HttpRequest, signed: Signed) -> dict[str, Any] | asse
 
 
 def verify_passkey(
-    request: HttpRequest, signed: Signed, purpose: str, credential: object
+    request: HttpRequest, signed: "Signed", purpose: str, credential: object
 ) -> StepUp | Literal["unavailable", "limited", "wrong_code"]:
     """As `verify`, with a passkey assertion for this session's `stepup` challenge in place of a
     code (DECISIONS M3g-1d-2), through `assertion.counted_assertion`, sign-in's one check: the

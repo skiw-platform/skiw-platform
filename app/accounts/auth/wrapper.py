@@ -10,9 +10,10 @@ reviewed as public. The steps run in AUTH-01 order and a failing step stops the 
    factor, else 403 `forbidden`. A self-service `permission` reads no grant and gives empty
    access. A catalogue code reads the user's grants once (accounts.access.grants) and keeps each
    grant whose assignment line matches the route's `line` in LINE_MATCHES; none: 403 `forbidden`.
-   Of those, a grant that needs a step-up is dropped (the step-up check is not built yet, so every
-   such grant fails closed); none left: 403 `stepup-required`, never for a line refusal. No 403
-   logs out. The kept grants are `Signed.access`, the handler's only grants;
+   Of those, a grant that needs a step-up is kept only while `stepup.recent()` finds this
+   session's evidence for its purpose (one call per distinct purpose, nothing cached); none left:
+   403 `stepup-required`, never for a line refusal. No 403 logs out. The kept grants are
+   `Signed.access`, the handler's only grants;
 4. input: `schema` parses the JSON object body (UNI-03); InvalidInput gives 400;
 5. idempotency: no M3 action needs it;
 6. the handler, in the same tenant transaction; or, with `own_transaction=True`, after steps 1-4
@@ -46,6 +47,7 @@ from accounts.access.grants import Grant, grants
 from accounts.access.tables import Line
 from accounts.auth.login import AGENCY, AUTH_AT, FACTOR, SEEN_AT, USER
 from accounts.auth.revoke import mark, revoked
+from accounts.auth.stepup import StepUp, recent
 from accounts.factor_model import KINDS
 from accounts.session import SessionStore
 from accounts.user_model import AppUser
@@ -120,10 +122,10 @@ def _tenant_step(signed: Signed, key: str, now: datetime) -> Literal["live", "id
 
 
 def _role_step(
-    signed: Signed, permission: str, line: ActionLine
+    request: HttpRequest, signed: Signed, permission: str, line: ActionLine
 ) -> frozenset[Grant] | Literal["forbidden", "stepup-required"]:
     """Step 3 after the factor check, inside the caller's with_agency(): the kept grants, or the
-    403 code. One grant read per request, never cached (AUTH-12)."""
+    403 code. One grant read and one step-up read per purpose, never cached (AUTH-09, AUTH-12)."""
     if permission in SELF_SERVICE:
         return frozenset()
     held = grants(signed.user_id, permission)
@@ -132,7 +134,9 @@ def _role_step(
     matching = [g for g in held if isinstance(line, str) and (g.line, line) in LINE_MATCHES]
     if not matching:
         return "forbidden"
-    kept = frozenset(g for g in matching if g.stepup is None)
+    purposes = {g.stepup for g in matching if g.stepup is not None}
+    fresh = {p for p in purposes if isinstance(recent(request, p), StepUp)}
+    kept = frozenset(g for g in matching if g.stepup is None or g.stepup in fresh)
     return kept or "stepup-required"
 
 
@@ -210,7 +214,7 @@ def authorized_action[T](
                     return _refused(401, "signed-out")
                 if signed.factor not in KINDS:
                     return _refused(403, "forbidden")
-                access = _role_step(signed, permission, line)
+                access = _role_step(request, signed, permission, line)
                 if isinstance(access, str):
                     return _refused(403, access)
                 signed = replace(signed, access=access)
