@@ -3,14 +3,17 @@ subtree walk and the line filter come in M4r-4b and M4r-4c.
 
 A `ScopedModel` has one manager, `_unscoped`, so Django adds no `objects`; Semgrep `scoped-only`
 rejects `_unscoped`, `_default_manager`, `_base_manager`, the manager attributes of `_meta` and a
-direct `QuerySet(...)` outside this module, where `scoped()` builds its `QuerySet`. Every read
-through `_unscoped` raises, so Django's own (shortcuts, generic views, model forms and formsets,
-`full_clean`, `get_next_by_<field>`) do too; save, delete and refresh use Django's base manager. A
-subclass declares `SCOPE_OWNER`, the owner id field, and `SCOPE_LINE`, None until M4r-4c (else
-ImproperlyConfigured). `check()` (run by `migrate` and the coverage test) refuses another manager,
-an owner that is neither a UUID field nor a foreign key to `app_user`, any join to its rows (a
-relation into it, a `through` use, another model on its table, a concrete parent) and a relation
-from it unless `related_name="+"` and `related_query_name` holds `__` (Django resolves `+`)."""
+directly built `QuerySet` (also `QuerySet[X](...)`) outside this module, where `scoped()` builds
+its own. Every read through `_unscoped` raises, so Django's own (shortcuts, generic views,
+`full_clean`, `get_next_by_<field>`) do too, and a model form or formset raises before it reads
+another row or saves (a bound one through a `UniqueConstraint`, whose `validate` reads the manager
+first); it may display a record already fetched (owner, 2026-11-27). Save, delete and refresh use
+Django's base manager. A subclass declares `SCOPE_OWNER`, the owner id field, and `SCOPE_LINE`, None
+until M4r-4c (else ImproperlyConfigured). `check()` (run by `migrate` and the coverage test) refuses
+another manager, an owner that is neither a UUID field nor a foreign key to `app_user`, a model with
+no such constraint, any join to its rows (a relation into it, a `through` use, another model on its
+table, a concrete parent) and a relation from it unless `related_name="+"` and `related_query_name`
+holds `__` (Django resolves `+`)."""
 
 from typing import ClassVar, Final, Literal, NoReturn
 
@@ -77,6 +80,11 @@ def _scope_errors(model: type[ScopedModel]) -> list[checks.CheckMessage]:
         errors.append(
             checks.Error("SCOPE_OWNER names no user id field", obj=model, id="scope.E002")
         )
+    stock = vars(models.UniqueConstraint)["validate"]
+    validated = (c for m in (model, *model._meta.get_parent_list()) for c in m._meta.constraints)
+    if not any(getattr(type(c), "validate", None) is stock for c in validated):
+        message = "no UniqueConstraint, so a model form would save without reading the manager"
+        errors.append(checks.Error(message, obj=model, id="scope.E005"))
     for field in model._meta.get_fields(include_hidden=True):
         if isinstance(field, ForeignObjectRel):
             message = f"{field.remote_field.model._meta.label}.{field.remote_field.name} joins it"

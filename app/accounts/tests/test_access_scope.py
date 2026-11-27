@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
-from django.db.models import QuerySet
+from django.db.models import F, Q, QuerySet
 from django.forms import modelform_factory, modelformset_factory
 from django.http import Http404
 from django.shortcuts import get_list_or_404, get_object_or_404
@@ -94,6 +94,37 @@ def test_scope_owner_must_name_a_user_id_field(name: str, errors: list[str]) -> 
         label = models.TextField()
         SCOPE_OWNER = name
         SCOPE_LINE = None
+
+    assert scope_errors(Row) == errors
+
+
+class Unvalidated(models.UniqueConstraint):
+    def validate(self, *args: object, **kwargs: object) -> None:
+        pass
+
+
+@pytest.mark.parametrize(
+    ("declared", "errors"),
+    [
+        (TenantModel.Meta.constraints, []),
+        ((models.UniqueConstraint(F("id"), condition=Q(id__isnull=False), name="e"),), []),
+        ((), ["scope.E005"]),
+        ((models.CheckConstraint(condition=~Q(id=None), name="agency_id_id_uq"),), ["scope.E005"]),
+        ((Unvalidated(fields=["agency_id", "id"], name="u"),), ["scope.E005"]),
+    ],
+)
+@isolate_apps("accounts")
+def test_a_scoped_model_needs_a_unique_constraint_django_validates(
+    declared: tuple[models.BaseConstraint, ...], errors: list[str]
+) -> None:
+    class Row(ScopedModel):
+        id = models.UUIDField(primary_key=True)
+        owner_user_id = models.UUIDField()
+        SCOPE_OWNER = "owner_user_id"
+        SCOPE_LINE = None
+
+        class Meta(TenantModel.Meta):
+            constraints = declared
 
     assert scope_errors(Row) == errors
 
@@ -222,6 +253,7 @@ def test_django_readers_of_every_row_refuse_a_scoped_model_not_a_queryset(
     # nosemgrep: scoped-only
     rows = cast("QuerySet[Row]", QuerySet(Row)).filter(owner_user_id=uuid4())
     row = Row(id=uuid4(), at=datetime.now(UTC), unit=Unit(id=uuid4()))
+    posted = {"form-TOTAL_FORMS": "1", "form-INITIAL_FORMS": "1", "form-0-id": str(row.id)}
     readers = [
         lambda: get_object_or_404(Row, pk=row.id),
         lambda: get_list_or_404(Row),
@@ -231,6 +263,7 @@ def test_django_readers_of_every_row_refuse_a_scoped_model_not_a_queryset(
         lambda: modelform_factory(Row, fields=["at"])(data={"at": "2026-11-27 10:00"}).is_valid(),
         lambda: modelformset_factory(Row, fields=["at"])().forms,
         lambda: modelformset_factory(Row, fields=["at"])(queryset=rows).forms,
+        lambda: modelformset_factory(Row, fields=["id", "at"])(posted, queryset=rows).is_valid(),
     ]
     for reader in readers:
         with pytest.raises(TypeError, match="only through scoped"):

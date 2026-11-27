@@ -1,5 +1,7 @@
 # Fixture for `semgrep --test semgrep/` (rule scoped-only).
 # ruff: noqa: B009 -- getattr with a constant name is the shape under test.
+from typing import cast
+
 from django.db import models
 from django.db.models import QuerySet
 from django.db.models import QuerySet as AllRows
@@ -56,6 +58,22 @@ def querysets(Client):
     Rows(model=Client)
     # ruleid: scoped-only
     AllRows(model=Client)
+    # ruleid: scoped-only
+    QuerySet[Client, Client](Client)
+    # ruleid: scoped-only
+    models.QuerySet["Client"](Client)
+    # ruleid: scoped-only
+    Rows[Client](model=Client)
+    # ruleid: scoped-only
+    (AllRows[Client])(Client)
+    # ruleid: scoped-only
+    QuerySet[Client][Client](Client)
+    # ruleid: scoped-only
+    Rows.__class_getitem__(Client)(Client)
+    # ruleid: scoped-only
+    getattr(models, "QuerySet")(Client)
+    # ruleid: scoped-only
+    getattr(queries, "QuerySet")[Client](Client)
 
 
 def passed_in(QuerySet, lib, Client):
@@ -64,6 +82,8 @@ def passed_in(QuerySet, lib, Client):
     QuerySet(model=Client)
     # ruleid: scoped-only
     lib.QuerySet(model=Client)
+    # ruleid: scoped-only
+    QuerySet[Client](model=Client)
 
 
 def allowed(Client, signed):
@@ -78,8 +98,18 @@ def allowed(Client, signed):
     print(Client.unscoped, Client.default_manager, getattr(Client, "managers"))
     # ok: scoped-only
     getattr(Client, "_meta")
+    # ok: scoped-only
+    print(list[AppUser](), QuerySet.__name__.lower(), getattr(models, "Q")(pk=1))
 
 
 # ok: scoped-only
 def typed(rows: QuerySet[AppUser]) -> QuerySet[AppUser]:
-    return rows
+    # ok: scoped-only
+    isinstance(rows, QuerySet)
+    # ok: scoped-only
+    return cast("QuerySet[AppUser]", cast(QuerySet[AppUser], rows))
+
+
+# ok: scoped-only
+class TypedRows(QuerySet[AppUser]):
+    pass

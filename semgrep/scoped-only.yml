@@ -25,7 +25,19 @@ rules:
           - metavariable-regex:
               metavariable: $M
               regex: ^(default_manager|base_manager|managers|managers_map|local_managers)$
-      # A QuerySet built directly: by a bare name, or through a module. Semgrep resolves imports,
-      # so the second also matches `from django.db.models import QuerySet as Rows; Rows(...)`.
+      # A QuerySet built directly: by a bare name, through a module or a literal getattr, also
+      # subscripted (`QuerySet[X](...)`, chained or by __class_getitem__). Semgrep resolves
+      # imports, so these also match `from django.db.models import QuerySet as Rows; Rows(...)`.
       - pattern: QuerySet(...)
       - pattern: $MOD.QuerySet(...)
+      - pattern: getattr($MOD, "QuerySet", ...)(...)
+      - patterns:
+          - pattern-either:
+              - pattern: $Q[...](...)
+              - pattern: $Q.__class_getitem__(...)(...)
+          - metavariable-pattern:
+              metavariable: $Q
+              pattern-either:
+                - pattern: QuerySet
+                - pattern: $MOD.QuerySet
+                - pattern: getattr($MOD, "QuerySet", ...)
