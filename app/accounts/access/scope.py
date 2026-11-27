@@ -3,24 +3,28 @@ subtree walk and the line filter come in M4r-4b and M4r-4c.
 
 A `ScopedModel` has one manager, `_unscoped`, so Django adds no `objects`; Semgrep `scoped-only`
 rejects `_unscoped`, `_default_manager`, `_base_manager`, the manager attributes of `_meta` and a
-direct `QuerySet(...)` outside this module. A subclass declares `SCOPE_OWNER`, the field holding the
-owner user's id, and `SCOPE_LINE`, which must be None until the line filter lands (M4r-4c); a bad
-declaration raises ImproperlyConfigured when the class is defined. `check()` (run by `migrate` and
-by the scope coverage test) refuses a second manager, an owner that is neither a UUID field nor a
-foreign key to `app_user`, and any relation on or into the model with a reverse accessor
-(related_name not '+'), since a reverse accessor reads rows without `scoped()`."""
+direct `QuerySet(...)` outside this module. `_unscoped.all()` (`get_object_or_404`, generic views),
+`get_next_by_<field>` and `get_next_in_order` raise; `scoped()` starts from `get_queryset()`. A
+subclass declares `SCOPE_OWNER`, the owner id field, and `SCOPE_LINE`, None until M4r-4c (else
+ImproperlyConfigured). `check()` (run by `migrate` and the coverage test) refuses another manager,
+an owner that is neither a UUID field nor a foreign key to `app_user`, any join to its rows (a
+relation into it, a `through` use, another model on its table, a concrete parent) and a relation
+from it unless `related_name="+"` and `related_query_name` holds `__` (Django resolves `+`)."""
 
-from typing import ClassVar, Final, Literal
+from typing import ClassVar, Final, Literal, NoReturn
 
 from django.core import checks
 from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
 from django.db import models
 from django.db.models import ForeignObjectRel
+from django.db.models.constants import LOOKUP_SEP
+from django.db.models.fields.related import RelatedField
 
 from accounts.user_model import AppUser
 from tenancy.models import TenantModel
 
 ORG_MAX_DEPTH: Final = 32  # slice spec §8; the same cap as the tree guard (accounts.0027)
+REFUSED: Final = "a ScopedModel is read only through scoped(), never every row of the agency"
 
 
 class ScopeIntegrityError(Exception):
@@ -28,11 +32,16 @@ class ScopeIntegrityError(Exception):
     27): `scoped()` raises it and returns no rows."""
 
 
+class Unscoped(models.Manager["ScopedModel"]):
+    def all(self) -> NoReturn:
+        raise TypeError(REFUSED)
+
+
 class ScopedModel(TenantModel):
     SCOPE_OWNER: ClassVar[str]
     SCOPE_LINE: ClassVar[Literal["insurance", "investment"] | None]
 
-    _unscoped = models.Manager()
+    _unscoped = Unscoped()
 
     class Meta(TenantModel.Meta):
         abstract = True
@@ -47,6 +56,11 @@ class ScopedModel(TenantModel):
                 f"{cls.__qualname__}: SCOPE_LINE must be declared None until the line filter"
             )
 
+    def _get_next_or_previous_by_FIELD(self, *args: object, **kwargs: object) -> NoReturn:
+        raise TypeError(REFUSED)
+
+    _get_next_or_previous_in_order = _get_next_or_previous_by_FIELD
+
     @classmethod
     def check(cls, **kwargs: object) -> list[checks.CheckMessage]:
         return [*super().check(**kwargs), *_scope_errors(cls)]
@@ -54,10 +68,8 @@ class ScopedModel(TenantModel):
 
 def _scope_errors(model: type[ScopedModel]) -> list[checks.CheckMessage]:
     errors: list[checks.CheckMessage] = []
-    if [manager.name for manager in model._meta.managers] != ["_unscoped"]:
-        errors.append(
-            checks.Error("a scoped model has no manager but _unscoped", obj=model, id="scope.E001")
-        )
+    if [(m.name, type(m)) for m in model._meta.managers] != [("_unscoped", Unscoped)]:
+        errors.append(checks.Error("a manager other than _unscoped", obj=model, id="scope.E001"))
     try:
         owner = model._meta.get_field(model.SCOPE_OWNER)
     except FieldDoesNotExist:
@@ -70,8 +82,22 @@ def _scope_errors(model: type[ScopedModel]) -> list[checks.CheckMessage]:
             checks.Error("SCOPE_OWNER names no user id field", obj=model, id="scope.E002")
         )
     for field in model._meta.get_fields(include_hidden=True):
-        relation = field if isinstance(field, ForeignObjectRel) else field.remote_field
-        if relation is not None and not relation.hidden:
-            message = f"{field.name} has a reverse accessor"
+        if isinstance(field, ForeignObjectRel):
+            message = f"{field.remote_field.model._meta.label}.{field.remote_field.name} joins it"
             errors.append(checks.Error(message, obj=model, id="scope.E003"))
+        elif isinstance(field, RelatedField) and (
+            field.remote_field.parent_link
+            or not field.remote_field.hidden
+            or LOOKUP_SEP not in field.related_query_name()
+        ):
+            message = f"{field.name}: a lookup on the related model can name it"
+            errors.append(checks.Error(message, obj=model, id="scope.E004"))
+    for other in model._meta.apps.get_models(include_auto_created=True):
+        tables = {m._meta.db_table.strip('"').rpartition('"."')[2] for m in (model, other)}
+        if len(tables) == 1 and other._meta.concrete_model is not model._meta.concrete_model:
+            errors.append(checks.Error(f"{other._meta.label} reads it", obj=model, id="scope.E003"))
+        for m2m in other._meta.local_many_to_many:
+            if m2m.remote_field.through is model:
+                message = f"{other._meta.label}.{m2m.name} joins it as a through model"
+                errors.append(checks.Error(message, obj=model, id="scope.E003"))
     return errors
