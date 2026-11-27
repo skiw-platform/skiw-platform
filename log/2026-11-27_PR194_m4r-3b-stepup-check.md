@@ -28,6 +28,7 @@ Owner answers of 2026-11-26 applied here: three PRs for M4r-3 and all seven cata
 - Step-up evidence from a passkey or TOTP removed afterwards still counts until it is the configured maximum age old (unchanged behaviour).
 - Builder mutant that survived: purposes collected from all held grants after the line refusal only adds a step-up read. The reviewer covered the mixed-line read count with a local probe; no committed test does. The reviewer did not repeat the mutation runs.
 - CI on `main`: image paths still name `ghcr.io/skiw-dev1` (see the PR 193 log); their own deploy-path PR is not made.
+- Post-merge run 45918430292 on b557f7d (repository public until it finished): checks, security, image and host passed (2084 unit, 254 web, 2042 live database, 60 end-to-end; 855 host tooling, 39 live host stack); `publish` failed in "Push by digest" with `denied: permission_denied: The requested installation does not exist`, as on d18862f; deploy-staging skipped.
 
 ## Appendix — final review round
 
