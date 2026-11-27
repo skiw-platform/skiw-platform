@@ -1,6 +1,6 @@
 """`ScopedModel` (slice spec Decisions 9, 10, 27; plan row M4r-4, M4r-4a): one manager, the two
 declarations refused when wrong, the system checks on the owner field and on relations, and
-Django's readers of every row refused (PR 197 review R1).
+Django's readers of every row refused (PR 197 review R1, R2).
 The models live in an isolated registry, so the app's own stays unchanged."""
 
 import importlib
@@ -12,6 +12,7 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 from django.db.models import QuerySet
+from django.forms import modelform_factory, modelformset_factory
 from django.http import Http404
 from django.shortcuts import get_list_or_404, get_object_or_404
 from django.test.utils import isolate_apps
@@ -216,22 +217,26 @@ def test_django_readers_of_every_row_refuse_a_scoped_model_not_a_queryset(
         class Meta(TenantModel.Meta):
             order_with_respect_to = "unit"
 
+    monkeypatch.setattr(QuerySet, "_fetch_all", lambda rows: setattr(rows, "_result_cache", []))
+    # Stands in for M4r-4b's scoped(), built in scope.py the same way; the one suppression.
+    # nosemgrep: scoped-only
+    rows = cast("QuerySet[Row]", QuerySet(Row)).filter(owner_user_id=uuid4())
     row = Row(id=uuid4(), at=datetime.now(UTC), unit=Unit(id=uuid4()))
     readers = [
         lambda: get_object_or_404(Row, pk=row.id),
         lambda: get_list_or_404(Row),
         ListView(model=Row).get_queryset,
         DetailView(model=Row).get_queryset,
-        *(getattr(row, name) for name in ("get_next_by_at", "get_previous_in_order")),
+        *(getattr(row, n) for n in ("get_next_by_at", "get_previous_in_order", "validate_unique")),
+        lambda: modelform_factory(Row, fields=["at"])(data={"at": "2026-11-27 10:00"}).is_valid(),
+        lambda: modelformset_factory(Row, fields=["at"])().forms,
+        lambda: modelformset_factory(Row, fields=["at"])(queryset=rows).forms,
     ]
     for reader in readers:
         with pytest.raises(TypeError, match="only through scoped"):
             reader()
 
-    monkeypatch.setattr(QuerySet, "_fetch_all", lambda rows: setattr(rows, "_result_cache", []))
-    # Stands in for M4r-4b's scoped(), which starts from this queryset; the one suppression.
-    # nosemgrep: scoped-only
-    rows = Row._unscoped.get_queryset()
+    assert len(modelformset_factory(Unit, fields=["id"])().forms) == 1
     for source in (Unit, rows):
         with pytest.raises(Http404):
             get_object_or_404(source, pk=row.id)

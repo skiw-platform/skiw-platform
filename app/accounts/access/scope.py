@@ -3,8 +3,9 @@ subtree walk and the line filter come in M4r-4b and M4r-4c.
 
 A `ScopedModel` has one manager, `_unscoped`, so Django adds no `objects`; Semgrep `scoped-only`
 rejects `_unscoped`, `_default_manager`, `_base_manager`, the manager attributes of `_meta` and a
-direct `QuerySet(...)` outside this module. `_unscoped.all()` (`get_object_or_404`, generic views),
-`get_next_by_<field>` and `get_next_in_order` raise; `scoped()` starts from `get_queryset()`. A
+direct `QuerySet(...)` outside this module, where `scoped()` builds its `QuerySet`. Every read
+through `_unscoped` raises, so Django's own (shortcuts, generic views, model forms and formsets,
+`full_clean`, `get_next_by_<field>`) do too; save, delete and refresh use Django's base manager. A
 subclass declares `SCOPE_OWNER`, the owner id field, and `SCOPE_LINE`, None until M4r-4c (else
 ImproperlyConfigured). `check()` (run by `migrate` and the coverage test) refuses another manager,
 an owner that is neither a UUID field nor a foreign key to `app_user`, any join to its rows (a
@@ -33,7 +34,7 @@ class ScopeIntegrityError(Exception):
 
 
 class Unscoped(models.Manager["ScopedModel"]):
-    def all(self) -> NoReturn:
+    def get_queryset(self) -> NoReturn:
         raise TypeError(REFUSED)
 
 
@@ -55,11 +56,6 @@ class ScopedModel(TenantModel):
             raise ImproperlyConfigured(
                 f"{cls.__qualname__}: SCOPE_LINE must be declared None until the line filter"
             )
-
-    def _get_next_or_previous_by_FIELD(self, *args: object, **kwargs: object) -> NoReturn:
-        raise TypeError(REFUSED)
-
-    _get_next_or_previous_in_order = _get_next_or_previous_by_FIELD
 
     @classmethod
     def check(cls, **kwargs: object) -> list[checks.CheckMessage]:
