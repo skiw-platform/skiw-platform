@@ -1,0 +1,31 @@
+rules:
+  - id: scoped-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A ScopedModel is read only through accounts.access.scope (slice spec Decision 10): its one
+      manager, _unscoped, and Django's _default_manager and _base_manager (and the managers on
+      _meta) return every row of the agency, past the own, team and agency filter. A QuerySet built
+      directly does the same. Allowed only in accounts/access/scope.py.
+    paths:
+      exclude:
+        - /app/accounts/access/scope.py
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: $X.$M
+              - pattern: getattr($X, "$M", ...)
+          - metavariable-regex:
+              metavariable: $M
+              regex: ^(_unscoped|_default_manager|_base_manager)$
+      - patterns:
+          - pattern-either:
+              - pattern: $X._meta.$M
+              - pattern: getattr($X._meta, "$M", ...)
+          - metavariable-regex:
+              metavariable: $M
+              regex: ^(default_manager|base_manager|managers|managers_map|local_managers)$
+      # A QuerySet built directly: by a bare name, or through a module. Semgrep resolves imports,
+      # so the second also matches `from django.db.models import QuerySet as Rows; Rows(...)`.
+      - pattern: QuerySet(...)
+      - pattern: $MOD.QuerySet(...)

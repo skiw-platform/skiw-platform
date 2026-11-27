@@ -14,6 +14,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Protocol
 
 import psycopg
@@ -62,19 +63,26 @@ class IsolationCase:
             raise ValueError(f"isolation case {self.table}: UPDATE or DELETE without INSERT")
 
 
-def registry() -> dict[str, IsolationCase]:
-    """Every project app's `tests.isolation_cases.CASES`, by table."""
-    found: dict[str, IsolationCase] = {}
+def case_modules(module: str) -> Iterator[ModuleType]:
+    """Each project app's `tests.<module>`, imported by name, so no app imports another's cases
+    (also the scope harness's registry, accounts/tests/scope_harness.py)."""
     for config in apps.get_app_configs():
         if not Path(config.path).is_relative_to(PROJECT):
             continue
-        name = f"{config.name}.tests.isolation_cases"
+        name = f"{config.name}.tests.{module}"
         try:
-            module = importlib.import_module(name)
+            found = importlib.import_module(name)
         except ModuleNotFoundError as exc:
             if exc.name in (name, f"{config.name}.tests"):
                 continue
             raise
+        yield found
+
+
+def registry() -> dict[str, IsolationCase]:
+    """Every project app's `tests.isolation_cases.CASES`, by table."""
+    found: dict[str, IsolationCase] = {}
+    for module in case_modules("isolation_cases"):
         for case in module.CASES:
             if case.table in found:
                 raise ValueError(f"isolation case {case.table} is registered twice")
