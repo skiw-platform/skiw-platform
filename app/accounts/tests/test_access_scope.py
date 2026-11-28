@@ -98,6 +98,9 @@ def test_scope_owner_must_name_a_user_id_field(name: str, errors: list[str]) -> 
     assert scope_errors(Row) == errors
 
 
+E5, KEY, DEFERRED = ["scope.E005"], ["agency_id", "id"], models.Deferrable.DEFERRED
+
+
 class Unvalidated(models.UniqueConstraint):
     def validate(self, *args: object, **kwargs: object) -> None:
         pass
@@ -107,16 +110,19 @@ class Unvalidated(models.UniqueConstraint):
     ("declared", "errors"),
     [
         (TenantModel.Meta.constraints, []),
-        ((models.UniqueConstraint(F("id"), condition=Q(id__isnull=False), name="e"),), []),
+        ((models.UniqueConstraint(fields=["id", "agency_id"], name="r"),), []),
+        ((models.UniqueConstraint(fields=["owner_user_id"], name="o"),), ["scope.E005"]),
+        ((models.UniqueConstraint(fields=[*KEY, "owner_user_id"], name="w"),), ["scope.E005"]),
+        ((models.UniqueConstraint(fields=KEY, condition=~Q(id=None), name="c"),), E5),
+        ((models.UniqueConstraint(F("agency_id"), F("id"), name="e"),), ["scope.E005"]),
+        ((models.UniqueConstraint(fields=KEY, deferrable=DEFERRED, name="d"),), E5),
         ((), ["scope.E005"]),
         ((models.CheckConstraint(condition=~Q(id=None), name="agency_id_id_uq"),), ["scope.E005"]),
         ((Unvalidated(fields=["agency_id", "id"], name="u"),), ["scope.E005"]),
     ],
 )
 @isolate_apps("accounts")
-def test_a_scoped_model_needs_a_unique_constraint_django_validates(
-    declared: tuple[models.BaseConstraint, ...], errors: list[str]
-) -> None:
+def test_the_tenant_key(declared: tuple[models.BaseConstraint, ...], errors: list[str]) -> None:
     class Row(ScopedModel):
         id = models.UUIDField(primary_key=True)
         owner_user_id = models.UUIDField()

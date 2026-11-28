@@ -6,12 +6,13 @@ rejects `_unscoped`, `_default_manager`, `_base_manager`, the manager attributes
 directly built `QuerySet` (also `QuerySet[X](...)`) outside this module, where `scoped()` builds
 its own. Every read through `_unscoped` raises, so Django's own (shortcuts, generic views,
 `full_clean`, `get_next_by_<field>`) do too, and a model form or formset raises before it reads
-another row or saves (a bound one through a `UniqueConstraint`, whose `validate` reads the manager
-first); it may display a record already fetched (owner, 2026-11-27). Save, delete and refresh use
-Django's base manager. A subclass declares `SCOPE_OWNER`, the owner id field, and `SCOPE_LINE`, None
-until M4r-4c (else ImproperlyConfigured). `check()` (run by `migrate` and the coverage test) refuses
-another manager, an owner that is neither a UUID field nor a foreign key to `app_user`, a model with
-no such constraint, any join to its rows (a relation into it, a `through` use, another model on its
+another row or saves (a bound one through `TenantModel`'s `unique (agency_id, id)`, whose `validate`
+reads the manager first); it may display a record already fetched (owner, 2026-11-27). Save, delete
+and refresh use Django's base manager. A subclass declares `SCOPE_OWNER`, the owner id field, and
+`SCOPE_LINE`, None until M4r-4c (else ImproperlyConfigured). `check()` (run by `migrate` and the
+coverage test) refuses another manager, an owner that is neither a UUID field nor a foreign key to
+`app_user`, a model without that constraint (stock, unconditional, field-based, not deferrable, on
+it or a parent), any join to its rows (a relation into it, a `through` use, another model on its
 table, a concrete parent) and a relation from it unless `related_name="+"` and `related_query_name`
 holds `__` (Django resolves `+`)."""
 
@@ -80,10 +81,15 @@ def _scope_errors(model: type[ScopedModel]) -> list[checks.CheckMessage]:
         errors.append(
             checks.Error("SCOPE_OWNER names no user id field", obj=model, id="scope.E002")
         )
-    stock = vars(models.UniqueConstraint)["validate"]
     validated = (c for m in (model, *model._meta.get_parent_list()) for c in m._meta.constraints)
-    if not any(getattr(type(c), "validate", None) is stock for c in validated):
-        message = "no UniqueConstraint, so a model form would save without reading the manager"
+    if not any(
+        isinstance(c, models.UniqueConstraint)
+        and getattr(type(c), "validate", None) is vars(models.UniqueConstraint)["validate"]
+        and sorted(c.fields) == ["agency_id", "id"]
+        and not (c.condition or c.deferrable)
+        for c in validated
+    ):
+        message = "no TenantModel unique (agency_id, id), so a model form could save"
         errors.append(checks.Error(message, obj=model, id="scope.E005"))
     for field in model._meta.get_fields(include_hidden=True):
         if isinstance(field, ForeignObjectRel):
