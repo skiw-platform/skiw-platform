@@ -12,8 +12,14 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory
 
-from accounts.access.catalogue import ACTION_LINES, CATALOGUE, SELF_SERVICE, ActionLine
-from accounts.auth.wrapper import LINE_MATCHES, Signed, authorized_action
+from accounts.access.catalogue import (
+    ACTION_LINES,
+    CATALOGUE,
+    LINE_MATCHES,
+    SELF_SERVICE,
+    ActionLine,
+)
+from accounts.auth.wrapper import Signed, authorized_action
 
 
 class Equal:

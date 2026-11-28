@@ -1,6 +1,8 @@
 """The scope harness's cases for accounts (accounts/tests/scope_harness.py)."""
 
-from accounts.tests import scope_probe
-from accounts.tests.scope_harness import ScopeCase
+from functools import partial
 
-CASES = [ScopeCase(scope_probe.ScopeProbe, scope_probe.insert)]
+from accounts.tests.scope_harness import ScopeCase
+from accounts.tests.scope_probe import PROBES, insert
+
+CASES = [ScopeCase(model, partial(insert, table=model._meta.db_table)) for model in PROBES]

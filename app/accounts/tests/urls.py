@@ -8,11 +8,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.db import connection
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import path
 
-from accounts.access.catalogue import ROUTE_CODES, ActionLine
+from accounts.access.catalogue import ACTION_LINES, ROUTE_CODES, ActionLine
+from accounts.access.scope import scoped
 from accounts.auth.wrapper import InvalidInput, Signed, authorized_action
+from accounts.tests.scope_probe import PROBES
 from accounts.views import stepup
 from tenancy.binding import with_agency
 
@@ -66,6 +68,13 @@ def handle_own(request: HttpRequest, signed: Signed, data: Mapping[str, Any]) ->
         return handle(request, signed, data)
 
 
+def scope_ids(request: HttpRequest, signed: Signed, data: Mapping[str, Any]) -> HttpResponse:
+    """The ids scoped() gives on each probe table (M4r-4c); the tables exist only while a
+    test module's `scope_probe.table()` does."""
+    found = {m._meta.db_table: scoped(m, signed).values_list("pk", flat=True) for m in PROBES}
+    return JsonResponse({table: sorted(map(str, ids)) for table, ids in found.items()})
+
+
 action = authorized_action(schema=note_only, permission="auth.factors", line="any")(handle)
 # The role step's routes: every route code on line `any`, and four on a business line; each also
 # under own/ with `own_transaction=True`.
@@ -79,6 +88,13 @@ urlpatterns = [
     path("read", read),
     path("action", action),
     path("stepup", stepup),  # the real POST /api/auth/stepup view
+    *(
+        path(
+            f"scope/{line}",
+            authorized_action(schema=note_only, permission="client.view", line=line)(scope_ids),
+        )
+        for line in ACTION_LINES
+    ),
     *(
         path(
             f"{route}/{code}/{line}",

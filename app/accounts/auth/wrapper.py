@@ -35,16 +35,21 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Any, Final, Literal
+from typing import Any, Literal
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 
-from accounts.access.catalogue import ACTION_LINES, ROUTE_CODES, SELF_SERVICE, ActionLine
+from accounts.access.catalogue import (
+    ACTION_LINES,
+    LINE_MATCHES,
+    ROUTE_CODES,
+    SELF_SERVICE,
+    ActionLine,
+)
 from accounts.access.grants import Grant, grants
-from accounts.access.tables import Line
 from accounts.auth.login import AGENCY, AUTH_AT, FACTOR, SEEN_AT, USER
 from accounts.auth.revoke import mark, revoked
 from accounts.auth.stepup import StepUp, recent
@@ -56,19 +61,6 @@ from tenancy.binding import with_agency
 SEEN_STEP = timedelta(minutes=1)
 # config.routes.SAFE_METHODS, which accounts may not import (import-linter): these carry no body.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-# Decision 26: (assignment line, action line) pairs that match, listed one by one. Any other pair,
-# a value outside the types included, matches nothing.
-LINE_MATCHES: Final[frozenset[tuple[Line, ActionLine]]] = frozenset(
-    {
-        ("insurance", "insurance"),
-        ("insurance", "any"),
-        ("investment", "investment"),
-        ("investment", "any"),
-        ("both", "insurance"),
-        ("both", "investment"),
-        ("both", "any"),
-    }
-)
 
 
 class InvalidInput(Exception):

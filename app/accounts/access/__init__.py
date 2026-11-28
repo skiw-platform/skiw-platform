@@ -3,4 +3,5 @@
 `permission`, `role` and `role_permission` (Decision 1); `seed` gives each agency its Owner role
 (Decision 5); `grants` evaluates a user's grants for one code from the stored ticks (Decisions 7,
 8), read by the wrapper's role step (accounts.auth.wrapper) and nowhere else; `scope` holds
-`ScopedModel` and `scoped()`, the one read of such a model (Decisions 9, 10, 27)."""
+`ScopedModel` and `scoped()`, the one read of such a model, filtered by scope and line
+(Decisions 9, 10, 26, 27)."""
