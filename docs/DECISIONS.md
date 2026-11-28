@@ -2017,3 +2017,84 @@
 - **Mutants (scratch copy, own Compose project, bytecode off, `__pycache__` cleared, green control before and after):** 19 on the line filter, the declaration check and the shared table; 19 caught: the line check skipped; an extra (insurance, investment) pair; untagged rows excluded; `both` matching no investment, or no untagged, model; the agency return, own or team read before the line check; the line taken from the union of grants; `isinstance` for the grant line; the model line unchecked or used as is; `SCOPE_LINE` accepting any str, or unchecked for type, or refusing insurance; the wrapper widening its own table; a role-name branch in the walk; the owner set or the access cached across requests.
 - **Exception to a rule?** No.
 - **Decided by:** owner (lines per record type, the signature, the permission limit and the write limit, 2026-11-27 and 2026-11-28); the readings builder within the approved spec.
+
+## 2026-11-28 — M4r-5a-i: the operator-setting and change-import rules, and the owner's M4r-5a answers
+- **Source:** slice spec v2.5 (hash bb262ec4), Decisions 11, 12, 13, 28, 30, 31, 36, flows 5.3 and 5.4, §9 rows 5a and 5b; the builder's M4r-5a plan of 2026-11-28 and its owner questions; the owner's answers of 2026-11-28, recorded by the builder (items 5 and 6 and the exact lists of item 7 were put to the owner after their questions, and answered `accept`). The spec text is not edited in this PR. Items marked *amendment* change slice spec v2.5 until its next revision takes them in.
+- **Owner decisions of 2026-11-28:**
+  1. **Split.** Row 5a becomes three PRs: 5a-i (the two rules, this PR), 5a-ii (the common frame and the role and permission functions) and 5a-iii (the assignment and org functions). Choosing the split also approved the new module `accounts/access/changes.py` (builder §8 gate). *Amendment* to §9 row 5a (one PR, ≈ 300 lines).
+  2. **`change_assignment_line`.** *Amendment* to Decision 12 and §9 rows 5a and 5b. A dedicated function in 5a-iii. In the owner's words: "Changing the sole Owner's line should never require granting temporary Owner access. Replace the assignment in one transaction under the existing roles lock. Remove the old assignment, add the new one for the same person and unit, and let the deferred last-Owner check run at commit. Audit both changes. If any step fails, roll back the transaction so the original assignment stays in place. Record the design amendment and include the function in the assignment and organisation PR."
+     - The person, role and unit stay the same, and the old line must match.
+     - Changing to the same line is refused.
+     - Neither half is kept, even if the caller catches the error.
+     - The events are `role.unassigned` then `role.assigned`; there is no new event kind.
+     - 5b adds the command `accounts_role change-line`.
+  3. **Repeat ticks.** *Amendment*, filling a gap in flow 5.4. On a non-Owner role, setting a pair the role already holds, or unsetting one it does not hold, is refused and writes no event. One role may hold one code at two scopes (`role_permission_tick_uq` includes `scope`). `set_permission` on the Owner stays the spec's no-op.
+  4. **Unassign.** *Amendment.* `unassign` requires the given line to match the assignment (the assignment key has no line).
+  5. **Deployment agency.** *Amendment.* Every change function refuses unless the transaction is bound (`guard.current_agency()`) to the deployment agency (`SKIW_DEPLOYMENT_AGENCY_ID`). There is no agency argument. The owner asked: "It should refuse a change when the transaction is bound to a different agency, even if the transaction is open." This stands in for part of Decision 13 until M4r-6 adds `bound_agency()`, and the deployment comparison stays after that.
+  6. **Order on every call.** *Amendment*, the reading of Decision 12's "first statement". The owner asked: "Use the validated operator code, with the lock taken before any role data is read or changed." Each function does all of this itself, in this order:
+     1. an open transaction;
+     2. the operator format, with `seed` refused;
+     3. the deployment agency;
+     4. isolation read committed;
+     5. the roles lock;
+     6. `skiw.operator` set transaction-locally;
+     7. then the role reads and the change.
+
+     The `SKIW_OPERATOR_CODES` list check stays with the 5b commands (Decision 31). Until 5b, no app code may call the functions.
+  7. **Exemptions.** Exact files, no folder exemptions. Each is added only in the PR where the file exists and needs it. In the owner's words: "Keep each exemption as narrow as the code that needs it."
+     - 5a-i: as below.
+     - 5a-ii and 5a-iii add `changes.py` and their own tests.
+     - 5b adds the two command files.
+     - Narrower than the folder lists of the plan, and than Decision 30's wording, which named only `changes.py` and the seed.
+- **What 5a-i adds (no migration, no grant, no behaviour change):**
+  - the rules `semgrep/operator-setting-changes-only.yml` and `semgrep/role-changes-commands-only.yml`, with annotated fixtures;
+  - the path test `app/tests/test_semgrep_changes_paths.py`;
+  - four `# nosemgrep: operator-setting-changes-only` lines in `accounts/access/seed.py`;
+  - a `docs/runbooks/local-dev.md` line.
+- **`operator-setting-changes-only`:** flags any string literal naming `skiw.operator`. That covers docstrings, bytes and f-string parts, in any case, with the parts optionally quoted as SQL identifiers and blanks allowed around the dot. Comments are not flagged.
+  - Exempt: `accounts/migrations/0028` and `0029` (the trigger bodies read the setting), and the 11 `accounts/tests` files that set it today. The list is in the rule and in the path test.
+  - **Builder reading 1:** the owner's list also named `0025`. That file names the setting only in a comment, which the rule does not flag, so following item 7 it is left out. The path test would fail on an exemption the file does not need.
+  - **Builder reading 2:** `seed.py` gets line-level suppressions instead of a file exemption. They sit on its docstring (beside the existing `auth-tables-accounts-only` one) and on its three statements. This is narrower than the file exemption the owner accepted.
+- **`role-changes-commands-only`:** flags every import of `accounts.access.changes` and has no exemption. It covers:
+  - absolute imports, including `as` aliases, `*`, several names and bracketed lists (`from accounts.access import grants, changes`);
+  - the relative forms from `.`, `..`, `.access`, `..access` and `...access` (the form a command in `accounts/management/commands/` would write), including the `accounts.access` re-export `from . import changes`;
+  - the module reached through an imported package, by name or by an absolute alias;
+  - `getattr(accounts.access, "changes")`;
+  - strings naming the module (`importlib`, `__import__`, `mock.patch` targets, and `name + ".changes"`).
+- **Path test:**
+  - pins both exclude lists, with the reader of `test_semgrep_tenancy_paths`;
+  - each exemption must be one existing file, not a folder;
+  - each exempt file must still hold a string that the rule's own regex matches (read with `ast`, from the rule file);
+  - the `nosemgrep` lines naming either rule must be exactly `seed.py`'s four, each on the line directly above a string that names the setting;
+  - (review R1) in every file under `app/`, a line holding `nosem` in any letter case must end in the one spelling `# nosemgrep: <id>[, <id>]` and hold the word once. This refuses comments that silence every rule and every other spelling, including scoped ones for other rules. Comments in that spelling for other rules stay allowed.
+- **Semgrep 1.179.0 behaviour, found by running it:**
+  - The pattern `import accounts.access.changes` matches every absolute import of the module: `as` aliases, `from accounts.access.changes import` with names, `*` or brackets, and `from accounts.access import changes` alone, aliased or among several names. The pattern `from . import changes` also matches `from . import grants, changes` and `from .changes import ...`. One pattern does not cover another number of dots: the first draft of the rule missed `from ...access import changes`, found by the builder's probe and closed with its own pattern and fixtures. So the rule keeps one pattern per form that nothing else covers (each one is a mutant below).
+  - Relative imports are matched literally, not resolved, so `from . import changes` is flagged in any package.
+  - An absolute package alias is resolved (`from accounts import access as acc` then `acc.changes`). A relatively imported package is not (`from .. import access` then `access.changes` is missed).
+  - Implicit concatenation and `+` of two literals are folded. So is `f"skiw.{'operator'}"`, but a name split around a runtime value is missed.
+  - Bytes, raw and triple-quoted strings are matched; comments never are.
+  - `# nosemgrep: <id>` is honoured as a trailing comment and on the line directly above the finding, and it accepts several ids. It is not honoured on a line inside brackets when the finding starts on an earlier line (`x = (` / `# nosemgrep` / `"..."` / `)`). `--test` honours it too.
+  - (review R1) Far looser forms also silence a finding: `nosem` or `nosemgrep` with no rule id silences every rule, as do `nosemgrep-ignore`, `nosemantic`, `nosemgrep(<id>)` and `nosemgrep <id>`; any letter case, `=` for `:` and quotes around an id are accepted; with the rules loaded from `semgrep/`, `semgrep.<rule id>` names a rule too; directly above a finding no space is needed after `#`.
+- **Limits, not flagged:**
+  - Operator rule:
+    - a name split around a runtime value, or built from non-literal parts (`".".join`, `chr`, config);
+    - an SQL comment or a Unicode escape inside the name;
+    - any name outside `app/` (env files, a Compose `PGOPTIONS`, shell, `.sql`).
+
+    Partly covered elsewhere: a split or parameterised `set_config` name is flagged by `tenancy-set-config-name`, and `ALTER ROLE skiw_app SET skiw.operator` run as `skiw_app` is refused by Postgres (42501, probed during planning).
+  - Import rule:
+    - a computed module name without a literal `.changes`;
+    - an attribute on a relatively imported package;
+    - `sys.modules` with a built key;
+    - `__import__("accounts.access", fromlist=["changes"])`;
+    - four or more leading dots (no package in `app/` is deep enough to need them);
+    - a non-test module importing a test helper that imports `changes` (none today).
+  - Suppression test: it covers comments in files under `app/`. It does not pin `.semgrepignore`, the scan's command line or the rule files other than their `paths.exclude`; a change to those is visible only in review.
+  - **Known false positives (none in the tree):** a relative `from . import changes` of an unrelated package's own `changes` module, and any string that is only dots followed by `changes` or `access.changes`.
+- **Import-linter:** a `protected` contract on `accounts.access.changes`, with the two commands as its allowed importers, was tried with import-linter 2.15. It fails today (`"accounts.management.commands.accounts_role" not present in the graph`), so it is left out. It can be added in 5b, once the commands exist.
+- **Size:** 515 changed lines (514 added, 1 removed, `git diff --numstat` against 6ea937c), after review R1; 436 before it. Past the 450 point where a PR is split or explained: the growth is the R1 test and its record, which belong with the rule they protect. Two rules, their fixtures, the path test and this entry.
+- **Mutants:** 21 on the sub-agent's rules, path test and suppressions, run by the implementing sub-agent before the builder's three-dot fix (scratch copy, bytecode off, `__pycache__` cleared, green control before and after), all caught. Operator rule (12): case-sensitive regex; no identifier quotes; no blanks at the dot; no lookbehind; no lookahead; a folder exemption; `0025` exempted; a needed exemption dropped; a seed suppression dropped; a suppression moved off its line; an extra suppression in a test file; a `/app/` exemption. Import rule (9): each of its seven patterns removed in turn; the string regex widened to `.*$`; an exemption added. A first pass of 26 against an earlier draft of the import rule left 8 alive. Seven were patterns that other patterns already cover, and they were removed. The eighth was the widened regex, which is now killed by the `accounts.access.changes_log` fixture. Not run, because it is equivalent: dropping the regex's `^` (Semgrep anchors a metavariable-regex at the start).
+- **Builder mutants on the final files:** 28 on a scratch copy (green control before and after), all caught: each of the five relative-import patterns removed; the old string regex; each of the 13 exemptions removed; a folder exemption; `0025` exempted; each of the four seed suppressions removed; and three planted violations (a runtime file naming the setting, a command importing the module with three dots and absolutely).
+- **Review R1 (PR 200, one P2, before merge):** the path test saw only comments spelled `nosemgrep` that named one of the two rules. It now applies the spelling rule above, with 20 refused forms and 6 scoped ones as test cases. Checked by the builder: 13,200 generated comment variants run through Semgrep 1.179.0, of which 8,556 silenced the operator rule and the test flagged every one; on a scratch copy, 8 planted comments behaved as expected and 8 mutants of the new check were all caught.
+- **Exception to a rule?** No.
+- **Decided by:** owner, items 1 to 7 (2026-11-28). Builder, within them: leaving `0025` out, the line-level suppressions in `seed.py`, and (review R1) requiring one comment spelling.

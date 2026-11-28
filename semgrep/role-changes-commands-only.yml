@@ -1,0 +1,33 @@
+rules:
+  - id: role-changes-commands-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only the accounts_role and accounts_org operator commands import accounts.access.changes
+      (slice spec Decision 30; DECISIONS 2026-11-28 M4r-5a-i): its functions change roles, ticks,
+      assignments and org units as break-glass operator acts, and accounts.access does not
+      re-export it (Decision 11). Each exemption is one file, added with the file that needs it.
+    # No exemption yet: changes.py and its tests arrive in M4r-5a-ii and -iii, the commands in 5b.
+    pattern-either:
+      # Semgrep 1.179.0 matches this against every absolute import of the module: plain and `as`,
+      # `from accounts.access.changes import ...` (names, `*`, brackets) and
+      # `from accounts.access import changes` (alone, aliased or among several names).
+      - pattern: import accounts.access.changes
+      # Relative imports are matched by their text, not resolved, so each number of dots needs its
+      # own pattern. These cover the accounts.access re-export (`from . import changes`),
+      # `from .changes import ...`, `..changes`, and `.access`, `..access` and `...access` (a
+      # command in accounts/management/commands/ writes three dots), with or without `.changes`.
+      - pattern: from . import changes
+      - pattern: from .. import changes
+      - pattern: from .access import changes
+      - pattern: from ..access import changes
+      - pattern: from ...access import changes
+      # The module reached through accounts.access imported by name or by an absolute alias.
+      - pattern: accounts.access.changes
+      - pattern: getattr(accounts.access, "changes", ...)
+      # importlib, __import__ and mock.patch targets naming it.
+      - patterns:
+          - pattern: '"$M"'
+          - metavariable-regex:
+              metavariable: $M
+              regex: ^(accounts\.access\.changes|\.+(access\.)?changes)(\.\w+)*$

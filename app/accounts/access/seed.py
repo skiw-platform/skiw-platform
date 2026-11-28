@@ -1,5 +1,6 @@
 # The docstring names security_event next to ALTER TABLE; the seed writes no security_event row.
-# nosemgrep: auth-tables-accounts-only
+# The seed is one of the two modules allowed to name skiw.operator (Decision 30), line by line.
+# nosemgrep: auth-tables-accounts-only, operator-setting-changes-only
 """The starting-role seed (slice spec Decision 5, Flow 5.5; Decisions 28, 31, 32, 33).
 
 Every agency starts with one role, Owner: the system role (`is_system`) holding every catalogue
@@ -85,8 +86,10 @@ def seed_starting_roles(cursor: "psycopg.Cursor[Any]", agency_id: UUID) -> bool:
         return False
     _force(cursor, WRITTEN, on=False)
     (caller,) = cursor.execute(
+        # nosemgrep: operator-setting-changes-only
         "SELECT coalesce(current_setting('skiw.operator', true), '')"
     ).fetchone() or ("",)
+    # nosemgrep: operator-setting-changes-only
     cursor.execute("SELECT set_config('skiw.operator', %s, true)", [OPERATOR])
     for role in SEED_DEFAULTS:
         role_id = uuid4()
@@ -101,6 +104,7 @@ def seed_starting_roles(cursor: "psycopg.Cursor[Any]", agency_id: UUID) -> bool:
             " FROM unnest(%s::text[], %s::text[]) AS pair (code, scope)",
             [agency_id, role_id, list(codes), list(scopes)],
         )
+    # nosemgrep: operator-setting-changes-only
     cursor.execute("SELECT set_config('skiw.operator', %s, true)", [caller])
     # The deferred check runs now, while the owner can still read the rows; Postgres also refuses
     # ALTER TABLE on a table with pending trigger events (55006). Deferred again for the caller.
