@@ -7,6 +7,7 @@ The models live in an isolated registry, so the app's own stays unchanged."""
 import importlib
 from dataclasses import replace
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
 
@@ -306,11 +307,17 @@ def test_scoped_takes_a_concrete_scoped_model_and_the_wrappers_signed() -> None:
     bad: list[tuple[Any, Any]] = [(m, good) for m in (AppUser, ScopedModel, Owned(), "Owned")]
     for change in (
         {"access": set(good.access)},
+        {"access": type("Frozen", (frozenset,), {})(good.access)},  # may override iteration
         {"access": frozenset({("own", uuid4(), "both", None)})},
         {"user_id": str(good.user_id)},
         {"agency_id": str(good.agency_id)},
     ):
         bad.append((Owned, replace(good, **change)))
+    fields = ("access", "user_id", "agency_id")
+    for gone in fields:  # PR 198 review R1: a missing field is a TypeError too, before any read
+        kept = {name: getattr(good, name) for name in fields if name != gone}
+        bad.append((Owned, SimpleNamespace(**kept)))
+    bad += [(Owned, None), (Owned, object())]
     for model, wrong in bad:
         with pytest.raises(TypeError, match="scoped"):
             scoped(model, wrong)

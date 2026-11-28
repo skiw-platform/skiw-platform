@@ -151,8 +151,11 @@ def scoped[M: ScopedModel](model: type[M], signed: "Signed") -> QuerySet[M, M]:
     atomic()."""
     if not (isinstance(model, type) and issubclass(model, ScopedModel)) or model._meta.abstract:
         raise TypeError("scoped() takes a concrete ScopedModel")
-    access, user, agency = signed.access, signed.user_id, signed.agency_id
-    if not (isinstance(user, UUID) and isinstance(agency, UUID) and isinstance(access, frozenset)):
+    try:
+        access, user, agency = signed.access, signed.user_id, signed.agency_id
+    except AttributeError:  # None, another object or a missing field
+        raise TypeError("scoped() takes the wrapper's Signed") from None
+    if not (isinstance(user, UUID) and isinstance(agency, UUID) and type(access) is frozenset):
         raise TypeError("scoped() takes the wrapper's Signed")
     if not all(isinstance(g, Grant) for g in access):
         raise TypeError("scoped() takes the wrapper's Signed")
