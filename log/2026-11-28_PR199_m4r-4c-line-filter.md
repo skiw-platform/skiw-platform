@@ -20,7 +20,7 @@ Slice spec v2.5 Decisions 9, 26 and 36, flow 5.2, §7 and §9 row 4: staff on on
 none
 
 ## Decisions worth keeping
-All are in docs/DECISIONS.md, "2026-11-28 — M4r-4c". Lines are per record type (owner, 2026-11-27): one probe table per line, no line column, so the spec's `line_tag` and "both row lines" wording is superseded until the next spec revision. A `both` grant sees every model line whatever the route's line (Decision 9 as written); which model a route reads is the handler's choice, reviewed per route. PR CI run 46138313974 on a969767 passed (2123 unit, 254 web, 2062 live database, 60 end-to-end).
+All are in docs/DECISIONS.md, "2026-11-28 — M4r-4c". Lines are per record type (owner, 2026-11-27): one probe table per line, no line column, so the spec's `line_tag` and "both row lines" wording is superseded until the next spec revision. A `both` grant sees every model line whatever the route's line (Decision 9 as written); which model a route reads is the handler's choice, reviewed per route. PR CI run 46138313974 on a969767 passed (2123 unit, 254 web, 2062 live database, 60 end-to-end). Post-merge main run 46145495995 on 6ea937c: checks, security, image and host passed (same counts; full-history secret scan clean); `publish` failed as on earlier merges (permission_denied pushing to the old image registry path).
 
 ## Follow-ups
 - Next: M4r-5a.
