@@ -1,24 +1,30 @@
-"""`ScopedModel` (slice spec Decisions 9, 10, 27; plan row M4r-4, M4r-4a): one manager, the two
-declarations refused when wrong, the system checks on the owner field and on relations, and
-Django's readers of every row refused (PR 197 review R1, R2).
+"""`ScopedModel` (slice spec Decisions 9, 10, 27; plan row M4r-4, M4r-4a, M4r-4b): one manager, the
+two declarations refused when wrong, the system checks on the owner field and on relations,
+Django's readers of every row refused (PR 197 review R1, R2), and what `scoped()` refuses before
+it reads.
 The models live in an isolated registry, so the app's own stays unchanged."""
 
 import importlib
+from dataclasses import replace
 from datetime import UTC, datetime
-from typing import cast
+from types import SimpleNamespace
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 from django.db.models import F, Q, QuerySet
+from django.db.transaction import TransactionManagementError
 from django.forms import modelform_factory, modelformset_factory
 from django.http import Http404
 from django.shortcuts import get_list_or_404, get_object_or_404
 from django.test.utils import isolate_apps
 from django.views.generic import DetailView, ListView
 
-from accounts.access.scope import ORG_MAX_DEPTH, ScopedModel, Unscoped
+from accounts.access.grants import Grant
+from accounts.access.scope import ORG_MAX_DEPTH, ScopedModel, Unscoped, scoped
+from accounts.tests.scope_harness import signed
 from accounts.user_model import AppUser
 from tenancy.models import TenantModel
 
@@ -255,7 +261,7 @@ def test_django_readers_of_every_row_refuse_a_scoped_model_not_a_queryset(
             order_with_respect_to = "unit"
 
     monkeypatch.setattr(QuerySet, "_fetch_all", lambda rows: setattr(rows, "_result_cache", []))
-    # Stands in for M4r-4b's scoped(), built in scope.py the same way; the one suppression.
+    # Stands in for scoped(), built in scope.py the same way; the one suppression.
     # nosemgrep: scoped-only
     rows = cast("QuerySet[Row]", QuerySet(Row)).filter(owner_user_id=uuid4())
     row = Row(id=uuid4(), at=datetime.now(UTC), unit=Unit(id=uuid4()))
@@ -286,3 +292,34 @@ def test_django_readers_of_every_row_refuse_a_scoped_model_not_a_queryset(
 def test_org_max_depth_is_the_tree_guards() -> None:
     guard = importlib.import_module("accounts.migrations.0027_tree_system_role_guards")
     assert ORG_MAX_DEPTH == guard.ORG_MAX_DEPTH == 32
+
+
+@isolate_apps("accounts")
+def test_scoped_takes_a_concrete_scoped_model_and_the_wrappers_signed() -> None:
+    class Owned(ScopedModel):
+        id = models.UUIDField(primary_key=True)
+        owner_user_id = models.UUIDField()
+        SCOPE_OWNER = "owner_user_id"
+        SCOPE_LINE = None
+
+    good = signed(uuid4(), uuid4(), Grant("own", uuid4(), "both", None))
+    # Any: every argument below is deliberately the wrong type.
+    bad: list[tuple[Any, Any]] = [(m, good) for m in (AppUser, ScopedModel, Owned(), "Owned")]
+    for change in (
+        {"access": set(good.access)},
+        {"access": type("Frozen", (frozenset,), {})(good.access)},  # may override iteration
+        {"access": frozenset({("own", uuid4(), "both", None)})},
+        {"user_id": str(good.user_id)},
+        {"agency_id": str(good.agency_id)},
+    ):
+        bad.append((Owned, replace(good, **change)))
+    fields = ("access", "user_id", "agency_id")
+    for gone in fields:  # PR 198 review R1: a missing field is a TypeError too, before any read
+        kept = {name: getattr(good, name) for name in fields if name != gone}
+        bad.append((Owned, SimpleNamespace(**kept)))
+    bad += [(Owned, None), (Owned, object())]
+    for model, wrong in bad:
+        with pytest.raises(TypeError, match="scoped"):
+            scoped(model, wrong)
+    with pytest.raises(TransactionManagementError, match="scoped"):
+        scoped(Owned, good)
