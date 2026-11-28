@@ -30,6 +30,8 @@ All are in docs/DECISIONS.md, "2026-11-28 — M4r-4b". Owner, 2026-11-28: the fi
 - Spec wording at the next update: the `scoped(model, signed)` signature, per-record-type business lines and flow 5.2.
 - Not checked: async paths, more than one database, performance on large trees. The reviewer relied on exact-head CI in round 2 and did not rerun tests locally.
 - The web test in `App.test.tsx` ("goes to the code step after a right password...") failed once in the builder's local runs on 60a71fa and passed every later run, locally and in CI.
+- CI on `main`: image paths still name `ghcr.io/skiw-dev1` (see the PR 193 and 194 logs); their own deploy-path PR is not made. No image can be deployed until it is.
+- Post-merge run 46132517279 on c3750f9 (repository public until it finished): checks, security, image and host passed (2119 unit, 254 web, 2053 live database, 60 end-to-end; 855 host tooling, 39 live host stack; secret scan clean); `publish` failed in "Push by digest" with `denied: permission_denied: The requested installation does not exist`, as on a74baf4; deploy-staging skipped.
 
 ## Appendix — final review round
 
