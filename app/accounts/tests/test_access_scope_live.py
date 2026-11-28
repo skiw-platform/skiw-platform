@@ -2,7 +2,8 @@
 role-holder reads outside their book/subtree" and "Subtree query never ends or widens on a corrupt
 tree"): each registered case's generated visibility check, then the walk on `scope_probe`. A
 corrupt tree is planted by the owner with the tree guard off, committed (skiw_app reads only
-committed rows), and undone the same way."""
+committed rows), and undone the same way. M4r-4c: the cases are the three probe tables (untagged,
+insurance, investment), and a model line later set to an invalid value matches nothing."""
 
 import os
 import re
@@ -17,8 +18,17 @@ from django.test.utils import CaptureQueriesContext
 
 from accounts.access.scope import ORG_MAX_DEPTH, ScopeIntegrityError, scoped
 from accounts.tests import scope_probe
-from accounts.tests.scope_harness import HOLD, UNIT, grant, registry, signed, tree, visibility
-from accounts.tests.scope_probe import ScopeProbe
+from accounts.tests.scope_harness import (
+    HOLD,
+    UNIT,
+    Sly,
+    grant,
+    registry,
+    signed,
+    tree,
+    visibility,
+)
+from accounts.tests.scope_probe import ScopeProbe, ScopeProbeInsurance
 from accounts.tests.test_access_audit_live import app, fresh_agency
 from tenancy.binding import with_agency
 
@@ -150,3 +160,18 @@ def test_a_unit_rls_cannot_see_raises() -> None:
             owners(a, ids["me"], ids["X"], unit)
     with with_agency(b), pytest.raises(ScopeIntegrityError, match=r"^anchor$"):
         scoped(ScopeProbe, signed(ids["me"], a, grant("team", ids["X"])))
+
+
+@pytest.mark.parametrize("line", ["any", "both", "Insurance", Sly("insurance"), ["insurance"]])
+def test_a_model_line_changed_to_an_invalid_value_matches_nothing(
+    line: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    a = fresh_agency()
+    ids = tree(a)
+    with app(a) as cursor:
+        scope_probe.insert(cursor, a, ids["me"], "scope_probe_insurance")
+    access = signed(ids["me"], a, grant("agency", ids["X"]))
+    with with_agency(a):
+        assert scoped(ScopeProbeInsurance, access).count() == 1
+        monkeypatch.setattr(ScopeProbeInsurance, "SCOPE_LINE", line)
+        assert scoped(ScopeProbeInsurance, access).count() == 0

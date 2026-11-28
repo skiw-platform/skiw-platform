@@ -1,5 +1,5 @@
-"""The scope boundary and `scoped()` (slice spec Decisions 9, 10, 27, flow 5.2; plan row M4r-4,
-M4r-4a, M4r-4b). The line filter comes in M4r-4c.
+"""The scope boundary and `scoped()` (slice spec Decisions 9, 10, 26, 27, flow 5.2; plan row M4r-4,
+M4r-4a to M4r-4c).
 
 `scoped(model, signed)` is the one read of a `ScopedModel`: the OR over `signed.access` of each
 grant's scope filter, always within `signed.agency_id`; no grant, no rows. `agency` is every row of
@@ -10,6 +10,9 @@ cycle, a walk past ORG_MAX_DEPTH levels below the unit (the unit is level 1) or 
 see raises ScopeIntegrityError, logged with the ids only. A grant whose scope or line is outside
 the catalogue's gives nothing. It is evaluated in the caller's with_agency(); RLS returns nothing
 once that has closed. What it does not bound (writes by key, a cached QuerySet): DECISIONS M4r-4b.
+Only grants whose line matches the model's `SCOPE_LINE` count, for every scope
+(catalogue.LINE_MATCHES, None as `any`): an `insurance` grant sees no `investment` model and the
+reverse; a `both` grant and a None model match every line; a model line outside the three, none.
 
 A `ScopedModel` has one manager, `_unscoped`, so Django adds no `objects`; Semgrep `scoped-only`
 rejects `_unscoped`, `_default_manager`, `_base_manager`, the manager attributes of `_meta` and a
@@ -19,7 +22,7 @@ its own. Every read through `_unscoped` raises, so Django's own (shortcuts, gene
 another row or saves (a bound one through `TenantModel`'s `unique (agency_id, id)`, whose `validate`
 reads the manager first); it may display a record already fetched (owner, 2026-11-27). Save, delete
 and refresh use Django's base manager. A subclass declares `SCOPE_OWNER`, the owner id field, and
-`SCOPE_LINE`, None until M4r-4c (else ImproperlyConfigured). `check()` (run by `migrate` and the
+`SCOPE_LINE`, a line or None (else ImproperlyConfigured). `check()` (run by `migrate` and the
 coverage test) refuses another manager, an owner that is neither a UUID field nor a foreign key to
 `app_user`, a model without that constraint (stock, unconditional, field-based, not deferrable, on
 it or a parent), any join to its rows (a relation into it, a `through` use, another model on its
@@ -39,8 +42,8 @@ from django.db.models import ForeignObjectRel, Q, QuerySet
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields.related import RelatedField
 
+from accounts.access.catalogue import LINE_MATCHES, ActionLine
 from accounts.access.grants import Grant
-from accounts.access.tables import LINES
 from accounts.auth.transactions import require_open
 from accounts.user_model import AppUser
 from tenancy.models import TenantModel
@@ -50,6 +53,12 @@ if TYPE_CHECKING:  # the wrapper imports accounts.access
 
 log = logging.getLogger("django.security.scope")
 ORG_MAX_DEPTH: Final = 32  # slice spec §8; the same cap as the tree guard (accounts.0027)
+# Decision 9: the action line a model's line matches as; None is in no line's module.
+MODEL_LINES: Final[dict[str | None, ActionLine]] = {
+    None: "any",
+    "insurance": "insurance",
+    "investment": "investment",
+}
 REFUSED: Final = "a ScopedModel is read only through scoped(), never every row of the agency"
 # Every team grant's subtree in one walk, one level past the cap, so a deeper tree shows.
 SUBTREE: Final = (
@@ -88,9 +97,10 @@ class ScopedModel(TenantModel):
         owner = getattr(cls, "SCOPE_OWNER", None)
         if not isinstance(owner, str) or not owner:
             raise ImproperlyConfigured(f"{cls.__qualname__}: declare SCOPE_OWNER, the owner field")
-        if getattr(cls, "SCOPE_LINE", "") is not None:
+        line = getattr(cls, "SCOPE_LINE", "")
+        if not (line is None or type(line) is str) or line not in MODEL_LINES:
             raise ImproperlyConfigured(
-                f"{cls.__qualname__}: SCOPE_LINE must be declared None until the line filter"
+                f"{cls.__qualname__}: SCOPE_LINE must be declared insurance, investment or None"
             )
 
     @classmethod
@@ -160,7 +170,9 @@ def scoped[M: ScopedModel](model: type[M], signed: "Signed") -> QuerySet[M, M]:
     if not all(isinstance(g, Grant) for g in access):
         raise TypeError("scoped() takes the wrapper's Signed")
     require_open("scoped()")
-    kept = [g for g in access if isinstance(g.line, str) and g.line in LINES]  # 4c: LINE_MATCHES
+    declared = model.SCOPE_LINE
+    line = MODEL_LINES.get(declared) if declared is None or type(declared) is str else None
+    kept = [g for g in access if type(g.line) is str and (g.line, line) in LINE_MATCHES]
     rows = QuerySet[M, M](model=model).filter(agency_id=agency)
     if any(g.scope == "agency" for g in kept):
         return rows

@@ -1,4 +1,4 @@
-"""The scope test harness (slice spec Decision 10; plan row M4r-4, M4r-4a, M4r-4b). Apps list their
+"""The scope test harness (slice spec Decision 10; plan row M4r-4, 4a to 4c). Apps list their
 `ScopedModel` subclasses as `CASES` in `<app>/tests/scope_cases.py`, found by name as the TEN-08
 cases are; the coverage test fails for a concrete `ScopedModel` without a case. A case's
 `insert(cursor, agency_id, owner)` adds one row as skiw_app and returns its id; `visibility(case)`
@@ -78,13 +78,39 @@ def signed(user: uuid.UUID, agency: uuid.UUID, *access: Grant) -> Signed:
     return Signed(user, agency, "totp", now, now, frozenset(access))
 
 
+class Sly(str):
+    """A tampered line: a str equal to every value and hashed as `like`."""
+
+    like: str
+
+    def __new__(cls, text: str, like: str = "both") -> "Sly":
+        made = super().__new__(cls, text)
+        made.like = like
+        return made
+
+    def __eq__(self, other: object) -> bool:
+        return True
+
+    def __hash__(self) -> int:
+        return hash(self.like)
+
+
+# Decision 9 by hand: the grant lines each model line admits.
+ADMITS = {
+    None: {"insurance", "investment", "both"},
+    "insurance": {"insurance", "both"},
+    "investment": {"investment", "both"},
+}
+
+
 def grant(scope: object, unit: object, line: object = "both") -> Grant:
     return Grant(scope, unit, line, None)  # type: ignore[arg-type]  # tampered values too
 
 
 def visibility(case: ScopeCase) -> None:
     """Decision 9 on the standard tree: a row owned by each person, one with no owner and one in
-    another agency; each access sees exactly its rows, in the caller's with_agency() only."""
+    another agency; each access sees exactly its rows, in the caller's with_agency() only. On each
+    grant line, every scope sees its rows only where the model's line admits that line."""
     a, b = fresh_agency(), fresh_agency()
     ids, elsewhere = tree(a), tree(b)
     with app(a) as cursor:
@@ -96,7 +122,7 @@ def visibility(case: ScopeCase) -> None:
     own, agency = grant("own", ids["X"]), grant("agency", ids["X"])
     tampered = (
         [grant(s, ids["X"]) for s in ("Agency", "all", None)]
-        + [grant("agency", ids["X"], line) for line in ("any", "Both", None)]
+        + [grant("agency", ids["X"], line) for line in ("any", "Both", None, Sly("nope"))]
         + [grant("team", str(ids["X"]))]
     )
     expected: list[tuple[list[Grant], set[str]]] = [
@@ -112,6 +138,15 @@ def visibility(case: ScopeCase) -> None:
         ([agency], {*PEOPLE, "nobody"}),
         ([own, agency, team["V"]], {*PEOPLE, "nobody"}),
     ]
+    admits = ADMITS[case.model.SCOPE_LINE]
+    for line in ("insurance", "investment", "both"):
+        seen = line in admits
+        lined = [grant(g.scope, g.org_unit_id, line) for g in (own, team["V"])]
+        expected.append(([grant("agency", ids["X"], line)], {*PEOPLE, "nobody"} if seen else set()))
+        expected.append((lined, {"me", "other"} if seen else set()))
+    mixed = [grant("team", ids["X"], "insurance"), grant("own", ids["X"], "investment")]
+    by_line = {"insurance": {"me", "mate"}, "investment": {"me"}}
+    expected.append((mixed, set().union(*(by_line[line] for line in by_line if line in admits))))
     for access, people in expected:
         with with_agency(a):
             found = scoped(case.model, signed(ids["me"], a, *access))

@@ -10,7 +10,10 @@ The `permission` table holds exactly these pairs (accounts.0019; a live test ass
 """
 
 from collections.abc import Mapping
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
+
+if TYPE_CHECKING:  # tables imports SCOPES from here
+    from accounts.access.tables import Line
 
 Scope = Literal["own", "team", "agency"]
 SCOPES: Final[tuple[Scope, ...]] = ("own", "team", "agency")
@@ -52,6 +55,20 @@ SELF_SERVICE: Final[frozenset[str]] = frozenset(
 ROUTE_CODES: Final[frozenset[str]] = frozenset(CATALOGUE) | SELF_SERVICE
 
 # Decision 26: the business line an action declares. `any` = in no module the §6 line split
-# names. An assignment's line (tables.Line) is matched against it by the wrapper's LINE_MATCHES.
+# names. An assignment's line (tables.Line) is matched against it in LINE_MATCHES.
 ActionLine = Literal["insurance", "investment", "any"]
 ACTION_LINES: Final[tuple[ActionLine, ...]] = ("insurance", "investment", "any")
+# Decision 26: (assignment line, action line) pairs that match, listed one by one. Any other pair,
+# a value outside the types included, matches nothing. The wrapper matches the route's line;
+# `scoped()` the model's `SCOPE_LINE`, None as `any` (Decision 9).
+LINE_MATCHES: Final[frozenset[tuple["Line", ActionLine]]] = frozenset(
+    {
+        ("insurance", "insurance"),
+        ("insurance", "any"),
+        ("investment", "investment"),
+        ("investment", "any"),
+        ("both", "insurance"),
+        ("both", "investment"),
+        ("both", "any"),
+    }
+)

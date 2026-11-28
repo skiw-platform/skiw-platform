@@ -24,7 +24,7 @@ from django.views.generic import DetailView, ListView
 
 from accounts.access.grants import Grant
 from accounts.access.scope import ORG_MAX_DEPTH, ScopedModel, Unscoped, scoped
-from accounts.tests.scope_harness import signed
+from accounts.tests.scope_harness import Sly, signed
 from accounts.user_model import AppUser
 from tenancy.models import TenantModel
 
@@ -60,12 +60,22 @@ def test_a_scoped_model_has_only_the_unscoped_manager() -> None:
     assert scope_errors(swapped) == ["scope.E001"]
 
 
-@pytest.mark.parametrize("line", ["insurance", "investment", "both", "", False, "missing"])
+@pytest.mark.parametrize(
+    "line", ["both", "any", "Insurance", "", False, Sly("x", "insurance"), "missing"]
+)
 @isolate_apps("accounts")
-def test_a_scope_line_other_than_none_is_refused(line: object) -> None:
-    declared = {} if line == "missing" else {"SCOPE_LINE": line}
+def test_a_scope_line_other_than_a_line_or_none_is_refused(line: object) -> None:
+    declared = {} if line == "missing" and type(line) is str else {"SCOPE_LINE": line}
     with pytest.raises(ImproperlyConfigured, match="SCOPE_LINE"):
         type("Row", (ScopedModel,), {"__module__": __name__, "SCOPE_OWNER": "id", **declared})
+
+
+@pytest.mark.parametrize("line", ["insurance", "investment", None])
+@isolate_apps("accounts")
+def test_a_scope_line_of_insurance_investment_or_none_is_accepted(line: str | None) -> None:
+    fields = {"__module__": __name__, "SCOPE_LINE": line}
+    row = cast(type[ScopedModel], type("Row", (ScopedModel,), {**fields, "SCOPE_OWNER": "id"}))
+    assert row.SCOPE_LINE is line
 
 
 @pytest.mark.parametrize("owner", ["", None, 1, "missing"])
