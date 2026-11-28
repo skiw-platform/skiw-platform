@@ -7,15 +7,17 @@ from pathlib import Path
 import pytest
 from pytest_django import Settings
 
-from accounts.tests import event_probe
+from accounts.tests import event_probe, scope_probe
 
 
 @pytest.fixture(scope="session", autouse=True)
 def security_event_probe(request: pytest.FixtureRequest) -> Iterator[None]:
     """The test-only probe trigger (accounts.tests.event_probe) for a live run: the accounts tests
-    and the TEN-08 harness plant change rows through it. Removed afterwards, also a leftover."""
+    and the TEN-08 harness plant change rows through it. Removed afterwards, also a leftover; so is
+    a `scope_probe` table an interrupted run left, which the TEN-08 coverage test would fail."""
     live = any(item.get_closest_marker("live") for item in request.session.items)
     if live:
+        scope_probe.drop()
         event_probe.install()
     yield
     if live:

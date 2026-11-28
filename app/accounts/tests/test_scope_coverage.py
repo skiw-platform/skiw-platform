@@ -11,6 +11,7 @@ from django.test.utils import isolate_apps
 
 from accounts.access.scope import ScopedModel
 from accounts.tests.scope_harness import ScopeCase, registry, scoped_models, uncovered
+from accounts.tests.scope_probe import insert
 from tenancy.models import TenantModel
 
 
@@ -36,11 +37,11 @@ def test_the_coverage_check_names_an_unregistered_model(monkeypatch: pytest.Monk
         assert uncovered(isolated) == ["accounts.Probe"]
 
         cases = ModuleType("accounts.tests.scope_cases")
-        vars(cases)["CASES"] = [ScopeCase(Probe)]
+        vars(cases)["CASES"] = [ScopeCase(Probe, insert)]
         monkeypatch.setitem(sys.modules, cases.__name__, cases)
-        assert registry() == {Probe: ScopeCase(Probe)}
+        assert registry() == {Probe: ScopeCase(Probe, insert)}
         assert uncovered(isolated) == []
 
-        vars(cases)["CASES"] = [ScopeCase(Probe), ScopeCase(Probe)]
+        vars(cases)["CASES"] = [ScopeCase(Probe, insert), ScopeCase(Probe, insert)]
         with pytest.raises(ValueError, match="registered twice"):
             registry()
