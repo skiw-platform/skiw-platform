@@ -1,0 +1,35 @@
+rules:
+  - id: operator-setting-changes-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Only accounts.access.changes and the starting-role seed name the skiw.operator setting
+      (slice spec Decisions 30, 31; DECISIONS 2026-11-28 M4r-5a-i): the audit triggers record it as
+      the operator of every role, permission, assignment and org change. Call the change functions
+      instead. Each exemption is one file that names it today; add one only with the file that
+      needs it.
+    # The migrations whose trigger bodies read the setting and the tests that set it on purpose.
+    # seed.py is not listed: its four lines carry `# nosemgrep: operator-setting-changes-only`.
+    paths:
+      exclude:
+        - /app/accounts/migrations/0028_role_audit_triggers.py
+        - /app/accounts/migrations/0029_org_unit_audit_trigger.py
+        - /app/accounts/tests/isolation_cases.py
+        - /app/accounts/tests/test_access_audit_live.py
+        - /app/accounts/tests/test_access_scope_live.py
+        - /app/accounts/tests/test_access_seed_live.py
+        - /app/accounts/tests/test_access_tables_live.py
+        - /app/accounts/tests/test_org_audit_live.py
+        - /app/accounts/tests/test_org_tables_live.py
+        - /app/accounts/tests/test_roles_audit_live.py
+        - /app/accounts/tests/test_roles_dml_forms_live.py
+        - /app/accounts/tests/test_roles_guards_live.py
+        - /app/accounts/tests/test_roles_tree_owner_live.py
+    # Any string (docstrings, bytes and f-string parts included; Semgrep folds implicit and `+`
+    # concatenation of literals) naming skiw.operator in any case, the parts optionally quoted as
+    # SQL identifiers, blanks allowed around the dot. Comments are not strings and stay quiet.
+    patterns:
+      - pattern: '"$S"'
+      - metavariable-regex:
+          metavariable: $S
+          regex: (?is)^.*?(?<![\w$])"?skiw"?\s*\.\s*"?operator"?(?![\w$])
